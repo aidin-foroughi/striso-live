@@ -22,6 +22,98 @@ class Pal {
   static const ok = Color(0xFF7CF29A);
   static const onHoney = Color(0xFF1B1606);
   static const lilac = Color(0xFFB9A3FF);
+  // chrome
+  static const headerTop = Color(0xFF1B1828), headerBottom = Color(0xFF17141F);
+  static const errorBg = Color(0xFF3A1F2A), errorEdge = Color(0xFF5B2C3C), errorText = Color(0xFFFFD9D9);
+  static const infoBg = Color(0xFF1D2C35), infoEdge = Color(0xFF2C4A57), infoText = Color(0xFFD5F4FB);
+  static const toast = Color(0xFF2A2540);
+  static const scrim = Color(0x8015121F);
+  static const card = Color(0xF01C1929);
+  static const shadow = Color(0x8C05030C);
+  static const hover = Color(0x08FFFFFF);
+  static const logText = Color(0xFFCFC8E2);
+  static const codeText = Color(0xFFE8E2F5);
+  static const honeyHover = Color(0xFFFFE09A);
+  // knobs and switches
+  static const knobCap = Color(0xFF2B2640), knobEdge = Color(0xFF48416A);
+  // the key equalizer: warm = more sensitive / above the middle, cool = less / below
+  static const eqWarm = Color(0xFFFF8A65), eqWarmText = Color(0xFFFFC2AD), eqUpText = Color(0xFFFFB39D);
+  static const eqCool = Color(0xFF7AA7FF), eqCoolText = Color(0xFFBCD2FF), eqDownText = Color(0xFFA9C4FF);
+  static const eqEven = Color(0xFF8FE3A4);
+  static const meterHot = Color(0xFFFF9654), meterHotter = Color(0xFFFF6270);
+  static const dangerKey = Color(0xFFFF6B6B), dangerKeyText = Color(0xFFFFB3B3);
+}
+
+/// Spacing (logical pixels).
+class Space {
+  static const xxs = 2.0, xs = 4.0, s = 6.0, m = 10.0, l = 16.0, xl = 22.0, xxl = 32.0;
+}
+
+/// Corner radii.
+class Radii {
+  static const small = 6.0, big = 14.0, pill = 999.0;
+}
+
+/// Type sizes.
+class TypeSize {
+  static const micro = 10.5, caption = 11.5, small = 12.5, label = 13.0, body = 14.0, title = 15.0, heading = 19.0;
+  static const voice = 22.0, keyName = 24.0, invite = 26.0, chord = 46.0, roman = 44.0;
+}
+
+/// Durations and curves.
+class Timing {
+  static const fast = Duration(milliseconds: 120);
+  static const normal = Duration(milliseconds: 180);
+  static const slow = Duration(milliseconds: 260);
+  static const pulse = Duration(milliseconds: 900);
+  static const toast = Duration(milliseconds: 2600);
+  static const toastLong = Duration(milliseconds: 6000);
+  static const tooltipWait = Duration(milliseconds: 500);
+  static const curve = Curves.easeOutCubic;
+}
+
+/// Fixed widths of the columns around the board.
+class Sizes {
+  static const leftColumn = 268.0, rightColumn = 300.0, sideColumn = 360.0, headerHeight = 52.0, tabHeight = 38.0;
+  static const knob = 68.0, dial = 48.0, consoleHeight = 260.0;
+  static const wide = 1100.0; // narrower windows stack the columns
+}
+
+/// The board drawing (board_view.dart): plate, keys, scale looks, heat, rings and overlays.
+class BoardPal {
+  static const plateTop = Color(0xFF26213A), plateBottom = Color(0xFF1B1829), plateEdge = Color.fromRGBO(244, 210, 122, 0.16);
+  static const naturalTop = Color(0xFF3A3352), natural = Color(0xFF302A44), naturalRim = Color.fromRGBO(244, 210, 122, 0.42);
+  static const accidentalTop = Color(0xFF252036), accidental = Color(0xFF1E1A2C), accidentalRim = Color.fromRGBO(244, 210, 122, 0.18);
+  static const labelNatural = Color.fromRGBO(240, 230, 205, 0.82), labelAccidental = Color.fromRGBO(190, 180, 215, 0.62);
+  static const labelOnHeat = Color.fromRGBO(30, 18, 30, 0.85), labelLit = Color.fromRGBO(255, 248, 235, 0.95);
+  static const guide = Color.fromRGBO(160, 150, 200, 0.10), guideLabel = Color.fromRGBO(170, 160, 205, 0.45);
+  static const control = Color(0xFF2A2540), controlRim = Color.fromRGBO(244, 210, 122, 0.35), controlHole = Color(0xFF0F0D17);
+  static const strike = Color(0xFFFFF0D7); // ring thrown out by a strike
+  static const needle = Color.fromRGBO(21, 18, 31, 0.75), needleTip = Color(0xFFFFFAF0);
+  static const ledOff = Color(0xFF2C3B31);
+  static const dim = Color.fromRGBO(21, 18, 31, 0.78); // keys without a settings function
+  static const settingsKey = Color(0xFF262036), settingsKeyCurrent = Color(0xFF3D3420);
+  static const settingsLabel = Color(0xFFF3ECDD), settingsSub = Color.fromRGBO(236, 230, 214, 0.75), settingsMissing = Color.fromRGBO(255, 150, 150, 0.85);
+  static const faintLine = Color.fromRGBO(160, 150, 200, 1); // grids and rings, with an alpha
+  static const motionBall = Color(0xFFE6FBFF), motionBallOff = Color(0xFF4A4560), motionText = Color.fromRGBO(200, 192, 225, 1);
+  static const morphPad = Color(0xFF18152A), puckEdge = Color(0xFFFFF8EA), puckTrail = Color(0xFFFFF4DC);
+
+  /// Pressure heat: honey -> ember -> rose-white.
+  static const heatStops = [(0.0, [244, 210, 122]), (0.45, [255, 150, 84]), (0.75, [255, 98, 110]), (1.0, [255, 226, 236])];
+}
+
+/// A key's look for a selected scale: the root clearly, the scale subtly, the rest dimmed.
+class KeyLook {
+  final Color top, bottom, rim, label;
+  final double rimW;
+  final bool dash;
+  const KeyLook(this.top, this.bottom, this.rim, this.rimW, this.label, [this.dash = false]);
+
+  static const root = KeyLook(Color(0xFF7A6232), Color(0xFF4C3B20), Color.fromRGBO(244, 210, 122, 0.98), 0.62, Color(0xFFFFF0C8));
+  static const rootEnharmonic = KeyLook(Color(0xFF4A3F3A), Color(0xFF352C34), Color.fromRGBO(244, 210, 122, 0.6), 0.42, Color.fromRGBO(255, 236, 190, 0.85), true);
+  static const inScale = KeyLook(Color(0xFF4A3F5E), Color(0xFF352D4A), Color.fromRGBO(244, 210, 122, 0.5), 0.36, Color.fromRGBO(246, 238, 218, 0.94));
+  static const enharmonic = KeyLook(Color(0xFF2D2840), Color(0xFF241F35), Color.fromRGBO(244, 210, 122, 0.3), 0.3, Color.fromRGBO(220, 210, 235, 0.6), true);
+  static const out = KeyLook(Color(0xFF201C2E), Color(0xFF1A1726), Color.fromRGBO(160, 150, 200, 0.14), 0.28, Color.fromRGBO(170, 160, 205, 0.42));
 }
 
 const String uiFont = 'Bahnschrift';

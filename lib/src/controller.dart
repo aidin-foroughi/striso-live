@@ -40,6 +40,69 @@ enum InviteState { idle, connecting, reconnect }
 
 enum Names { octave, letters, degrees, solfege, off }
 
+enum AppTab { play, sound, setup }
+
+class EngineButton {
+  final String engine;
+  final int color; // 0xRRGGBB, the led colour of its voice key
+  final int count;
+  const EngineButton(this.engine, this.color, this.count);
+}
+
+/// 0xRRGGBB of a hue at the engine-stripe saturation and lightness.
+class HSLColorInt {
+  static int of(double hue) {
+    final c = (1 - (2 * 0.55 - 1).abs()) * 0.6, x = c * (1 - ((hue / 60) % 2 - 1).abs()), m = 0.55 - c / 2;
+    final (r, g, b) = hue < 60
+        ? (c, x, 0.0)
+        : hue < 120
+        ? (x, c, 0.0)
+        : hue < 180
+        ? (0.0, c, x)
+        : hue < 240
+        ? (0.0, x, c)
+        : hue < 300
+        ? (x, 0.0, c)
+        : (c, 0.0, x);
+    int v(double f) => ((f + m) * 255).round().clamp(0, 255);
+    return (v(r) << 16) | (v(g) << 8) | v(b);
+  }
+}
+
+/// The main knobs per engine, by parameter name: the current firmware's names first, then the
+/// demo board's. Missing names are skipped; a short pick is filled from the voice's own list.
+const Map<String, List<String>> mainKnobNames = {
+  'va': ['gain', 'cut_base', 'cut_env', 'res', 'drive', 'release', 'saw2_detune', 'vibrato'],
+  'modal': ['level', 'hard', 'decay', 'upper', 'keytrack', 'damper', 'tremdepth', 'rub'],
+  'bowed': ['gain', 'force_hi', 'rosin', 'pos', 'bright', 'body_amt', 'vibrato', 'ensemble', 'bow_pos', 'body', 'damping'],
+  'wind': ['level', 'reed_open', 'attack', 'bright', 'breath', 'growl', 'vib', 'body', 'stiffness', 'aperture', 'bell', 'vibrato'],
+  'brass': ['gain', 'brassiness', 'lip_loud', 'tone_hz', 'release', 'mute', 'vibrato', 'pair', 'breath', 'stiffness', 'bell', 'growl'],
+  'ep': ['gain', 'hard', 'decay', 'bell', 'drive', 'grit', 'tone', 'wobble', 'level', 'hammer', 'hardness', 'tine', 'bark', 'trem_depth'],
+  'reed': ['level', 'breath', 'stiffness', 'aperture', 'bell', 'growl', 'vibrato'],
+};
+
+/// The effect amounts on the Play tab: reverb, delay, chorus (firmware names, then the demo's).
+const List<String> mainFxNames = ['rvmix', 'dlmix', 'chmix', 'rvdecay', 'rv_mix', 'dl_mix', 'ch_mix', 'rv_size'];
+
+List<Param> pickByName(List<Param> params, List<String> names, int max) {
+  final out = <Param>[];
+  for (final n in names) {
+    final p = params.where((q) => q.name == n).firstOrNull;
+    if (p != null && !out.contains(p)) out.add(p);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+List<Param> pickMainKnobs(String engine, List<Param> params, {int max = 8, int min = 6}) {
+  final out = pickByName(params, mainKnobNames[engine] ?? const [], max);
+  for (final p in params) {
+    if (out.length >= min) break;
+    if (!out.contains(p) && p.kind != Kind.onOff) out.add(p);
+  }
+  return out;
+}
+
 class EngineInfo {
   final String label, blurb;
   final double hue;
@@ -237,6 +300,8 @@ class AppController extends ChangeNotifier implements MorphHost {
       eqFollow = eq['follow'] != false;
     }
     settingsOn = store.get<bool>('settingsOverlay') ?? false;
+    tab = AppTab.values.firstWhere((t) => t.name == store.get<String>('tab'), orElse: () => AppTab.play);
+    morphOpen = store.get<bool>('morphOpen') ?? false;
     final ps = store.raw('presets');
     if (ps is List) {
       final r = parsePresetFile(jsonEncode(ps));
@@ -1317,11 +1382,73 @@ class AppController extends ChangeNotifier implements MorphHost {
   }
 
   /// A click on a key on the board (not in demo play).
-  bool boardSelect(int id) {
-    if (settingsClick(id)) return true;
+  bool boardSelect(int id, {bool overlays = true}) {
+    if (overlays && settingsClick(id)) return true;
     eqSelect(id);
     return false;
   }
+
+  // ---------------------------------------------------------------------------------------------
+  // tabs, engines and the main knobs of the Play tab
+
+  AppTab tab = AppTab.play;
+  bool morphOpen = false;
+
+  void setTab(AppTab t) {
+    if (tab == t) return;
+    tab = t;
+    hover = -1;
+    hoverControl = -1;
+    store.set('tab', t.name);
+    notifyListeners();
+  }
+
+  void setMorphOpen(bool open) {
+    morphOpen = open;
+    store.set('morphOpen', open);
+    notifyListeners();
+  }
+
+  /// The engine buttons: the seven of the Striso's voice keys in key order with their led
+  /// colours, then any other engine this firmware lists.
+  List<EngineButton> engines() {
+    final out = <EngineButton>[];
+    final seen = <String>{};
+    for (final e in voiceKeys.values) {
+      final (engine, led) = e;
+      if (!seen.add(engine)) continue;
+      out.add(EngineButton(engine, ledColor(led), voices.where((v) => v.engine == engine).length));
+    }
+    var k = 0;
+    for (final v in voices) {
+      if (seen.add(v.engine)) {
+        final hue = engineInfo(v.engine, k++).hue;
+        out.add(EngineButton(v.engine, HSLColorInt.of(hue), voices.where((x) => x.engine == v.engine).length));
+      }
+    }
+    return out;
+  }
+
+  String get currentEngine => voices.where((v) => v.index == current).firstOrNull?.engine ?? (voiceName.isEmpty ? '' : voiceName.split(':').first);
+
+  /// The engine button: like a voice key on the Striso, the engine with the preset it had last.
+  void selectEngine(String engine) {
+    if (!connected) {
+      toast('Connect to switch voices', 'warn');
+      return;
+    }
+    settingsVoices(); // remembers the current preset per engine
+    final a = voiceKeyAction(voices, current, engine, _remembered, 0);
+    if (a == null) {
+      toast('This firmware has no ${engineInfo(engine).label} voice', 'warn');
+      return;
+    }
+    if (a.index != current) selectVoice(a.index);
+  }
+
+  /// About eight knobs that matter most for the current voice, then the effect amounts.
+  List<Param> mainKnobs() => pickMainKnobs(currentEngine, params[0]!.params);
+  List<Param> mainFx() => pickByName(params[1]!.params, mainFxNames, 4);
 
   // ---------------------------------------------------------------------------------------------
   // animation frame and readouts

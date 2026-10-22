@@ -17,7 +17,8 @@ import 'chrome.dart';
 
 class MorphPanel extends StatelessWidget {
   final AppController ctl;
-  const MorphPanel(this.ctl, {super.key});
+  final bool showTitle;
+  const MorphPanel(this.ctl, {super.key, this.showTitle = true});
 
   @override
   Widget build(BuildContext context) {
@@ -30,7 +31,7 @@ class MorphPanel extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             AreaHeadRow(
-              'Morph',
+              showTitle ? 'Morph' : 'Puck follows',
               right: [
                 Seg<MorphMode>(
                   value: m.mode,

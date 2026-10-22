@@ -1,6 +1,7 @@
 // The instrument: the 61 keys in their real layout with pressure, tilt and strikes, the control
 // buttons, the scale, key equalizer and settings overlays, and the motion sensor. A static layer
-// (a recorded picture) holds what does not move. Port of tools/app/js/board.js.
+// (a recorded picture) holds what does not move. Colours come from BoardPal/KeyLook in theme.dart.
+// Port of tools/app/js/board.js.
 
 import 'dart:math' as math;
 import 'dart:ui' as dui;
@@ -14,53 +15,16 @@ import '../controller.dart';
 import '../theme.dart';
 import 'paint_util.dart';
 
-class _Look {
-  final Color top, bottom, rim, label;
-  final double rimW;
-  final bool dash;
-  const _Look(this.top, this.bottom, this.rim, this.rimW, this.label, [this.dash = false]);
-}
-
-// key looks for a selected scale: the root clearly, the scale subtly, the rest dimmed but legible
 const _scaleLook = {
-  KeyRelation.root: _Look(Color(0xFF7A6232), Color(0xFF4C3B20), Color.fromRGBO(244, 210, 122, 0.98), 0.62, Color(0xFFFFF0C8)),
-  KeyRelation.rootEnharmonic: _Look(
-    Color(0xFF4A3F3A),
-    Color(0xFF352C34),
-    Color.fromRGBO(244, 210, 122, 0.6),
-    0.42,
-    Color.fromRGBO(255, 236, 190, 0.85),
-    true,
-  ),
-  KeyRelation.inScale: _Look(Color(0xFF4A3F5E), Color(0xFF352D4A), Color.fromRGBO(244, 210, 122, 0.5), 0.36, Color.fromRGBO(246, 238, 218, 0.94)),
-  KeyRelation.enharmonic: _Look(
-    Color(0xFF2D2840),
-    Color(0xFF241F35),
-    Color.fromRGBO(244, 210, 122, 0.3),
-    0.3,
-    Color.fromRGBO(220, 210, 235, 0.6),
-    true,
-  ),
-  KeyRelation.out: _Look(Color(0xFF201C2E), Color(0xFF1A1726), Color.fromRGBO(160, 150, 200, 0.14), 0.28, Color.fromRGBO(170, 160, 205, 0.42)),
+  KeyRelation.root: KeyLook.root,
+  KeyRelation.rootEnharmonic: KeyLook.rootEnharmonic,
+  KeyRelation.inScale: KeyLook.inScale,
+  KeyRelation.enharmonic: KeyLook.enharmonic,
+  KeyRelation.out: KeyLook.out,
 };
 
-class _P {
-  static const plateTop = Color(0xFF26213A), plateBottom = Color(0xFF1B1829), plateEdge = Color.fromRGBO(244, 210, 122, 0.16);
-  static const natural = Color(0xFF302A44), naturalRim = Color.fromRGBO(244, 210, 122, 0.42);
-  static const accidental = Color(0xFF1E1A2C), accidentalRim = Color.fromRGBO(244, 210, 122, 0.18);
-  static const labelNatural = Color.fromRGBO(240, 230, 205, 0.82), labelAccidental = Color.fromRGBO(190, 180, 215, 0.62);
-  static const guide = Color.fromRGBO(160, 150, 200, 0.10), guideLabel = Color.fromRGBO(170, 160, 205, 0.45);
-  static const control = Color(0xFF2A2540), controlRim = Color.fromRGBO(244, 210, 122, 0.35);
-}
-
-// pressure heat: honey -> ember -> rose-white
 final List<(int, int, int)> _heat = () {
-  const stops = [
-    (0.0, [244, 210, 122]),
-    (0.45, [255, 150, 84]),
-    (0.75, [255, 98, 110]),
-    (1.0, [255, 226, 236]),
-  ];
+  const stops = BoardPal.heatStops;
   final out = <(int, int, int)>[];
   for (var k = 0; k < 64; k++) {
     final t = k / 63;
@@ -78,12 +42,15 @@ final List<(int, int, int)> _heat = () {
 
 (int, int, int) _heatOf(double p) => _heat[(p * 63).round().clamp(0, 63)];
 Color _rgba((int, int, int) c, double a) => Color.fromRGBO(c.$1, c.$2, c.$3, a.clamp(0.0, 1.0));
+Color _a(Color c, double a) => c.withValues(alpha: a.clamp(0.0, 1.0));
 
-/// The smoothed key display state, advanced once per frame.
+/// The smoothed key display state, advanced once per frame; also holds the static picture.
 class BoardAnim {
   final dp = List<double>.filled(buttonCount, 0), dx = List<double>.filled(buttonCount, 0), dy = List<double>.filled(buttonCount, 0);
   double lastDraw = -1e9;
   bool force = true;
+  dui.Picture? picture;
+  String signature = '';
 
   /// Returns true when something moves (the board must repaint).
   bool step(LiveState live, double now, double dt, {required bool hovering}) {
@@ -103,6 +70,11 @@ class BoardAnim {
     }
     return busy;
   }
+
+  void dispose() {
+    picture?.dispose();
+    picture = null;
+  }
 }
 
 class _Geo {
@@ -119,9 +91,12 @@ class _Geo {
   Offset at(double x, double y) => Offset(px(x), py(y));
 }
 
+/// The board. [overlays]: show the key equalizer and settings-keys overlays (the Setup tab);
+/// without them a click on a key only selects it for the key equalizer.
 class BoardView extends StatefulWidget {
   final AppController ctl;
-  const BoardView(this.ctl, {super.key});
+  final bool overlays;
+  const BoardView(this.ctl, {super.key, this.overlays = false});
 
   @override
   State<BoardView> createState() => _BoardViewState();
@@ -153,6 +128,7 @@ class _BoardViewState extends State<BoardView> with SingleTickerProviderStateMix
   @override
   void dispose() {
     _ticker.dispose();
+    anim.dispose();
     super.dispose();
   }
 
@@ -201,7 +177,7 @@ class _BoardViewState extends State<BoardView> with SingleTickerProviderStateMix
   void _down(PointerDownEvent e) {
     if (e.kind == PointerDeviceKind.mouse && e.buttons != kPrimaryMouseButton) return;
     final h = _hit(e.localPosition);
-    if (h?.key != null && ctl.boardSelect(h!.key!)) return;
+    if (h?.key != null && ctl.boardSelect(h!.key!, overlays: widget.overlays)) return;
     final board = ctl.demoBoard;
     if (!ctl.playable || board == null || h == null) return;
     if (h.key != null) {
@@ -257,7 +233,7 @@ class _BoardViewState extends State<BoardView> with SingleTickerProviderStateMix
             onPointerCancel: _up,
             child: Semantics(
               label: 'The Striso keys, lit by pressure while you play',
-              child: CustomPaint(size: _size, painter: BoardPainter(ctl, anim, _repaint), isComplex: true, willChange: true),
+              child: CustomPaint(size: _size, painter: BoardPainter(ctl, anim, _repaint, overlays: widget.overlays), isComplex: true, willChange: true),
             ),
           ),
         );
@@ -269,23 +245,22 @@ class _BoardViewState extends State<BoardView> with SingleTickerProviderStateMix
 class BoardPainter extends CustomPainter {
   final AppController ctl;
   final BoardAnim anim;
-  BoardPainter(this.ctl, this.anim, Listenable repaint) : super(repaint: Listenable.merge([repaint, ctl, ctl.values]));
-
-  static dui.Picture? _static;
-  static String _staticSig = '';
+  final bool overlays;
+  BoardPainter(this.ctl, this.anim, Listenable repaint, {this.overlays = false}) : super(repaint: Listenable.merge([repaint, ctl, ctl.values]));
 
   LiveState get live => ctl.live;
+  bool get _eq => overlays && ctl.eqOn && ctl.params[3]!.params.isNotEmpty && !ctl.settingsOn;
+  bool get _settings => overlays && ctl.settingsOn;
 
   String _signature(Size size) {
-    final eq = ctl.eqOn && ctl.params[3]!.params.isNotEmpty;
-    final eqSig = eq
+    final eqSig = _eq
         ? [
             for (final id in keyIds) '${ctl.keyParam(id)?.value.toStringAsFixed(3)}:${ctl.lastPeakOf(id).toStringAsFixed(3)}',
             ctl.eqMedian?.toStringAsFixed(3),
             ctl.eqSelected,
           ].join(',')
         : '';
-    final setSig = ctl.settingsOn ? '${ctl.current}|${ctl.voices.length}|${ctl.settingsSelected}' : '';
+    final setSig = _settings ? '${ctl.current}|${ctl.voices.length}|${ctl.settingsSelected}' : '';
     return '${size.width.toStringAsFixed(1)}x${size.height.toStringAsFixed(1)}|${live.transpose}|${live.transposeFifths}|'
         '${ctl.currentKey?.name}|${ctl.names.name}|$eqSig|$setSig';
   }
@@ -295,59 +270,39 @@ class BoardPainter extends CustomPainter {
     if (size.isEmpty) return;
     final g = _Geo.of(size);
     final sig = _signature(size);
-    if (_static == null || sig != _staticSig) {
+    if (anim.picture == null || sig != anim.signature) {
       final rec = dui.PictureRecorder();
       _buildStatic(Canvas(rec), size, g);
-      _static?.dispose();
-      _static = rec.endRecording();
-      _staticSig = sig;
+      anim.picture?.dispose();
+      anim.picture = rec.endRecording();
+      anim.signature = sig;
     }
-    canvas.drawPicture(_static!);
+    canvas.drawPicture(anim.picture!);
     _dynamic(canvas, g);
   }
+
+  Paint _stroke(Color c, double w) => Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = w
+    ..color = c;
 
   // ---------------------------------------------------------------------------------------------
   // static layer
 
   void _buildStatic(Canvas c, Size size, _Geo g) {
     final s = g.s, r = keyRadius * s;
-    // plate
     final x0 = g.px(plate.x0), y0 = g.py(plate.y1), x1 = g.px(plate.x1), y1 = g.py(plate.y0);
     final rr = RRect.fromLTRBR(x0, y0, x1, y1, Radius.circular(plate.radius * s));
-    c.drawRRect(rr, Paint()..shader = dui.Gradient.linear(Offset(0, y0), Offset(0, y1), [_P.plateTop, _P.plateBottom]));
-    c.drawRRect(
-      rr,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = math.max(1, s * 0.35)
-        ..color = _P.plateEdge,
-    );
+    c.drawRRect(rr, Paint()..shader = dui.Gradient.linear(Offset(0, y0), Offset(0, y1), [BoardPal.plateTop, BoardPal.plateBottom]));
+    c.drawRRect(rr, _stroke(BoardPal.plateEdge, math.max(1, s * 0.35)));
 
     // pitch guides: height on the board is pitch; a faint line at every C
     final t = live.transpose;
     for (var midi = 24; midi <= 108; midi += 12) {
       final y = g.py((midi - startNote - t) * mmPerSemitone);
       if (y < y0 + 6 * s || y > y1 - 2 * s) continue;
-      dashedLine(
-        c,
-        Offset(g.px(-76), y),
-        Offset(x1 - 2 * s, y),
-        Paint()
-          ..color = _P.guide
-          ..strokeWidth = math.max(1, s * 0.18),
-        s * 1.2,
-        s * 1.6,
-      );
-      drawText(
-        c,
-        'C${midi ~/ 12 - 1}',
-        Offset(x1 - 2 * s, y - s * 0.4),
-        (s * 2.6).roundToDouble(),
-        _P.guideLabel,
-        weight: FontWeight.w400,
-        align: 1,
-        vAlign: 1,
-      );
+      dashedLine(c, Offset(g.px(-76), y), Offset(x1 - 2 * s, y), _stroke(BoardPal.guide, math.max(1, s * 0.18)), s * 1.2, s * 1.6);
+      drawText(c, 'C${midi ~/ 12 - 1}', Offset(x1 - 2 * s, y - s * 0.4), (s * 2.6).roundToDouble(), BoardPal.guideLabel, weight: FontWeight.w400, align: 1, vAlign: 1);
     }
 
     // keys: by scale membership when a scale is chosen, else natural/accidental like the board
@@ -363,7 +318,7 @@ class BoardPainter extends CustomPainter {
           ..shader = dui.Gradient.radial(
             center,
             r,
-            [look?.top ?? (k.natural ? const Color(0xFF3A3352) : const Color(0xFF252036)), look?.bottom ?? (k.natural ? _P.natural : _P.accidental)],
+            [look?.top ?? (k.natural ? BoardPal.naturalTop : BoardPal.accidentalTop), look?.bottom ?? (k.natural ? BoardPal.natural : BoardPal.accidental)],
             null,
             TileMode.clamp,
             null,
@@ -371,10 +326,7 @@ class BoardPainter extends CustomPainter {
             r * 0.1,
           ),
       );
-      final rim = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = math.max(1, s * (look?.rimW ?? 0.32))
-        ..color = look?.rim ?? (k.natural ? _P.naturalRim : _P.accidentalRim);
+      final rim = _stroke(look?.rim ?? (k.natural ? BoardPal.naturalRim : BoardPal.accidentalRim), math.max(1, s * (look?.rimW ?? 0.32)));
       if (look != null && look.dash) {
         dashedCircle(c, center, r, rim, s * 1.1, s * 0.9);
       } else {
@@ -383,11 +335,10 @@ class BoardPainter extends CustomPainter {
       _label(c, k, cx, cy, r, look?.label);
     }
 
-    if (ctl.eqOn && ctl.params[3]!.params.isNotEmpty && !ctl.settingsOn) _drawEq(c, g, r);
-    if (ctl.settingsOn) _drawSettings(c, g, r);
-
-    for (final ctlb in controls) {
-      _control(c, g, ctlb, false);
+    if (_eq) _drawEq(c, g, r);
+    if (_settings) _drawSettings(c, g, r);
+    for (final b in controls) {
+      _control(c, g, b, false);
     }
   }
 
@@ -396,7 +347,7 @@ class BoardPainter extends CustomPainter {
     if (mode == Names.off) return;
     final n = noteName(k.id, live.transpose, live.transposeFifths);
     final big = (r * 0.78).roundToDouble();
-    final col = color ?? (k.natural ? _P.labelNatural : _P.labelAccidental);
+    final col = color ?? (k.natural ? BoardPal.labelNatural : BoardPal.labelAccidental);
     final key = ctl.currentKey;
     if (key != null && (mode == Names.degrees || mode == Names.solfege)) {
       final tpc = keyTpc(k.id, live.transposeFifths);
@@ -425,39 +376,26 @@ class BoardPainter extends CustomPainter {
       final f = ctl.keyParam(k.id)?.value;
       if (f != null && (math.log(f) / math.ln2).abs() > 0.004) {
         final a = math.min(1.0, (math.log(f) / math.ln2).abs() * 1.6) * 0.5;
-        c.drawCircle(center, r * 0.97, Paint()..color = f > 1 ? Color.fromRGBO(255, 138, 101, a) : Color.fromRGBO(122, 167, 255, a));
+        c.drawCircle(center, r * 0.97, Paint()..color = _a(f > 1 ? Pal.eqWarm : Pal.eqCool, a));
       }
       if (f != null && (f - 1).abs() > 0.0005) {
-        drawText(c, '×${f.toStringAsFixed(2)}', Offset(cx, cy + r * 0.64), small, f > 1 ? const Color(0xFFFFC2AD) : const Color(0xFFBCD2FF));
+        drawText(c, '×${f.toStringAsFixed(2)}', Offset(cx, cy + r * 0.64), small, f > 1 ? Pal.eqWarmText : Pal.eqCoolText);
       }
       final pk = ctl.lastPeakOf(k.id);
       if (pk > 0) {
         final dev = med != null ? pk / med - 1 : 0.0;
-        final col = dev.abs() < 0.08 ? const Color(0xFF8FE3A4) : (dev < 0 ? const Color(0xFF7AA7FF) : const Color(0xFFFF8A65));
+        final col = dev.abs() < 0.08 ? Pal.eqEven : (dev < 0 ? Pal.eqCool : Pal.eqWarm);
         final frac = med != null ? math.min(1.0, pk / (2 * med)) : math.min(1.0, pk);
         c.drawArc(
           Rect.fromCircle(center: center, radius: r + s * 1.5),
           -math.pi / 2,
           frac * math.pi * 2,
           false,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeCap = StrokeCap.round
-            ..strokeWidth = math.max(2, s * 1.1)
-            ..color = col,
+          _stroke(col, math.max(2, s * 1.1))..strokeCap = StrokeCap.round,
         );
         drawText(c, pk >= 1.7 ? 'max' : pk.toStringAsFixed(2), Offset(cx, cy - r * 0.62), small, col);
       }
-      if (k.id == ctl.eqSelected) {
-        c.drawCircle(
-          center,
-          r + s * 3.0,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = math.max(2, s * 0.8)
-            ..color = Pal.glacier,
-        );
-      }
+      if (k.id == ctl.eqSelected) c.drawCircle(center, r + s * 3.0, _stroke(Pal.glacier, math.max(2, s * 0.8)));
     }
   }
 
@@ -469,37 +407,25 @@ class BoardPainter extends CustomPainter {
       final cx = g.px(k.x), cy = g.py(k.y), center = Offset(cx, cy);
       final f = settingsKeys[k.id];
       if (f == null) {
-        c.drawCircle(center, r + s * 0.3, Paint()..color = const Color.fromRGBO(21, 18, 31, 0.78));
+        c.drawCircle(center, r + s * 0.3, Paint()..color = BoardPal.dim);
         continue;
       }
       final v = f.engine != null ? voices[f.engine] : null;
-      final col = f.led != null ? rgb(ledColor(f.led!)) : (f.danger ? const Color(0xFFFF6B6B) : rgb(groupColors[f.group] ?? 0xffffff));
-      c.drawCircle(center, r + s * 0.3, Paint()..color = v != null && v.current ? const Color(0xFF3D3420) : const Color(0xFF262036));
-      final rim = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = math.max(1.5, s * (v != null && v.current ? 1.1 : 0.6))
-        ..color = v != null && v.count == 0 ? const Color.fromRGBO(255, 107, 107, 0.6) : col;
+      final col = f.led != null ? rgb(ledColor(f.led!)) : (f.danger ? Pal.dangerKey : rgb(groupColors[f.group] ?? 0xffffff));
+      c.drawCircle(center, r + s * 0.3, Paint()..color = v != null && v.current ? BoardPal.settingsKeyCurrent : BoardPal.settingsKey);
+      final rim = _stroke(v != null && v.count == 0 ? _a(Pal.dangerKey, 0.6) : col, math.max(1.5, s * (v != null && v.current ? 1.1 : 0.6)));
       if (f.uncertain) {
         dashedCircle(c, center, r + s * 0.3, rim, s * 1.2, s * 0.8);
       } else {
         c.drawCircle(center, r + s * 0.3, rim);
       }
       if (v != null && v.current) {
-        c.drawCircle(center, r * 1.9, Paint()..shader = ring(center, r * 0.8, r * 1.9, [col.withValues(alpha: 0.45), col.withValues(alpha: 0)]));
+        c.drawCircle(center, r * 1.9, Paint()..shader = ring(center, r * 0.8, r * 1.9, [_a(col, 0.45), _a(col, 0)]));
       }
-      if (k.id == ctl.settingsSelected) {
-        c.drawCircle(
-          center,
-          r + s * 2.6,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = math.max(2, s * 0.8)
-            ..color = Pal.glacier,
-        );
-      }
+      if (k.id == ctl.settingsSelected) c.drawCircle(center, r + s * 2.6, _stroke(Pal.glacier, math.max(2, s * 0.8)));
       final label = f.short + (f.uncertain ? '?' : '');
       final size = (r * (label.length > 5 ? 0.42 : (label.length > 3 ? 0.5 : 0.6))).roundToDouble();
-      drawText(c, label, Offset(cx, cy - (v != null ? r * 0.16 : 0)), size, f.danger ? const Color(0xFFFFB3B3) : const Color(0xFFF3ECDD));
+      drawText(c, label, Offset(cx, cy - (v != null ? r * 0.16 : 0)), size, f.danger ? Pal.dangerKeyText : BoardPal.settingsLabel);
       if (v != null) {
         final sub = v.count == 0 ? 'not here' : (v.current && v.preset.isNotEmpty ? v.preset : (v.count > 1 ? '${v.count} presets' : ''));
         drawText(
@@ -507,21 +433,14 @@ class BoardPainter extends CustomPainter {
           sub.length > 11 ? '${sub.substring(0, 10)}…' : sub,
           Offset(cx, cy + r * 0.38),
           (r * 0.3).roundToDouble(),
-          v.count > 0 ? const Color.fromRGBO(236, 230, 214, 0.75) : const Color.fromRGBO(255, 150, 150, 0.85),
+          v.count > 0 ? BoardPal.settingsSub : BoardPal.settingsMissing,
           weight: FontWeight.w500,
         );
       }
     }
     // the button to hold
     final set = controls.firstWhere((b) => b.id == 3);
-    c.drawCircle(
-      g.at(set.x, set.y),
-      8.5 * s,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = math.max(2, s * 0.7)
-        ..color = Pal.honey,
-    );
+    c.drawCircle(g.at(set.x, set.y), 8.5 * s, _stroke(Pal.honey, math.max(2, s * 0.7)));
     drawText(c, 'hold', Offset(g.px(set.x), g.py(set.y) + 9.5 * s), (s * 3).roundToDouble(), Pal.honey, vAlign: -1);
   }
 
@@ -548,16 +467,10 @@ class BoardPainter extends CustomPainter {
           ..quadraticBezierTo(cx - r * 1.1, cy + r * 0.2, cx, cy + r * 1.25)
           ..close();
     }
-    c.drawPath(path, Paint()..color = lit ? Color.fromRGBO(244, 210, 122, 0.25 + 0.5 * glow) : _P.control);
-    c.drawPath(
-      path,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = math.max(1, s * 0.4)
-        ..color = lit ? Pal.honey : _P.controlRim,
-    );
+    c.drawPath(path, Paint()..color = lit ? _a(Pal.honey, 0.25 + 0.5 * glow) : BoardPal.control);
+    c.drawPath(path, _stroke(lit ? Pal.honey : BoardPal.controlRim, math.max(1, s * 0.4)));
     final dotY = cy + (b.shape == ControlShape.up ? r * 0.15 : (b.shape == ControlShape.down ? -r * 0.15 : 0));
-    c.drawCircle(Offset(cx, dotY), r * 0.45, Paint()..color = lit ? Pal.honey : const Color(0xFF0F0D17));
+    c.drawCircle(Offset(cx, dotY), r * 0.45, Paint()..color = lit ? Pal.honey : BoardPal.controlHole);
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -596,95 +509,41 @@ class BoardPainter extends CustomPainter {
           Paint()..shader = dui.Gradient.radial(gp, fr, [_rgba(_heatOf(math.min(1, p * 1.25)), 0.98), _rgba(col, 0.85), _rgba(col, 0)], [0, 0.6, 1]),
         );
         c.restore();
-        c.drawCircle(
-          center,
-          r,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = math.max(1, s * 0.45)
-            ..color = _rgba(col, 0.95),
-        );
+        c.drawCircle(center, r, _stroke(_rgba(col, 0.95), math.max(1, s * 0.45)));
       }
-      if (w > 0) c.drawCircle(center, r, Paint()..color = Color.fromRGBO(244, 210, 122, w * 0.5));
+      if (w > 0) c.drawCircle(center, r, Paint()..color = _a(Pal.honey, w * 0.5));
       // strike: a ring thrown outwards, stronger for harder strikes
       if (sAge < 700 && !reduced) {
         final t = sAge / 700, a = live.strikeA[id];
         final e = 1 - math.pow(1 - t, 3);
-        c.drawCircle(
-          center,
-          r * (1.05 + (0.45 + 0.75 * a) * e),
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = math.max(1, s * (0.4 + 1.6 * a) * (1 - t))
-            ..color = Color.fromRGBO(255, 240, 215, ((1 - t) * (0.35 + 0.6 * a)).clamp(0, 1)),
-        );
+        c.drawCircle(center, r * (1.05 + (0.45 + 0.75 * a) * e), _stroke(_a(BoardPal.strike, (1 - t) * (0.35 + 0.6 * a)), math.max(1, s * (0.4 + 1.6 * a) * (1 - t))));
       }
       // release: a cool ring drawn back in
       if (rAge < 500 && p < 0.5 && !reduced) {
         final t = rAge / 500;
-        c.drawCircle(
-          center,
-          r * (1.25 - 0.45 * t),
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = math.max(1, s * 0.5 * (1 - t))
-            ..color = Color.fromRGBO(143, 220, 236, ((1 - t) * 0.55 * live.releaseA[id]).clamp(0, 1)),
-        );
+        c.drawCircle(center, r * (1.25 - 0.45 * t), _stroke(_a(Pal.glacier, (1 - t) * 0.55 * live.releaseA[id]), math.max(1, s * 0.5 * (1 - t))));
       }
-      if (p > 0.02 || w > 0.25) {
-        _label(c, k, cx, cy, r, p > 0.3 ? const Color.fromRGBO(30, 18, 30, 0.85) : const Color.fromRGBO(255, 248, 235, 0.95));
-      }
+      if (p > 0.02 || w > 0.25) _label(c, k, cx, cy, r, p > 0.3 ? BoardPal.labelOnHeat : BoardPal.labelLit);
       // tilt: a needle from the centre
       if (p > 0.02) {
         final end = Offset(cx + tx * r * 0.85, cy - ty * r * 0.85);
-        c.drawLine(
-          center,
-          end,
-          Paint()
-            ..color = const Color.fromRGBO(21, 18, 31, 0.75)
-            ..strokeWidth = math.max(1.5, s * 0.55)
-            ..strokeCap = StrokeCap.round,
-        );
-        c.drawCircle(end, math.max(2, s * 0.75), Paint()..color = const Color(0xFFFFFAF0));
+        c.drawLine(center, end, _stroke(BoardPal.needle, math.max(1.5, s * 0.55))..strokeCap = StrokeCap.round);
+        c.drawCircle(end, math.max(2, s * 0.75), Paint()..color = BoardPal.needleTip);
       }
-      if (id == ctl.hover) {
-        c.drawCircle(
-          center,
-          r + s * 0.9,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = math.max(1, s * 0.3)
-            ..color = const Color.fromRGBO(143, 220, 236, 0.8),
-        );
-      }
+      if (id == ctl.hover) c.drawCircle(center, r + s * 0.9, _stroke(_a(Pal.glacier, 0.8), math.max(1, s * 0.3)));
     }
     for (final b in controls) {
       final on = live.controls[b.id] == 1;
       final age = now - live.controlT[b.id];
       if (on || age < 400 || b.id == ctl.hoverControl) {
         _control(c, g, b, on, on ? 1 : math.max(0, 1 - age / 400));
-        if (b.id == ctl.hoverControl) {
-          c.drawCircle(
-            g.at(b.x, b.y),
-            7.4 * s,
-            Paint()
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = math.max(1, s * 0.3)
-              ..color = const Color.fromRGBO(143, 220, 236, 0.8),
-          );
-        }
+        if (b.id == ctl.hoverControl) c.drawCircle(g.at(b.x, b.y), 7.4 * s, _stroke(_a(Pal.glacier, 0.8), math.max(1, s * 0.3)));
       }
     }
     // indicator LED: lit while connected
     final led = g.at(ledPosition.x, ledPosition.y);
-    c.drawCircle(led, 1.6 * s, Paint()..color = ctl.ledOn ? Pal.ok : const Color(0xFF2C3B31));
-    if (ctl.ledOn) {
-      c.drawCircle(
-        led,
-        6 * s,
-        Paint()..shader = dui.Gradient.radial(led, 6 * s, [const Color.fromRGBO(124, 242, 154, 0.35), const Color.fromRGBO(124, 242, 154, 0)]),
-      );
-    }
+    c.drawCircle(led, 1.6 * s, Paint()..color = ctl.ledOn ? Pal.ok : BoardPal.ledOff);
+    if (ctl.ledOn) c.drawCircle(led, 6 * s, Paint()..shader = dui.Gradient.radial(led, 6 * s, [_a(Pal.ok, 0.35), _a(Pal.ok, 0)]));
   }
 
   @override
@@ -757,13 +616,13 @@ class _MotionPainter extends CustomPainter {
     final ringP = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1
-      ..color = const Color.fromRGBO(160, 150, 200, 0.28);
+      ..color = _a(BoardPal.faintLine, 0.28);
     for (final f in [1.0, 0.66, 0.33]) {
       g.drawCircle(Offset(cx, cy), rr * f, ringP);
     }
     final cross = Paint()
       ..strokeWidth = 1
-      ..color = const Color.fromRGBO(160, 150, 200, 0.14);
+      ..color = _a(BoardPal.faintLine, 0.14);
     g.drawLine(Offset(cx - rr, cy), Offset(cx + rr, cy), cross);
     g.drawLine(Offset(cx, cy - rr), Offset(cx, cy + rr), cross);
     final b = Offset(cx + st.bx * rr, cy - st.by * rr);
@@ -777,7 +636,7 @@ class _MotionPainter extends CustomPainter {
           st.trail[i],
           Paint()
             ..strokeWidth = 2 * f
-            ..color = Color.fromRGBO(143, 220, 236, f * 0.5),
+            ..color = _a(Pal.glacier, f * 0.5),
         );
       }
     }
@@ -788,10 +647,7 @@ class _MotionPainter extends CustomPainter {
         ..shader = dui.Gradient.radial(
           b,
           rr * 0.16,
-          [
-            has ? const Color(0xFFE6FBFF) : const Color(0xFF4A4560),
-            has ? const Color.fromRGBO(143, 220, 236, 0.25) : const Color.fromRGBO(74, 69, 96, 0.2),
-          ],
+          [has ? BoardPal.motionBall : BoardPal.motionBallOff, has ? _a(Pal.glacier, 0.25) : _a(BoardPal.motionBallOff, 0.2)],
           null,
           TileMode.clamp,
           null,
@@ -803,19 +659,19 @@ class _MotionPainter extends CustomPainter {
     final top = cy + rr + 16, bw = w * 0.62, bh = 5.0, x0 = w - bw - 4;
     for (final (i, ax) in ['x', 'y', 'z'].indexed) {
       final y = top + i * 14;
-      g.drawRect(Rect.fromLTWH(x0, y - bh / 2, bw, bh), Paint()..color = const Color.fromRGBO(160, 150, 200, 0.16));
+      g.drawRect(Rect.fromLTWH(x0, y - bh / 2, bw, bh), Paint()..color = _a(BoardPal.faintLine, 0.16));
       final gv = [m.gx, m.gy, m.gz][i];
       final v = has ? (gv * 4).clamp(-1.0, 1.0) : 0.0;
       final mid = x0 + bw / 2;
       g.drawRect(Rect.fromLTWH(math.min(mid, mid + v * bw / 2), y - bh / 2, (v * bw / 2).abs(), bh), Paint()..color = Pal.glacier);
-      drawText(g, 'rot $ax', Offset(2, y), 11, const Color.fromRGBO(200, 192, 225, 0.7), weight: FontWeight.w400, align: -1);
+      drawText(g, 'rot $ax', Offset(2, y), TypeSize.caption, _a(BoardPal.motionText, 0.7), weight: FontWeight.w400, align: -1);
     }
     drawText(
       g,
       has ? '${m.abs.toStringAsFixed(2)} g' : 'no data',
       Offset(cx, cy + rr * 0.55),
-      11,
-      has ? const Color.fromRGBO(236, 230, 214, 0.85) : const Color.fromRGBO(160, 150, 200, 0.5),
+      TypeSize.caption,
+      has ? _a(Pal.text, 0.85) : _a(BoardPal.faintLine, 0.5),
       weight: FontWeight.w400,
     );
   }

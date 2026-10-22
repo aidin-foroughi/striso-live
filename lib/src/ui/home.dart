@@ -1,5 +1,5 @@
-// The faceplate: panels in a grid that meets at 1px seams, like the web app's layout, with the
-// keyboard shortcuts and the app-wide animation frame.
+// The window: header, tabs (Play, Sound, Setup), the banner, the console as a pull-up drawer,
+// toasts; the keyboard shortcuts and the app-wide animation frame.
 
 import 'dart:math' as math;
 
@@ -11,10 +11,10 @@ import '../controller.dart';
 import '../theme.dart';
 import 'chrome.dart';
 import 'console.dart';
-import 'live_panel.dart';
-import 'side_panel.dart';
-import 'sound_panel.dart';
-import 'touch_panel.dart';
+import 'header.dart';
+import 'play_tab.dart';
+import 'setup_tab.dart';
+import 'sound_tab.dart';
 
 class HomePage extends StatefulWidget {
   final AppController ctl;
@@ -64,8 +64,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       return true;
     }
     if (mod || kb.isAltPressed) return false;
+    final tabs = {LogicalKeyboardKey.digit1: AppTab.play, LogicalKeyboardKey.digit2: AppTab.sound, LogicalKeyboardKey.digit3: AppTab.setup};
+    if (tabs.containsKey(k)) {
+      ctl.setTab(tabs[k]!);
+      return true;
+    }
     if (k == LogicalKeyboardKey.keyS) {
       ctl.toggleSettings();
+      if (ctl.settingsOn) ctl.setTab(AppTab.setup);
       return true;
     }
     if (k == LogicalKeyboardKey.bracketLeft) {
@@ -83,132 +89,35 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     return false;
   }
 
-  Widget _area(Widget child) => Container(color: Pal.panel, child: child);
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Pal.ink,
+      backgroundColor: Pal.panel,
       body: Stack(
         children: [
           Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               TopBar(ctl),
+              TabStrip(ctl),
               BannerBar(ctl),
               Expanded(
-                child: LayoutBuilder(
-                  builder: (context, c) {
-                    final w = c.maxWidth;
-                    final boardH = (c.maxHeight * 0.64).clamp(420.0, 780.0);
-                    Widget grid;
-                    if (w > 1280) {
-                      // voices | live | side, then touch, then sound. The live panel sets the height of
-                      // the first row; the side columns fill it (and scroll inside).
-                      grid = Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Stack(
-                            children: [
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const SizedBox(width: 237),
-                                  Expanded(child: _area(LivePanel(ctl, boardHeight: boardH))),
-                                  const SizedBox(width: 341),
-                                ],
-                              ),
-                              Positioned(left: 0, top: 0, bottom: 0, width: 236, child: _area(VoicesPanel(ctl))),
-                              Positioned(
-                                right: 0,
-                                top: 0,
-                                bottom: 0,
-                                width: 340,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                                  children: [
-                                    _area(MorphPanel(ctl)),
-                                    const SizedBox(height: 1),
-                                    Expanded(child: _area(PresetsPanel(ctl))),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 1),
-                          _area(TouchSection(ctl)),
-                          const SizedBox(height: 1),
-                          _area(SoundPanel(ctl)),
-                        ],
-                      );
-                    } else if (w > 760) {
-                      grid = Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _area(LivePanel(ctl, boardHeight: boardH)),
-                          const SizedBox(height: 1),
-                          Stack(
-                            children: [
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const SizedBox(width: 245),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                                      children: [_area(MorphPanel(ctl)), const SizedBox(height: 1), _area(PresetsPanel(ctl))],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              Positioned(left: 0, top: 0, bottom: 0, width: 244, child: _area(VoicesPanel(ctl))),
-                            ],
-                          ),
-                          const SizedBox(height: 1),
-                          _area(TouchSection(ctl)),
-                          const SizedBox(height: 1),
-                          _area(SoundPanel(ctl)),
-                        ],
-                      );
-                    } else {
-                      grid = Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _area(LivePanel(ctl, boardHeight: math.max(300, w / 1.15))),
-                          const SizedBox(height: 1),
-                          _area(VoicesPanel(ctl, scroll: false)),
-                          const SizedBox(height: 1),
-                          _area(MorphPanel(ctl)),
-                          const SizedBox(height: 1),
-                          _area(PresetsPanel(ctl)),
-                          const SizedBox(height: 1),
-                          _area(TouchSection(ctl, narrow: true)),
-                          const SizedBox(height: 1),
-                          _area(SoundPanel(ctl)),
-                        ],
-                      );
-                    }
-                    return Scrollbar(
-                      child: SingleChildScrollView(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Container(color: Pal.seam, child: grid),
-                            ConsoleDrawer(ctl),
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(18, 10, 18, 18),
-                              child: Text(
-                                '[ ]  previous and next voice,  Ctrl+Z  undo,  Ctrl+Shift+Z  redo,  M  mutate,  S  settings keys. '
-                                'Knobs: drag, scroll, arrow keys; double-click resets; Alt+click locks against Mutate.',
-                                style: ui(12, color: Pal.faint),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
+                child: ListenableBuilder(
+                  listenable: ctl,
+                  builder: (context, _) => AnimatedSwitcher(
+                    duration: ctl.options.reducedMotion ? Duration.zero : Timing.fast,
+                    child: KeyedSubtree(
+                      key: ValueKey(ctl.tab),
+                      child: switch (ctl.tab) {
+                        AppTab.play => PlayTab(ctl),
+                        AppTab.sound => SoundTab(ctl),
+                        AppTab.setup => SetupTab(ctl),
+                      },
+                    ),
+                  ),
                 ),
               ),
+              ConsoleDrawer(ctl),
             ],
           ),
           ToastLayer(ctl),

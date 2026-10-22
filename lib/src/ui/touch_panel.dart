@@ -34,46 +34,6 @@ const _touchInfo = {
   ),
 };
 
-class TouchSection extends StatelessWidget {
-  final AppController ctl;
-  final bool narrow;
-  const TouchSection(this.ctl, {super.key, this.narrow = false});
-
-  @override
-  Widget build(BuildContext context) {
-    final cols = [_box(_TouchGlobal(ctl)), _box(_KeyEq(ctl)), _box(_SaveBox(ctl))];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const AreaHead('Touch', sub: 'sensitivity of the keys, live on the board'),
-        Container(
-          color: Pal.seam,
-          padding: const EdgeInsets.only(top: 1),
-          child: narrow
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [for (final c in cols) Padding(padding: const EdgeInsets.only(bottom: 1), child: c)],
-                )
-              : IntrinsicHeight(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(flex: 110, child: cols[0]),
-                      const SizedBox(width: 1),
-                      Expanded(flex: 120, child: cols[1]),
-                      const SizedBox(width: 1),
-                      Expanded(flex: 80, child: cols[2]),
-                    ],
-                  ),
-                ),
-        ),
-      ],
-    );
-  }
-
-  Widget _box(Widget child) => Container(color: Pal.panel, padding: const EdgeInsets.fromLTRB(16, 12, 16, 16), child: child);
-}
-
 Widget _h3(String t) => Padding(
   padding: const EdgeInsets.only(bottom: 8),
   child: Text(t, style: ui(13.5, weight: FontWeight.w600)),
@@ -83,9 +43,9 @@ Widget _help(String t) => Padding(
   child: Text(t, style: ui(12, color: Pal.faint, height: 1.4)),
 );
 
-class _TouchGlobal extends StatelessWidget {
+class TouchGlobal extends StatelessWidget {
   final AppController ctl;
-  const _TouchGlobal(this.ctl);
+  const TouchGlobal(this.ctl, {super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -205,9 +165,9 @@ class _TouchRowState extends State<_TouchRow> {
 
 String fmtNum(double v) => v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString();
 
-class _KeyEq extends StatelessWidget {
+class KeyEqualizer extends StatelessWidget {
   final AppController ctl;
-  const _KeyEq(this.ctl);
+  const KeyEqualizer(this.ctl, {super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -257,7 +217,7 @@ class _KeyEq extends StatelessWidget {
               spacing: 16,
               runSpacing: 4,
               children: [
-                CheckLabel('Show on the board', key: const Key('eq-on'), value: ctl.eqOn, onChanged: ctl.setEqOn),
+                CheckLabel('Show on the board', value: ctl.eqOn, onChanged: ctl.setEqOn),
                 CheckLabel('Select the last pressed key', value: ctl.eqFollow, onChanged: ctl.setEqFollow),
               ],
             ),
@@ -589,9 +549,9 @@ class _MeterPainter extends CustomPainter {
   bool shouldRepaint(covariant _MeterPainter old) => true;
 }
 
-class _SaveBox extends StatelessWidget {
+class SaveBox extends StatelessWidget {
   final AppController ctl;
-  const _SaveBox(this.ctl);
+  const SaveBox(this.ctl, {super.key});
 
   @override
   Widget build(BuildContext context) {

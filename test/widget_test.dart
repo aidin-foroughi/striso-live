@@ -77,10 +77,14 @@ void main() {
     expect(find.text('Demo (simulated Striso)'), findsOneWidget);
     expect(find.byKey(const Key('now-preset')), findsOneWidget);
     expect(tester.widget<Text>(find.byKey(const Key('now-preset'))).data, 'classic');
-    // the voice browser: engines and tiles
-    expect(find.text('Virtual analog'), findsWidgets);
-    expect(find.text('wine glass'), findsOneWidget);
-    // the sound racks: a knob or switch per parameter
+    // the voice browser: the engine row and the current engine's presets
+    expect(find.byKey(const Key('engine-modal')), findsOneWidget);
+    expect(find.text('pad'), findsOneWidget);
+    // the Play tab's main knobs
+    expect(find.byType(Knob), findsWidgets);
+    // the Sound tab's racks: a knob or switch per parameter
+    await tester.tap(find.byKey(const Key('tab-sound')));
+    await settle(tester, 300);
     expect(
       find.byType(Knob).evaluate().length + find.byType(ToggleCtl).evaluate().length,
       ctl.params[0]!.params.length + ctl.params[1]!.params.length,
@@ -92,6 +96,11 @@ void main() {
   testWidgets('switching voice from a tile reads the new parameters; undo and redo', (tester) async {
     final ctl = await boot(tester);
     await startDemo(tester, ctl);
+    await tester.tap(find.byKey(const Key('engine-modal')));
+    for (var i = 0; i < 20 && !ctl.voiceName.startsWith('modal'); i++) {
+      await runFor(tester, 50);
+    }
+    expect(ctl.voiceName, startsWith('modal'));
     await tester.tap(find.text('wine glass'));
     for (var i = 0; i < 20 && ctl.voiceName != 'modal:wine glass'; i++) {
       await runFor(tester, 50);
@@ -101,6 +110,8 @@ void main() {
     // a change through the controller, as a knob drag does, then undo/redo from the buttons
     final p = ctl.params[0]!.params.firstWhere((q) => q.kind == Kind.continuous);
     final before = p.value;
+    await tester.tap(find.byKey(const Key('tab-sound')));
+    await settle(tester, 300);
     ctl.onEdit(0, p, p.min + (p.max - p.min) * 0.8, 'begin', 'Change ${p.name}');
     ctl.onEdit(0, p, p.value, 'end');
     await settle(tester, 100);
@@ -118,6 +129,8 @@ void main() {
   testWidgets('settings overlay: the panel, a voice key click switches voice', (tester) async {
     final ctl = await boot(tester);
     await startDemo(tester, ctl);
+    await tester.tap(find.byKey(const Key('tab-setup')));
+    await settle(tester, 300);
     expect(find.byKey(const Key('settings-panel')), findsNothing);
     await tester.tap(find.byKey(const Key('btn-settings-overlay')));
     await settle(tester, 200);
@@ -139,7 +152,8 @@ void main() {
   testWidgets('touch panel and key equalizer: sliders, selection, live peaks, Suggest', (tester) async {
     final ctl = await boot(tester);
     await startDemo(tester, ctl);
-    expect(find.text('Whole instrument'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('tab-setup')));
+    await settle(tester, 300);
     expect(find.text('Threshold'), findsOneWidget);
     expect(ctl.params[2]!.params.length, 5);
     expect(ctl.params[3]!.params.length, 61);
@@ -205,6 +219,8 @@ void main() {
   testWidgets('save to Striso (fake drive): confirm, backup, reconnect and read back', (tester) async {
     final ctl = await boot(tester, options: const AppOptions(noUsb: true, fakeSave: 'ok'));
     await startDemo(tester, ctl);
+    await tester.tap(find.byKey(const Key('tab-setup')));
+    await settle(tester, 300);
     final p = ctl.findParam(2, 'pressure')!;
     ctl.onEdit(2, p, 1.5, 'begin', 'Touch pressure');
     ctl.onEdit(2, p, 1.5, 'end');
@@ -226,7 +242,7 @@ void main() {
     await startDemo(tester, ctl);
     await settle(tester, 300);
     expect(tester.takeException(), isNull);
-    expect(find.text('Voices'), findsOneWidget);
+    expect(find.byKey(const Key('engine-va')), findsOneWidget);
     await finish(tester, ctl);
   });
 }
