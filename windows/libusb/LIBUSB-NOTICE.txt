@@ -1,0 +1,5 @@
+libusb-1.0.dll in this folder is libusb 1.0.30 (Windows x64), unmodified, as shipped in the
+libusb_package Python wheel 1.0.30.0. libusb is free software under the GNU Lesser General
+Public License version 2.1 or later: https://github.com/libusb/libusb/blob/master/COPYING
+Source code: https://github.com/libusb/libusb (tag v1.0.30). Striso Live loads it dynamically;
+you may replace this DLL with another build of libusb-1.0.

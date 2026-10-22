@@ -1,0 +1,24 @@
+name: striso_live
+description: "Striso Live: live companion for the Striso board"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  file_selector: ^1.0.3
+  striso_core:
+    path: packages/striso_core
+  striso_usb:
+    path: packages/striso_usb
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

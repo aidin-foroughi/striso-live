@@ -208,8 +208,12 @@ class StrisoClient {
 
   Future<VersionInfo?> getVersion() async {
     streaming = false; // 'V' also stops the stream and empties the board's output queue
-    final r = await request(Cmd.version(), (l, s) => parseQErr(l) == null && l != 'Stcs' ? Take.more : Take.no,
-        timeout: const Duration(milliseconds: 800), idle: const Duration(milliseconds: 120));
+    final r = await request(
+      Cmd.version(),
+      (l, s) => parseQErr(l) == null && l != 'Stcs' ? Take.more : Take.no,
+      timeout: const Duration(milliseconds: 800),
+      idle: const Duration(milliseconds: 120),
+    );
     if (r.lines.isEmpty) return null;
     return parseVersion(r.lines.first)..extra = r.lines.sublist(1);
   }
@@ -225,12 +229,17 @@ class StrisoClient {
   }
 
   Future<List<VoiceEntry>> listVoices() async {
-    final r = await request(Cmd.voices(), (l, s) {
-      final v = parseVoiceLine(l);
-      if (v == null) return Take.no;
-      ((s['voices'] ??= <VoiceEntry>[]) as List<VoiceEntry>).add(v);
-      return Take.more;
-    }, timeout: const Duration(milliseconds: 700), idle: const Duration(milliseconds: 90));
+    final r = await request(
+      Cmd.voices(),
+      (l, s) {
+        final v = parseVoiceLine(l);
+        if (v == null) return Take.no;
+        ((s['voices'] ??= <VoiceEntry>[]) as List<VoiceEntry>).add(v);
+        return Take.more;
+      },
+      timeout: const Duration(milliseconds: 700),
+      idle: const Duration(milliseconds: 90),
+    );
     return (r.state['voices'] as List<VoiceEntry>?) ?? const [];
   }
 
@@ -268,8 +277,12 @@ class StrisoClient {
 
   /// A console command for the console drawer; replies are collected until quiet.
   Future<List<String>> raw(int byte) async {
-    final r = await request(command(byte), (l, s) => parseQErr(l) == null ? Take.more : Take.no,
-        timeout: const Duration(milliseconds: 1500), idle: const Duration(milliseconds: 150));
+    final r = await request(
+      command(byte),
+      (l, s) => parseQErr(l) == null ? Take.more : Take.no,
+      timeout: const Duration(milliseconds: 1500),
+      idle: const Duration(milliseconds: 150),
+    );
     return r.lines;
   }
 
@@ -305,8 +318,14 @@ class StrisoClient {
     }
   }
 
-  ClientDiagnostics diagnostics() => ClientDiagnostics(parser.stats, rxBytes, streaming, restarts,
-      _lastMessageMs < 0 ? null : Duration(milliseconds: _now - _lastMessageMs), _queue.length + (_current != null ? 1 : 0));
+  ClientDiagnostics diagnostics() => ClientDiagnostics(
+    parser.stats,
+    rxBytes,
+    streaming,
+    restarts,
+    _lastMessageMs < 0 ? null : Duration(milliseconds: _now - _lastMessageMs),
+    _queue.length + (_current != null ? 1 : 0),
+  );
 
   // parameters: the latest value per parameter goes out at most every 16 ms --------------------------
 

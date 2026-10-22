@@ -9,10 +9,10 @@ import 'package:test/test.dart';
 Future<void> sleep(int ms) => Future<void>.delayed(Duration(milliseconds: ms));
 
 List<Param> P() => [
-      Param(index: 0, name: 'gain', group: 'level', min: 0, max: 4, kind: 0, value: 1),
-      Param(index: 1, name: 'steps', group: 'osc', min: 0, max: 7, kind: 1, value: 2),
-      Param(index: 2, name: 'sync', group: 'osc', min: 0, max: 1, kind: 2, value: 0),
-    ];
+  Param(index: 0, name: 'gain', group: 'level', min: 0, max: 4, kind: 0, value: 1),
+  Param(index: 1, name: 'steps', group: 'osc', min: 0, max: 7, kind: 1, value: 2),
+  Param(index: 2, name: 'sync', group: 'osc', min: 0, max: 1, kind: 2, value: 0),
+];
 Snapshot corner(Map<String, double> v) => Snapshot('va:pad', {0: v, 1: {}});
 
 /// The firmware source, when this checkout has it next to the tools.
@@ -47,7 +47,12 @@ void main() {
 
     test('morph interpolates continuous values and snaps integer and on/off ones', () {
       final params = P();
-      final corners = <Snapshot?>[corner({'gain': 0, 'steps': 0, 'sync': 0}), corner({'gain': 4, 'steps': 7, 'sync': 1}), null, null];
+      final corners = <Snapshot?>[
+        corner({'gain': 0, 'steps': 0, 'sync': 0}),
+        corner({'gain': 4, 'steps': 7, 'sync': 1}),
+        null,
+        null,
+      ];
       final out = morphValues(params, corners, [0.4, 0.6, 0, 0], 0);
       final by = {for (final (p, v) in out) p.name: v};
       expect(by['gain'], toFloat32(2.4));
@@ -128,8 +133,12 @@ void main() {
       expect(median([3, 1, 2]), 2);
       expect(median([4, 1, 3, 2]), 2.5);
       const measured = [
-        Measured(n: 0, peak: 0.40, factor: 1), Measured(n: 1, peak: 0.50, factor: 1), Measured(n: 2, peak: 0.25, factor: 1.2),
-        Measured(n: 3, peak: 0.80, factor: 1), Measured(n: 4, peak: 0.10, factor: 0.9), Measured(n: 5, peak: 0.01, factor: 1),
+        Measured(n: 0, peak: 0.40, factor: 1),
+        Measured(n: 1, peak: 0.50, factor: 1),
+        Measured(n: 2, peak: 0.25, factor: 1.2),
+        Measured(n: 3, peak: 0.80, factor: 1),
+        Measured(n: 4, peak: 0.10, factor: 0.9),
+        Measured(n: 5, peak: 0.01, factor: 1),
         Measured(n: 6, peak: 1.8, factor: 1),
       ];
       final r = suggestFactors(measured);
@@ -147,9 +156,13 @@ void main() {
       expect(r.changes.every((c) => [0, 1, 2, 3, 4].contains(c.key.n)), isTrue);
       expect(suggestFactors(measured.sublist(0, 2)).median, isNull);
       expect(
-          suggestFactors(const [Measured(n: 0, peak: 0.4, factor: 1), Measured(n: 1, peak: 0.401, factor: 1), Measured(n: 2, peak: 0.399, factor: 1)])
-              .changes,
-          isEmpty);
+        suggestFactors(const [
+          Measured(n: 0, peak: 0.4, factor: 1),
+          Measured(n: 1, peak: 0.401, factor: 1),
+          Measured(n: 2, peak: 0.399, factor: 1),
+        ]).changes,
+        isEmpty,
+      );
     });
 
     test('peaks of each press, and pressure of 1.0 and more unwrapped', () {
@@ -179,7 +192,11 @@ void main() {
       final touch = (await c.getParams(2))!;
       expect(touch.params.map((p) => p.name), ['pressure', 'velocity', 'tilt', 'bend', 'threshold']);
       expect(touch.params.map((p) => [p.min, p.max, p.value]), [
-        [toFloat32(0.1), 4, 1], [toFloat32(0.1), 4, 1], [-4, 4, 1], [0, 8, 0.5], [0, 0.5, 0],
+        [toFloat32(0.1), 4, 1],
+        [toFloat32(0.1), 4, 1],
+        [-4, 4, 1],
+        [0, 8, 0.5],
+        [0, 0.5, 0],
       ]);
       final keys = (await c.getParams(3))!;
       expect(keys.count, 61);
@@ -269,8 +286,10 @@ void main() {
     test('voice keys: select with the remembered preset, then step through the presets', () {
       const voices = [
         VoiceEntry(index: 0, name: 'strisy', engine: 'strisy'),
-        VoiceEntry(index: 1, name: 'va:classic', engine: 'va'), VoiceEntry(index: 2, name: 'va:pad', engine: 'va'),
-        VoiceEntry(index: 3, name: 'va:lead', engine: 'va'), VoiceEntry(index: 4, name: 'modal:bell', engine: 'modal'),
+        VoiceEntry(index: 1, name: 'va:classic', engine: 'va'),
+        VoiceEntry(index: 2, name: 'va:pad', engine: 'va'),
+        VoiceEntry(index: 3, name: 'va:lead', engine: 'va'),
+        VoiceEntry(index: 4, name: 'modal:bell', engine: 'modal'),
       ];
       expect(voiceKeyAction(voices, 0, 'va'), (index: 1, name: 'va:classic', presetIndex: 0, count: 3));
       expect(voiceKeyAction(voices, 0, 'va', {'va': 2})!.name, 'va:lead');

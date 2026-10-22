@@ -18,10 +18,7 @@ List<int> ascii(String s) => s.codeUnits;
 class Collected {
   final messages = <List<int>>[];
   final lines = <String>[];
-  late final StreamParser p = StreamParser(
-    onMessage: (src, id, v, n) => messages.add([src, id, ...v.sublist(0, n)]),
-    onLine: lines.add,
-  );
+  late final StreamParser p = StreamParser(onMessage: (src, id, v, n) => messages.add([src, id, ...v.sublist(0, n)]), onLine: lines.add);
 }
 
 void main() {
@@ -71,8 +68,15 @@ void main() {
 
   test('stream framing with text interleaved at random points and random chunking', () {
     final r = rng(42);
-    const lines = ['voice 3 va:pad', '* 12 modal:wine glass', 'params 0 va:pad 2', '0 gain level 3f000000 40a00000 40133333 0',
-      'synth blocks 1526 avg 40210 peak 61002 budget 314572 cycles', 'Q err 0 99', ''];
+    const lines = [
+      'voice 3 va:pad',
+      '* 12 modal:wine glass',
+      'params 0 va:pad 2',
+      '0 gain level 3f000000 40a00000 40133333 0',
+      'synth blocks 1526 avg 40210 peak 61002 budget 314572 cycles',
+      'Q err 0 99',
+      '',
+    ];
     for (var round = 0; round < 50; round++) {
       final expectedMsgs = <List<int>>[], expectedLines = <String>[];
       final bytes = <int>[];
@@ -114,7 +118,7 @@ void main() {
     c.p.push(b);
     c.p.push(ascii('ok\r\n'));
     expect(c.messages, [
-      [0, 6, 1, 2, 3, 4]
+      [0, 6, 1, 2, 3, 4],
     ]);
     expect(c.lines, ['ok']);
     expect(c.p.stats.truncated, 1);
@@ -127,7 +131,7 @@ void main() {
     c.p.push([0x73, 0x0d]);
     c.p.push([0x0a]);
     expect(c.messages, [
-      [4, 9]
+      [4, 9],
     ]);
     expect(c.lines, ['Stcs']);
   });

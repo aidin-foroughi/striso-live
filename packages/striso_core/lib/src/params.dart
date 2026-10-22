@@ -19,16 +19,20 @@ class Snapshot {
   String label;
   Snapshot(this.voice, this.values, [this.label = '']);
 
-  Map<String, Object?> toJson() => {'voice': voice, 'label': label, 'values': {for (final e in values.entries) '${e.key}': e.value}};
-  static Snapshot fromJson(Map<String, Object?> j) => Snapshot(
-        j['voice'] as String,
-        {for (final e in (j['values'] as Map).entries) int.parse(e.key as String): {for (final v in (e.value as Map).entries) v.key as String: (v.value as num).toDouble()}},
-        (j['label'] as String?) ?? '',
-      );
+  Map<String, Object?> toJson() => {
+    'voice': voice,
+    'label': label,
+    'values': {for (final e in values.entries) '${e.key}': e.value},
+  };
+  static Snapshot fromJson(Map<String, Object?> j) => Snapshot(j['voice'] as String, {
+    for (final e in (j['values'] as Map).entries)
+      int.parse(e.key as String): {for (final v in (e.value as Map).entries) v.key as String: (v.value as num).toDouble()},
+  }, (j['label'] as String?) ?? '');
 }
 
-Snapshot snapshot(Map<int, List<Param>> state, String voiceName) =>
-    Snapshot(voiceName, {for (final t in soundTargets) t: {for (final p in state[t] ?? const <Param>[]) p.name: p.value}});
+Snapshot snapshot(Map<int, List<Param>> state, String voiceName) => Snapshot(voiceName, {
+  for (final t in soundTargets) t: {for (final p in state[t] ?? const <Param>[]) p.name: p.value},
+});
 
 // ---------------------------------------------------------------------------------------------
 // morph: corners at (0,0) (1,0) (0,1) (1,1) in pad units (u right, v down)
@@ -204,9 +208,14 @@ class PresetParam {
   const PresetParam(this.index, this.name, this.group, this.value, this.min, this.max, this.kind);
   Map<String, Object?> toJson() => {'index': index, 'name': name, 'group': group, 'value': value, 'min': min, 'max': max, 'kind': kind};
   static PresetParam fromJson(Map j) => PresetParam(
-        (j['index'] as num?)?.toInt() ?? 0, j['name'] as String, (j['group'] as String?) ?? '',
-        (j['value'] as num).toDouble(), (j['min'] as num?)?.toDouble() ?? 0, (j['max'] as num?)?.toDouble() ?? 1, (j['kind'] as num?)?.toInt() ?? 0,
-      );
+    (j['index'] as num?)?.toInt() ?? 0,
+    j['name'] as String,
+    (j['group'] as String?) ?? '',
+    (j['value'] as num).toDouble(),
+    (j['min'] as num?)?.toDouble() ?? 0,
+    (j['max'] as num?)?.toDouble() ?? 1,
+    (j['kind'] as num?)?.toInt() ?? 0,
+  );
 }
 
 class Preset {
@@ -215,15 +224,29 @@ class Preset {
   const Preset({required this.name, required this.voice, required this.engine, required this.created, required this.params, required this.fx});
 
   Map<String, Object?> toJson() => {
-        'format': presetFormat, 'version': 1, 'name': name, 'voice': voice, 'engine': engine, 'created': created,
-        'params': [for (final p in params) p.toJson()], 'fx': [for (final p in fx) p.toJson()],
-      };
+    'format': presetFormat,
+    'version': 1,
+    'name': name,
+    'voice': voice,
+    'engine': engine,
+    'created': created,
+    'params': [for (final p in params) p.toJson()],
+    'fx': [for (final p in fx) p.toJson()],
+  };
 }
 
 Preset makePreset(String name, String voiceName, Map<int, List<Param>> state, {DateTime? now}) {
-  List<PresetParam> strip(List<Param>? l) => [for (final p in l ?? const <Param>[]) PresetParam(p.index, p.name, p.group, p.value, p.min, p.max, p.kind)];
-  return Preset(name: name, voice: voiceName, engine: voiceName.split(':').first, created: (now ?? DateTime.now()).toUtc().toIso8601String(),
-      params: strip(state[Target.voice]), fx: strip(state[Target.fx]));
+  List<PresetParam> strip(List<Param>? l) => [
+    for (final p in l ?? const <Param>[]) PresetParam(p.index, p.name, p.group, p.value, p.min, p.max, p.kind),
+  ];
+  return Preset(
+    name: name,
+    voice: voiceName,
+    engine: voiceName.split(':').first,
+    created: (now ?? DateTime.now()).toUtc().toIso8601String(),
+    params: strip(state[Target.voice]),
+    fx: strip(state[Target.fx]),
+  );
 }
 
 String? validatePreset(Object? p) {
@@ -258,20 +281,26 @@ String? validatePreset(Object? p) {
     }
     final m = p as Map;
     final voice = m['voice'] as String;
-    presets.add(Preset(
-      name: m['name'] as String, voice: voice, engine: (m['engine'] as String?) ?? voice.split(':').first,
-      created: (m['created'] as String?) ?? '',
-      params: [for (final q in m['params'] as List) PresetParam.fromJson(q as Map)],
-      fx: [for (final q in m['fx'] as List) PresetParam.fromJson(q as Map)],
-    ));
+    presets.add(
+      Preset(
+        name: m['name'] as String,
+        voice: voice,
+        engine: (m['engine'] as String?) ?? voice.split(':').first,
+        created: (m['created'] as String?) ?? '',
+        params: [for (final q in m['params'] as List) PresetParam.fromJson(q as Map)],
+        fx: [for (final q in m['fx'] as List) PresetParam.fromJson(q as Map)],
+      ),
+    );
   }
   return (presets: presets, errors: errors);
 }
 
 String collectionJson(List<Preset> presets) => const JsonEncoder.withIndent('  ').convert({
-      'format': collectionFormat, 'version': 1, 'exported': DateTime.now().toUtc().toIso8601String(),
-      'presets': [for (final p in presets) p.toJson()],
-    });
+  'format': collectionFormat,
+  'version': 1,
+  'exported': DateTime.now().toUtc().toIso8601String(),
+  'presets': [for (final p in presets) p.toJson()],
+});
 
 // ---------------------------------------------------------------------------------------------
 // C export: arrays in EngineParams index order, one value per line with its name
@@ -306,7 +335,8 @@ String presetToC(Preset preset) {
   final id = cIdent(preset.name);
   final engine = preset.engine;
   final lines = <String>[
-    '// Striso Live preset "${preset.name.replaceAll('"', "'")}" for $engine (made from ${preset.voice}), ${preset.created.length >= 10 ? preset.created.substring(0, 10) : ''}'.trimRight(),
+    '// Striso Live preset "${preset.name.replaceAll('"', "'")}" for $engine (made from ${preset.voice}), ${preset.created.length >= 10 ? preset.created.substring(0, 10) : ''}'
+        .trimRight(),
     '// Values in strisy::EngineParams<$engine::Engine> index order; apply each with',
     '//   *strisy::EngineParams<E>::ptr(e, i) = v; strisy::EngineParams<E>::changed(e, i);',
   ];
@@ -341,7 +371,13 @@ String formatValue(double min, double max, int kind, double v) {
   if (kind == Kind.onOff) return v >= 0.5 ? 'on' : 'off';
   if (kind == Kind.integer) return v.round().toString();
   final a = v.abs(), span = (max - min).abs();
-  var d = span >= 100 ? 0 : span >= 10 ? 1 : span >= 1 ? 2 : 3;
+  var d = span >= 100
+      ? 0
+      : span >= 10
+      ? 1
+      : span >= 1
+      ? 2
+      : 3;
   if (a >= 1000) d = 0;
   var s = v.toStringAsFixed(d);
   if (RegExp(r'^-0(\.0*)?$').hasMatch(s)) s = s.substring(1);

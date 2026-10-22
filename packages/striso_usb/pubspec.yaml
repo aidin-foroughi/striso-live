@@ -1,0 +1,16 @@
+name: striso_usb
+description: libusb-1.0 through dart:ffi for Striso Live, with the USB I/O in a background isolate.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  ffi: ^2.1.0
+  striso_core:
+    path: ../striso_core
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6

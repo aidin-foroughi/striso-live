@@ -6,26 +6,153 @@
 // Gb Db Ab Eb Bb F C G D A E B F# C# G# D# A# (c1 = -8..8), and a key's height is its pitch.
 
 const List<int> c0 = [
-  6, 5, 5, 4, 4, 3, 2, 2, 1, 1, 0, 0, -1, -2, -2, -3, -3,
-  5, 4, 4, 3, 3, 2, 1, 1, 0, 0, -1, -1, -2, -3, -3, -4, -4,
-  4, 3, 3, 2, 2, 1, 0, 0, -1, -1, -2, -2, -3, -4, -4, -5, -5,
-  3, 2, 2, 1, 1, 0, -1, -1, -2, -2, -3, -3, -4, -5, -5, -6, -6,
+  6,
+  5,
+  5,
+  4,
+  4,
+  3,
+  2,
+  2,
+  1,
+  1,
+  0,
+  0,
+  -1,
+  -2,
+  -2,
+  -3,
+  -3,
+  5,
+  4,
+  4,
+  3,
+  3,
+  2,
+  1,
+  1,
+  0,
+  0,
+  -1,
+  -1,
+  -2,
+  -3,
+  -3,
+  -4,
+  -4,
+  4,
+  3,
+  3,
+  2,
+  2,
+  1,
+  0,
+  0,
+  -1,
+  -1,
+  -2,
+  -2,
+  -3,
+  -4,
+  -4,
+  -5,
+  -5,
+  3,
+  2,
+  2,
+  1,
+  1,
+  0,
+  -1,
+  -1,
+  -2,
+  -2,
+  -3,
+  -3,
+  -4,
+  -5,
+  -5,
+  -6,
+  -6,
 ];
-final List<int> c1 = [for (var r = 0; r < 4; r++) for (var c = -8; c <= 8; c++) c];
+final List<int> c1 = [
+  for (var r = 0; r < 4; r++)
+    for (var c = -8; c <= 8; c++) c,
+];
 
 const Set<int> missingButtons = {52, 54, 57, 59, 61, 64, 66};
 const int buttonCount = 68;
-final List<int> keyIds = [for (var id = 0; id < buttonCount; id++) if (!missingButtons.contains(id)) id];
+final List<int> keyIds = [
+  for (var id = 0; id < buttonCount; id++)
+    if (!missingButtons.contains(id)) id,
+];
 
 const int startNote = 62; // D4, synth_control.cpp start_note_offset
 
 /// Firmware key numbers (config_store.c button_number_map): key n (0..60) is button id map[n];
 /// the per-key sensitivity list (console 'k', target 3) is in key-number order.
 const List<int> buttonNumberMap = [
-  56, 51, 63, 58, 53, 65, 60, 55, 67, 62, 40, 35, 47, 42, 37, 49, 44,
-  39, 34, 46, 41, 36, 48, 43, 38, 50, 45, 23, 18, 30, 25, 20, 32, 27,
-  22, 17, 29, 24, 19, 31, 26, 21, 33, 28, 6, 1, 13, 8, 3, 15, 10,
-  5, 0, 12, 7, 2, 14, 9, 4, 16, 11,
+  56,
+  51,
+  63,
+  58,
+  53,
+  65,
+  60,
+  55,
+  67,
+  62,
+  40,
+  35,
+  47,
+  42,
+  37,
+  49,
+  44,
+  39,
+  34,
+  46,
+  41,
+  36,
+  48,
+  43,
+  38,
+  50,
+  45,
+  23,
+  18,
+  30,
+  25,
+  20,
+  32,
+  27,
+  22,
+  17,
+  29,
+  24,
+  19,
+  31,
+  26,
+  21,
+  33,
+  28,
+  6,
+  1,
+  13,
+  8,
+  3,
+  15,
+  10,
+  5,
+  0,
+  12,
+  7,
+  2,
+  14,
+  9,
+  4,
+  16,
+  11,
 ];
 final Map<int, int> keyNumberOf = {for (var n = 0; n < buttonNumberMap.length; n++) buttonNumberMap[n]: n};
 
@@ -67,7 +194,15 @@ int keyTpc(int id, [int fifths = 0]) => c1[id] + 2 + fifths;
 class NoteName {
   final String letter, accidental, text, full;
   final int acc, midi, octave;
-  const NoteName({required this.letter, required this.accidental, required this.acc, required this.midi, required this.octave, required this.text, required this.full});
+  const NoteName({
+    required this.letter,
+    required this.accidental,
+    required this.acc,
+    required this.midi,
+    required this.octave,
+    required this.text,
+    required this.full,
+  });
 }
 
 /// Note name with scientific octave for a transposition (semitones) and spelling shift.
@@ -87,10 +222,8 @@ class KeyInfo {
   const KeyInfo(this.id, this.row, this.col, this.c0v, this.c1v, this.pitch, this.natural, this.x, this.y);
 }
 
-KeyInfo keyInfo(int id) => KeyInfo(
-      id, id ~/ 17, id % 17, c0[id], c1[id], pitchOf(id), spell(c1[id]).acc == 0,
-      c1[id] * mmPerColumn, pitchOf(id) * mmPerSemitone,
-    );
+KeyInfo keyInfo(int id) =>
+    KeyInfo(id, id ~/ 17, id % 17, c0[id], c1[id], pitchOf(id), spell(c1[id]).acc == 0, c1[id] * mmPerColumn, pitchOf(id) * mmPerSemitone);
 
 final List<KeyInfo> boardKeys = [for (final id in keyIds) keyInfo(id)];
 

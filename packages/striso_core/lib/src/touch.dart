@@ -36,8 +36,15 @@ double _round3(double x) => (x * 1000).round() / 1000;
 /// proportional to the factor (button_read.c: c_force = factory * factor), so the new factor is
 /// factor * median / peak, clamped. Only measured keys change; peaks that are tiny or at the top
 /// of the range are left out.
-Suggestion suggestFactors(List<Measured> measured,
-    {double lo = 0.6, double hi = 1.6, int minKeys = 3, double minPeak = 0.03, double maxPeak = 1.7, double minChange = 0.005}) {
+Suggestion suggestFactors(
+  List<Measured> measured, {
+  double lo = 0.6,
+  double hi = 1.6,
+  int minKeys = 3,
+  double minPeak = 0.03,
+  double maxPeak = 1.7,
+  double minChange = 0.005,
+}) {
   final used = measured.where((m) => m.peak >= minPeak && m.peak <= maxPeak).toList();
   final skipped = measured.where((m) => !used.contains(m)).toList();
   if (used.length < minKeys) return Suggestion(null, const [], used.length, skipped);

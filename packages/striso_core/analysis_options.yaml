@@ -4,3 +4,6 @@ linter:
   rules:
     # the chord tone table uses interval names (_M3, _P5) as in music theory
     constant_identifier_names: false
+
+formatter:
+  page_width: 150

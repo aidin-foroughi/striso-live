@@ -4,8 +4,13 @@ import 'package:test/test.dart';
 
 MusicKey key(String s) {
   final parts = s.split(' ');
-  final type = const {'major': 'major', 'minor': 'minor', 'harmonic minor': 'harmonic', 'melodic minor': 'melodic', 'dorian': 'dorian'}[
-      parts.sublist(1).join(' ')]!;
+  final type = const {
+    'major': 'major',
+    'minor': 'minor',
+    'harmonic minor': 'harmonic',
+    'melodic minor': 'melodic',
+    'dorian': 'dorian',
+  }[parts.sublist(1).join(' ')]!;
   return makeKey(pcOf(parseNote(parts[0]).tpc), type)!;
 }
 
@@ -34,17 +39,23 @@ String roman(String str, [String? k]) => A(str, k).roman!.text;
 
 const roots = ['C', 'G', 'D', 'A', 'E', 'B', 'F#', 'Db', 'Ab', 'Eb', 'Bb', 'F'];
 const qualities = {
-  'maj': [0, 4, 1], 'min': [0, -3, 1], 'dim': [0, -3, -6], 'aug': [0, 4, 8],
-  '7': [0, 4, 1, -2], 'maj7': [0, 4, 1, 5], 'm7': [0, -3, 1, -2], 'm7b5': [0, -3, -6, -2], 'dim7': [0, -3, -6, -9],
-  'mmaj7': [0, -3, 1, 5], 'aug7': [0, 4, 8, -2],
+  'maj': [0, 4, 1],
+  'min': [0, -3, 1],
+  'dim': [0, -3, -6],
+  'aug': [0, 4, 8],
+  '7': [0, 4, 1, -2],
+  'maj7': [0, 4, 1, 5],
+  'm7': [0, -3, 1, -2],
+  'm7b5': [0, -3, -6, -2],
+  'dim7': [0, -3, -6, -9],
+  'mmaj7': [0, -3, 1, 5],
+  'aug7': [0, 4, 8, -2],
 };
 int semi(int f) => mod(f * 7, 12);
 
 List<SNote> build(int rootTpc, List<int> fifths, int inversion) {
   final root = 60 + semi(rootTpc) - 12;
-  return [
-    for (final (k, f) in fifths.indexed) SNote(rootTpc + f, root + semi(f) + (k < inversion ? 12 : 0)),
-  ];
+  return [for (final (k, f) in fifths.indexed) SNote(rootTpc + f, root + semi(f) + (k < inversion ? 12 : 0))];
 }
 
 void main() {
@@ -119,8 +130,19 @@ void main() {
 
   test('figured bass for triads and sevenths in C major', () {
     const cases = {
-      'C E G': 'I', 'E G C': 'I6', 'G C E': 'I6/4', 'G B D F': 'V7', 'B D F G': 'V6/5', 'D F G B': 'V4/3', 'F G B D': 'V4/2',
-      'B D F A': 'viiø7', 'D F A B': 'viiø6/5', 'F A B D': 'viiø4/3', 'F A C E': 'IVmaj7', 'A C E F': 'IVmaj6/5', 'C E G B': 'Imaj7',
+      'C E G': 'I',
+      'E G C': 'I6',
+      'G C E': 'I6/4',
+      'G B D F': 'V7',
+      'B D F G': 'V6/5',
+      'D F G B': 'V4/3',
+      'F G B D': 'V4/2',
+      'B D F A': 'viiø7',
+      'D F A B': 'viiø6/5',
+      'F A B D': 'viiø4/3',
+      'F A C E': 'IVmaj7',
+      'A C E F': 'IVmaj6/5',
+      'C E G B': 'Imaj7',
       'D F A C': 'ii7',
     };
     cases.forEach((ch, want) => expect(roman(ch, 'C major'), want, reason: ch));
@@ -144,17 +166,39 @@ void main() {
 
   test('every minor variant reads against natural minor with the raised 6th and 7th diatonic', () {
     for (final k in ['A minor', 'A harmonic minor', 'A melodic minor']) {
-      final got = ['A C E', 'C E G', 'G B D F', 'E G# B D', 'G# B D F', 'E G B', 'F A C', 'D F A', 'C E G#', 'B D# F# A', 'C E G Bb', 'D F# A']
-          .map((c) => roman(c, k));
+      final got = [
+        'A C E',
+        'C E G',
+        'G B D F',
+        'E G# B D',
+        'G# B D F',
+        'E G B',
+        'F A C',
+        'D F A',
+        'C E G#',
+        'B D# F# A',
+        'C E G Bb',
+        'D F# A',
+      ].map((c) => roman(c, k));
       expect(got, ['i', 'III', 'VII7', 'V7', 'vii°7', 'v', 'VI', 'iv', 'III+', 'V7/V', 'V7/VI', 'IV'], reason: k);
     }
   });
 
   test('secondary dominants and leading-tone chords', () {
     const c = [
-      ('D F# A', 'V/V'), ('D F# A C', 'V7/V'), ('F# A C D', 'V6/5/V'), ('A C# E G', 'V7/ii'), ('E G# B D', 'V7/vi'),
-      ('B D# F# A', 'V7/iii'), ('C E G Bb', 'V7/IV'), ('E G# B', 'V/vi'), ('F# A C Eb', 'vii°7/V'),
-      ('F# A C E', 'viiø7/V'), ('C# E G Bb', 'vii°7/ii'), ('G# B D F', 'vii°7/vi'), ('D F# A C E', 'V9/V'),
+      ('D F# A', 'V/V'),
+      ('D F# A C', 'V7/V'),
+      ('F# A C D', 'V6/5/V'),
+      ('A C# E G', 'V7/ii'),
+      ('E G# B D', 'V7/vi'),
+      ('B D# F# A', 'V7/iii'),
+      ('C E G Bb', 'V7/IV'),
+      ('E G# B', 'V/vi'),
+      ('F# A C Eb', 'vii°7/V'),
+      ('F# A C E', 'viiø7/V'),
+      ('C# E G Bb', 'vii°7/ii'),
+      ('G# B D F', 'vii°7/vi'),
+      ('D F# A C E', 'V9/V'),
     ];
     for (final (ch, want) in c) {
       final r = A(ch, 'C major');
@@ -236,12 +280,33 @@ void main() {
 
   test('suspended, added, extended and altered chords', () {
     const want = {
-      'C D G': 'Csus2', 'C F G': 'Csus4', 'C F G Bb': 'C7sus4', 'C F Bb': 'C7sus4', 'C E G A': 'C6', 'C Eb G A': 'Cm6',
-      'C E G D5': 'Cadd9', 'C Eb G D5': 'Cm(add9)', 'C E G A D5': 'C6/9', 'C E G Bb D5': 'C9', 'C E G B D5': 'Cmaj9',
-      'C Eb G Bb D5': 'Cm9', 'C E G Bb Db5': 'C7♭9', 'C E G Bb D#5': 'C7♯9', 'C E G Bb F#5': 'C7♯11',
-      'C E G Bb Ab5': 'C7♭13', 'C E Bb D5 F5': 'C11', 'C Eb G Bb F5': 'Cm11', 'C E G Bb A5': 'C13',
-      'C E G B A5': 'Cmaj13', 'C E G# Bb': 'C7♯5', 'C E Gb Bb': 'C7♭5', 'C E G# B': 'Cmaj7♯5',
-      'C Eb G B': 'Cm(maj7)', 'C Eb Gb Bbb': 'Cdim7', 'C Eb Gb': 'Cdim', 'C Eb Gb Bb': 'Cm7♭5',
+      'C D G': 'Csus2',
+      'C F G': 'Csus4',
+      'C F G Bb': 'C7sus4',
+      'C F Bb': 'C7sus4',
+      'C E G A': 'C6',
+      'C Eb G A': 'Cm6',
+      'C E G D5': 'Cadd9',
+      'C Eb G D5': 'Cm(add9)',
+      'C E G A D5': 'C6/9',
+      'C E G Bb D5': 'C9',
+      'C E G B D5': 'Cmaj9',
+      'C Eb G Bb D5': 'Cm9',
+      'C E G Bb Db5': 'C7♭9',
+      'C E G Bb D#5': 'C7♯9',
+      'C E G Bb F#5': 'C7♯11',
+      'C E G Bb Ab5': 'C7♭13',
+      'C E Bb D5 F5': 'C11',
+      'C Eb G Bb F5': 'Cm11',
+      'C E G Bb A5': 'C13',
+      'C E G B A5': 'Cmaj13',
+      'C E G# Bb': 'C7♯5',
+      'C E Gb Bb': 'C7♭5',
+      'C E G# B': 'Cmaj7♯5',
+      'C Eb G B': 'Cm(maj7)',
+      'C Eb Gb Bbb': 'Cdim7',
+      'C Eb Gb': 'Cdim',
+      'C Eb Gb Bb': 'Cm7♭5',
     };
     want.forEach((ch, n) => expect(name(ch), n, reason: ch));
     expect(A('C Eb Gb Bb').alt, 'Cø7');

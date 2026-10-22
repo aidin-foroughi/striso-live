@@ -12,10 +12,14 @@ class UsbError implements Exception {
   @override
   String toString() => message;
 
-  static const busy = UsbError(UsbErrorCode.busy,
-      'Device busy: another program holds the Striso. Close tools/striso.py, the browser version or another Striso Live, and connect again.');
-  static const denied = UsbError(UsbErrorCode.denied,
-      'Access denied. Close tools/striso.py or any other program using the Striso; if this persists, check that WinUSB is installed for interface 2.');
+  static const busy = UsbError(
+    UsbErrorCode.busy,
+    'Device busy: another program holds the Striso. Close tools/striso.py, the browser version or another Striso Live, and connect again.',
+  );
+  static const denied = UsbError(
+    UsbErrorCode.denied,
+    'Access denied. Close tools/striso.py or any other program using the Striso; if this persists, check that WinUSB is installed for interface 2.',
+  );
   static const unplugged = UsbError(UsbErrorCode.unplugged, 'The Striso was unplugged.');
 }
 

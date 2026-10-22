@@ -180,9 +180,7 @@ class StreamParser {
   final _values = Int32List(7);
   final _text = <int>[];
 
-  StreamParser({MessageHandler? onMessage, LineHandler? onLine})
-      : onMessage = onMessage ?? ((_, _, _, _) {}),
-        onLine = onLine ?? ((_) {});
+  StreamParser({MessageHandler? onMessage, LineHandler? onLine}) : onMessage = onMessage ?? ((_, _, _, _) {}), onLine = onLine ?? ((_) {});
 
   void reset() {
     _need = 0;
@@ -292,7 +290,7 @@ class Param {
   double value;
   double loadValue;
   Param({required this.index, required this.name, required this.group, required this.min, required this.max, required this.value, required this.kind})
-      : loadValue = value;
+    : loadValue = value;
   Param copy() => Param(index: index, name: name, group: group, min: min, max: max, value: value, kind: kind)..loadValue = loadValue;
 }
 
@@ -303,8 +301,13 @@ Param? parseParamLine(String line) {
   final m = _paramLine.firstMatch(line);
   if (m == null) return null;
   return Param(
-    index: int.parse(m[1]!), name: m[2]!, group: m[3]!,
-    min: hexToFloat(m[4]!), max: hexToFloat(m[5]!), value: hexToFloat(m[6]!), kind: int.parse(m[7]!),
+    index: int.parse(m[1]!),
+    name: m[2]!,
+    group: m[3]!,
+    min: hexToFloat(m[4]!),
+    max: hexToFloat(m[5]!),
+    value: hexToFloat(m[6]!),
+    kind: int.parse(m[7]!),
   );
 }
 

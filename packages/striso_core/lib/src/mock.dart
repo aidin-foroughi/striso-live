@@ -14,15 +14,154 @@ import 'transport.dart';
 
 typedef _P = (String name, String group, double min, double max, int kind, double def);
 
-const List<_P> _va = [('gain','level',0.5,5.0,0,2.3),('pres_lin','level',0.0,1.0,0,0.3),('pres_sq','level',0.0,1.5,0,0.7),('pres_hz','level',1.0,200.0,0,70.0),('hold_decay','level',0.005,1.0,0,0.045),('release','release',0.02,4.0,0,0.1),('rel_pedal','release',0.0,6.0,0,2.9),('rel_speed','release',0.0,8.0,0,3.0),('acc_level','accent',0.0,2.5,0,0.75),('acc_decay','accent',0.005,0.4,0,0.04),('acc_key','accent',0.0,0.06,0,0.02778),('acc_cutoff','accent',0.0,48.0,0,28.0),('acc_drive','accent',0.0,2.0,0,0.7),('acc_sync','accent',0.0,24.0,0,10.0),('acc_pitch','accent',-1.0,1.0,0,0.0),('cut_base','filter',-20.0,80.0,0,26.0),('cut_key','filter',0.0,1.2,0,0.75),('cut_env','filter',0.0,80.0,0,46.0),('cut_back','filter',-24.0,24.0,0,9.0),('cut_fwd','filter',-24.0,24.0,0,5.0),('res','filter',0.0,0.98,0,0.2),('res_back','filter',-0.5,0.98,0,0.72),('res_fwd','filter',-0.5,0.98,0,0.08),('bass_comp','filter',0.0,1.0,0,0.45),('drive','filter',0.1,3.0,0,0.6),('drive_env','filter',0.0,3.0,0,0.9),('saw','osc',0.0,1.0,0,0.5),('saw_back','osc',0.0,1.0,0,0.75),('saw_fwd','osc',0.0,1.0,0,0.65),('saw2','osc',0.0,1.0,0,0.36),('saw2_back','osc',0.0,1.0,0,0.5),('saw2_fwd','osc',0.0,1.0,0,0.6),('saw2_detune','osc',-0.5,0.5,0,0.07),('pulse','osc',0.0,1.0,0,0.0),('pulse_back','osc',0.0,1.0,0,0.45),('pwm','osc',0.0,0.4,0,0.13),('pwm_hz','osc',0.05,8.0,0,0.37),('sub','osc',0.0,1.0,0,0.5),('sub_base','osc',0.0,1.0,0,0.2),('sub_back','osc',0.0,1.0,0,0.25),('sub_fwd','osc',0.0,1.0,0,0.6),('b_sync','osc',0.0,1.0,2,1.0),('b_level','osc',0.0,1.0,0,0.0),('b_fwd','osc',0.0,1.0,0,0.5),('b_detune','osc',-0.5,0.5,0,0.0),('sync','osc',0.0,24.0,0,5.0),('sync_fwd','osc',0.0,24.0,0,12.0),('sync_env','osc',0.0,24.0,0,9.0),('tilt_home','osc',-1.0,1.0,0,0.0),('drift','mod',0.0,0.3,0,0.03),('saw2_drift','mod',0.0,0.3,0,0.025),('cut_drift','mod',0.0,2.0,0,0.3),('gyro_chorus','mod',0.0,1.0,0,0.22),('vibrato','mod',0.0,1.5,0,0.35),('vib_hz','mod',1.0,9.0,0,5.3)];
-const List<_P> _modal = [('level','level',0.1,3.0,0,1.2),('thresh','mallet',0.005,0.2,0,0.04),('span','mallet',0.2,1.5,0,0.6),('hard','mallet',0.2,1.2,0,0.7),('hardvel','mallet',0.0,1.0,0,0.5),('tilt','mallet',0.0,0.5,0,0.2),('mute','mallet',0.0,1.0,0,0.3),('upper','tone',0.0,2.0,0,1.0),('decay','decay',0.1,4.0,0,1.0),('keytrack','decay',0.0,1.5,0,0.8),('hfdamp','decay',0.0,1.0,0,0.4),('damper','damper',0.0,2.0,0,1.0),('lift','damper',0.02,0.5,0,0.12),('pedal','damper',0.0,1.0,0,0.0),('trem','trem',0.0,1.0,2,0),('tremrate','trem',1.0,10.0,0,5.5),('tremdepth','trem',0.0,1.0,0,0.4),('tremthr','trem',0.2,1.2,0,0.6),('rub','rub',0.0,1.0,0,0.3),('rubnoise','rub',0.0,0.3,0,0.05)];
-const List<_P> _bowed = [('level','level',0.1,4.0,0,1.5),('bow_force','bow',0.0,1.0,0,0.45),('bow_speed','bow',0.0,1.0,0,0.6),('bow_pos','bow',0.02,0.5,0,0.12),('rosin','bow',0.0,1.0,0,0.5),('body','body',0.0,1.0,0,0.6),('body_size','body',0.5,2.0,0,1.0),('damping','string',0.0,1.0,0,0.3),('inharm','string',0.0,0.2,0,0.02),('vibrato','mod',0.0,1.0,0,0.3),('vib_hz','mod',3.0,8.0,0,5.4)];
-const List<_P> _reed = [('level','level',0.1,4.0,0,1.4),('breath','breath',0.0,1.0,0,0.5),('noise','breath',0.0,0.5,0,0.08),('stiffness','reed',0.0,1.0,0,0.55),('aperture','reed',0.0,1.0,0,0.4),('bore','tube',0,3,1,1),('bell','tube',0.0,1.0,0,0.5),('growl','mod',0.0,1.0,0,0.0),('vibrato','mod',0.0,1.0,0,0.25)];
-const List<_P> _ep = [('level','level',0.1,4.0,0,1.6),('hammer','hammer',0.0,1.0,0,0.5),('hardness','hammer',0.0,1.0,0,0.45),('tine','tone',0.0,1.0,0,0.6),('bark','tone',0.0,1.0,0,0.3),('pickup','tone',-1.0,1.0,0,0.1),('decay','decay',0.2,8.0,0,3.0),('release','decay',0.02,2.0,0,0.25),('trem_on','trem',0,1,2,1),('trem_rate','trem',0.5,9.0,0,4.2),('trem_depth','trem',0.0,1.0,0,0.35),('voicing','trem',0,4,1,2)];
-const List<_P> _fx = [('chorus','chorus',0,1,2,1),('ch_rate','chorus',0.05,5.0,0,0.6),('ch_depth','chorus',0.0,1.0,0,0.35),('ch_mix','chorus',0.0,1.0,0,0.3),('delay','delay',0,1,2,0),('dl_time','delay',0.02,1.5,0,0.38),('dl_sync','delay',0,7,1,3),('dl_fb','delay',0.0,0.95,0,0.35),('dl_mix','delay',0.0,1.0,0,0.2),('dl_pong','delay',0,1,2,1),('reverb','reverb',0,1,2,1),('rv_size','reverb',0.0,1.0,0,0.55),('rv_damp','reverb',0.0,1.0,0,0.4),('rv_mix','reverb',0.0,1.0,0,0.22),('trem','tremolo',0,1,2,0),('tr_rate','tremolo',0.1,12.0,0,4.0),('tr_depth','tremolo',0.0,1.0,0,0.4),('tr_pan','tremolo',0,1,2,1),('width','master',0.0,2.0,0,1.0),('gain','master',0.0,2.0,0,1.0)];
+const List<_P> _va = [
+  ('gain', 'level', 0.5, 5.0, 0, 2.3),
+  ('pres_lin', 'level', 0.0, 1.0, 0, 0.3),
+  ('pres_sq', 'level', 0.0, 1.5, 0, 0.7),
+  ('pres_hz', 'level', 1.0, 200.0, 0, 70.0),
+  ('hold_decay', 'level', 0.005, 1.0, 0, 0.045),
+  ('release', 'release', 0.02, 4.0, 0, 0.1),
+  ('rel_pedal', 'release', 0.0, 6.0, 0, 2.9),
+  ('rel_speed', 'release', 0.0, 8.0, 0, 3.0),
+  ('acc_level', 'accent', 0.0, 2.5, 0, 0.75),
+  ('acc_decay', 'accent', 0.005, 0.4, 0, 0.04),
+  ('acc_key', 'accent', 0.0, 0.06, 0, 0.02778),
+  ('acc_cutoff', 'accent', 0.0, 48.0, 0, 28.0),
+  ('acc_drive', 'accent', 0.0, 2.0, 0, 0.7),
+  ('acc_sync', 'accent', 0.0, 24.0, 0, 10.0),
+  ('acc_pitch', 'accent', -1.0, 1.0, 0, 0.0),
+  ('cut_base', 'filter', -20.0, 80.0, 0, 26.0),
+  ('cut_key', 'filter', 0.0, 1.2, 0, 0.75),
+  ('cut_env', 'filter', 0.0, 80.0, 0, 46.0),
+  ('cut_back', 'filter', -24.0, 24.0, 0, 9.0),
+  ('cut_fwd', 'filter', -24.0, 24.0, 0, 5.0),
+  ('res', 'filter', 0.0, 0.98, 0, 0.2),
+  ('res_back', 'filter', -0.5, 0.98, 0, 0.72),
+  ('res_fwd', 'filter', -0.5, 0.98, 0, 0.08),
+  ('bass_comp', 'filter', 0.0, 1.0, 0, 0.45),
+  ('drive', 'filter', 0.1, 3.0, 0, 0.6),
+  ('drive_env', 'filter', 0.0, 3.0, 0, 0.9),
+  ('saw', 'osc', 0.0, 1.0, 0, 0.5),
+  ('saw_back', 'osc', 0.0, 1.0, 0, 0.75),
+  ('saw_fwd', 'osc', 0.0, 1.0, 0, 0.65),
+  ('saw2', 'osc', 0.0, 1.0, 0, 0.36),
+  ('saw2_back', 'osc', 0.0, 1.0, 0, 0.5),
+  ('saw2_fwd', 'osc', 0.0, 1.0, 0, 0.6),
+  ('saw2_detune', 'osc', -0.5, 0.5, 0, 0.07),
+  ('pulse', 'osc', 0.0, 1.0, 0, 0.0),
+  ('pulse_back', 'osc', 0.0, 1.0, 0, 0.45),
+  ('pwm', 'osc', 0.0, 0.4, 0, 0.13),
+  ('pwm_hz', 'osc', 0.05, 8.0, 0, 0.37),
+  ('sub', 'osc', 0.0, 1.0, 0, 0.5),
+  ('sub_base', 'osc', 0.0, 1.0, 0, 0.2),
+  ('sub_back', 'osc', 0.0, 1.0, 0, 0.25),
+  ('sub_fwd', 'osc', 0.0, 1.0, 0, 0.6),
+  ('b_sync', 'osc', 0.0, 1.0, 2, 1.0),
+  ('b_level', 'osc', 0.0, 1.0, 0, 0.0),
+  ('b_fwd', 'osc', 0.0, 1.0, 0, 0.5),
+  ('b_detune', 'osc', -0.5, 0.5, 0, 0.0),
+  ('sync', 'osc', 0.0, 24.0, 0, 5.0),
+  ('sync_fwd', 'osc', 0.0, 24.0, 0, 12.0),
+  ('sync_env', 'osc', 0.0, 24.0, 0, 9.0),
+  ('tilt_home', 'osc', -1.0, 1.0, 0, 0.0),
+  ('drift', 'mod', 0.0, 0.3, 0, 0.03),
+  ('saw2_drift', 'mod', 0.0, 0.3, 0, 0.025),
+  ('cut_drift', 'mod', 0.0, 2.0, 0, 0.3),
+  ('gyro_chorus', 'mod', 0.0, 1.0, 0, 0.22),
+  ('vibrato', 'mod', 0.0, 1.5, 0, 0.35),
+  ('vib_hz', 'mod', 1.0, 9.0, 0, 5.3),
+];
+const List<_P> _modal = [
+  ('level', 'level', 0.1, 3.0, 0, 1.2),
+  ('thresh', 'mallet', 0.005, 0.2, 0, 0.04),
+  ('span', 'mallet', 0.2, 1.5, 0, 0.6),
+  ('hard', 'mallet', 0.2, 1.2, 0, 0.7),
+  ('hardvel', 'mallet', 0.0, 1.0, 0, 0.5),
+  ('tilt', 'mallet', 0.0, 0.5, 0, 0.2),
+  ('mute', 'mallet', 0.0, 1.0, 0, 0.3),
+  ('upper', 'tone', 0.0, 2.0, 0, 1.0),
+  ('decay', 'decay', 0.1, 4.0, 0, 1.0),
+  ('keytrack', 'decay', 0.0, 1.5, 0, 0.8),
+  ('hfdamp', 'decay', 0.0, 1.0, 0, 0.4),
+  ('damper', 'damper', 0.0, 2.0, 0, 1.0),
+  ('lift', 'damper', 0.02, 0.5, 0, 0.12),
+  ('pedal', 'damper', 0.0, 1.0, 0, 0.0),
+  ('trem', 'trem', 0.0, 1.0, 2, 0),
+  ('tremrate', 'trem', 1.0, 10.0, 0, 5.5),
+  ('tremdepth', 'trem', 0.0, 1.0, 0, 0.4),
+  ('tremthr', 'trem', 0.2, 1.2, 0, 0.6),
+  ('rub', 'rub', 0.0, 1.0, 0, 0.3),
+  ('rubnoise', 'rub', 0.0, 0.3, 0, 0.05),
+];
+const List<_P> _bowed = [
+  ('level', 'level', 0.1, 4.0, 0, 1.5),
+  ('bow_force', 'bow', 0.0, 1.0, 0, 0.45),
+  ('bow_speed', 'bow', 0.0, 1.0, 0, 0.6),
+  ('bow_pos', 'bow', 0.02, 0.5, 0, 0.12),
+  ('rosin', 'bow', 0.0, 1.0, 0, 0.5),
+  ('body', 'body', 0.0, 1.0, 0, 0.6),
+  ('body_size', 'body', 0.5, 2.0, 0, 1.0),
+  ('damping', 'string', 0.0, 1.0, 0, 0.3),
+  ('inharm', 'string', 0.0, 0.2, 0, 0.02),
+  ('vibrato', 'mod', 0.0, 1.0, 0, 0.3),
+  ('vib_hz', 'mod', 3.0, 8.0, 0, 5.4),
+];
+const List<_P> _reed = [
+  ('level', 'level', 0.1, 4.0, 0, 1.4),
+  ('breath', 'breath', 0.0, 1.0, 0, 0.5),
+  ('noise', 'breath', 0.0, 0.5, 0, 0.08),
+  ('stiffness', 'reed', 0.0, 1.0, 0, 0.55),
+  ('aperture', 'reed', 0.0, 1.0, 0, 0.4),
+  ('bore', 'tube', 0, 3, 1, 1),
+  ('bell', 'tube', 0.0, 1.0, 0, 0.5),
+  ('growl', 'mod', 0.0, 1.0, 0, 0.0),
+  ('vibrato', 'mod', 0.0, 1.0, 0, 0.25),
+];
+const List<_P> _ep = [
+  ('level', 'level', 0.1, 4.0, 0, 1.6),
+  ('hammer', 'hammer', 0.0, 1.0, 0, 0.5),
+  ('hardness', 'hammer', 0.0, 1.0, 0, 0.45),
+  ('tine', 'tone', 0.0, 1.0, 0, 0.6),
+  ('bark', 'tone', 0.0, 1.0, 0, 0.3),
+  ('pickup', 'tone', -1.0, 1.0, 0, 0.1),
+  ('decay', 'decay', 0.2, 8.0, 0, 3.0),
+  ('release', 'decay', 0.02, 2.0, 0, 0.25),
+  ('trem_on', 'trem', 0, 1, 2, 1),
+  ('trem_rate', 'trem', 0.5, 9.0, 0, 4.2),
+  ('trem_depth', 'trem', 0.0, 1.0, 0, 0.35),
+  ('voicing', 'trem', 0, 4, 1, 2),
+];
+const List<_P> _fx = [
+  ('chorus', 'chorus', 0, 1, 2, 1),
+  ('ch_rate', 'chorus', 0.05, 5.0, 0, 0.6),
+  ('ch_depth', 'chorus', 0.0, 1.0, 0, 0.35),
+  ('ch_mix', 'chorus', 0.0, 1.0, 0, 0.3),
+  ('delay', 'delay', 0, 1, 2, 0),
+  ('dl_time', 'delay', 0.02, 1.5, 0, 0.38),
+  ('dl_sync', 'delay', 0, 7, 1, 3),
+  ('dl_fb', 'delay', 0.0, 0.95, 0, 0.35),
+  ('dl_mix', 'delay', 0.0, 1.0, 0, 0.2),
+  ('dl_pong', 'delay', 0, 1, 2, 1),
+  ('reverb', 'reverb', 0, 1, 2, 1),
+  ('rv_size', 'reverb', 0.0, 1.0, 0, 0.55),
+  ('rv_damp', 'reverb', 0.0, 1.0, 0, 0.4),
+  ('rv_mix', 'reverb', 0.0, 1.0, 0, 0.22),
+  ('trem', 'tremolo', 0, 1, 2, 0),
+  ('tr_rate', 'tremolo', 0.1, 12.0, 0, 4.0),
+  ('tr_depth', 'tremolo', 0.0, 1.0, 0, 0.4),
+  ('tr_pan', 'tremolo', 0, 1, 2, 1),
+  ('width', 'master', 0.0, 2.0, 0, 1.0),
+  ('gain', 'master', 0.0, 2.0, 0, 1.0),
+];
 
 /// Global touch settings (console 'g', target 2), as synth_control.cpp.
-const List<_P> _touch = [('pressure','touch',0.1,4.0,0,1.0),('velocity','touch',0.1,4.0,0,1.0),('tilt','touch',-4.0,4.0,0,1.0),('bend','touch',0.0,8.0,0,0.5),('threshold','touch',0.0,0.5,0,0.0)];
+const List<_P> _touch = [
+  ('pressure', 'touch', 0.1, 4.0, 0, 1.0),
+  ('velocity', 'touch', 0.1, 4.0, 0, 1.0),
+  ('tilt', 'touch', -4.0, 4.0, 0, 1.0),
+  ('bend', 'touch', 0.0, 8.0, 0, 0.5),
+  ('threshold', 'touch', 0.0, 0.5, 0, 0.0),
+];
 
 class _Engine {
   final String engine;
@@ -39,7 +178,12 @@ const List<_Engine> _engines = [
   _Engine('modal', ['vibraphone', 'marimba', 'glockenspiel', 'bell', 'kalimba', 'wine glass'], _modal, 12500),
   _Engine('bowed', ['violin', 'viola', 'cello', 'bass', 'section', 'ponticello', 'flautando', 'sordino', 'pizzicato'], _bowed, 11000),
   _Engine('wind', ['clarinet', 'bass clarinet', 'soprano sax', 'alto sax', 'tenor sax', 'baritone sax', 'oboe', 'bassoon', 'flute'], _reed, 8600),
-  _Engine('ep', ['stage', 'suitcase', 'mk2', 'dyno', 'ballad', 'bark', 'neosoul', 'fm80s', 'lofi', 'wurli', 'wurlibark', 'pianet', 'felt', 'celesta'], _ep, 7600),
+  _Engine(
+    'ep',
+    ['stage', 'suitcase', 'mk2', 'dyno', 'ballad', 'bark', 'neosoul', 'fm80s', 'lofi', 'wurli', 'wurlibark', 'pianet', 'felt', 'celesta'],
+    _ep,
+    7600,
+  ),
   _Engine('brass', ['trumpet', 'flugelhorn', 'trombone', 'horn', 'euphonium', 'tuba', 'harmon', 'plunger', 'section'], _reed, 9000),
 ];
 
@@ -69,7 +213,7 @@ List<double> _presetValues(List<_P> table, int seed) {
       if (seed == 0)
         p.$6
       else
-        conformTo(p.$3, p.$4, p.$5, p.$5 == Kind.onOff ? (r() < 0.7 ? p.$6 : 1 - p.$6) : p.$6 + (r() - 0.5) * 0.5 * (p.$4 - p.$3), p.$6)
+        conformTo(p.$3, p.$4, p.$5, p.$5 == Kind.onOff ? (r() < 0.7 ? p.$6 : 1 - p.$6) : p.$6 + (r() - 0.5) * 0.5 * (p.$4 - p.$3), p.$6),
   ];
 }
 
@@ -117,9 +261,15 @@ class MockBoard {
   double _motionAcc = 0, _idleAcc = 0;
   Timer? _timer;
 
-  MockBoard({this.autoplay = true, this.motionEnabled = true, this.idleFrames = 500, MockConfig? config, this.listDelay = Duration.zero,
-      this.firmware = 'striso_control_strisoboard_v2.2.4-voices-mock', math.Random? random})
-      : random = random ?? math.Random() {
+  MockBoard({
+    this.autoplay = true,
+    this.motionEnabled = true,
+    this.idleFrames = 500,
+    MockConfig? config,
+    this.listDelay = Duration.zero,
+    this.firmware = 'striso_control_strisoboard_v2.2.4-voices-mock',
+    math.Random? random,
+  }) : random = random ?? math.Random() {
     for (var k = 0; k < _engines.length; k++) {
       final e = _engines[k];
       if (e.presets == null) {
@@ -244,9 +394,21 @@ class MockBoard {
         sb.write('$n ${firmwareKeyName(n)} keys ${floatToHex(0.1)} ${floatToHex(10)} ${floatToHex(keyFactors[n])} 0\r\n');
       }
     } else {
-      final table = target == 0 ? _entries[voice].eng.params : target == 1 ? _fx : _touch;
-      final vals = target == 0 ? values : target == 1 ? fx : touch;
-      final name = target == 0 ? _entries[voice].name : target == 1 ? 'fx' : 'touch';
+      final table = target == 0
+          ? _entries[voice].eng.params
+          : target == 1
+          ? _fx
+          : _touch;
+      final vals = target == 0
+          ? values
+          : target == 1
+          ? fx
+          : touch;
+      final name = target == 0
+          ? _entries[voice].name
+          : target == 1
+          ? 'fx'
+          : 'touch';
       sb.write('params $target $name ${table.length}\r\n');
       for (var i = 0; i < table.length; i++) {
         final p = table[i];
@@ -267,7 +429,11 @@ class MockBoard {
       keyFactors[index] = toFloat32(v);
       return true;
     }
-    final table = target == 0 ? _entries[voice].eng.params : target == 1 ? _fx : null;
+    final table = target == 0
+        ? _entries[voice].eng.params
+        : target == 1
+        ? _fx
+        : null;
     if (table == null || index >= table.length || v.isNaN) return false;
     final p = table[index];
     (target == 0 ? values : fx)[index] = conformTo(p.$3, p.$4, p.$5, v, 0);
@@ -310,7 +476,12 @@ class MockBoard {
       final id = keyIds[random.nextInt(keyIds.length)];
       if (keys.containsKey(id)) continue;
       final noise = random.nextDouble() < 0.3 ? random.nextInt(8) : 0;
-      _send(Src.dis, id, [noise, ((random.nextDouble() - 0.5) * 6).floor(), ((random.nextDouble() - 0.5) * 200).floor(), ((random.nextDouble() - 0.5) * 200).floor()]);
+      _send(Src.dis, id, [
+        noise,
+        ((random.nextDouble() - 0.5) * 6).floor(),
+        ((random.nextDouble() - 0.5) * 200).floor(),
+        ((random.nextDouble() - 0.5) * 200).floor(),
+      ]);
     }
   }
 
@@ -321,7 +492,12 @@ class MockBoard {
         // force x this key's hardware gain x its factor, saturated at full scale (firmware c9be783)
         final kn = keyNumberOf[id];
         final f = gain[id] * (kn == null ? 1 : keyFactors[kn]);
-        _send(Src.dis, id, [_clampInt(k.pres * f * fullScale), _clampInt(k.vpres * f * fullScale), _clampInt(k.x * fullScale), _clampInt(k.y * fullScale)]);
+        _send(Src.dis, id, [
+          _clampInt(k.pres * f * fullScale),
+          _clampInt(k.vpres * f * fullScale),
+          _clampInt(k.x * fullScale),
+          _clampInt(k.y * fullScale),
+        ]);
         k.vpres *= 0.6; // the velocity estimate settles while held
       } else {
         _send(Src.dis, id, [0, _clampInt(math.min(0.0, k.vpres) * fullScale), 0, 0]);
@@ -337,7 +513,12 @@ class MockBoard {
     final ax = tx + shake * 0.08, ay = ty, az = math.sqrt(math.max(0, 1 - tx * tx - ty * ty));
     final abs = math.sqrt(ax * ax + ay * ay + az * az);
     final gx = 0.37 * 0.14 * math.cos(t * 0.37) * 4000, gy = 0.23 * 0.1 * math.cos(t * 0.23 + 1) * 4000;
-    _send(Src.accel, 8, [for (final v in [ax, ay, az, abs]) _clampInt(v * accPerG), _clampInt(gx), _clampInt(gy), _clampInt(shake * 900)]);
+    _send(Src.accel, 8, [
+      for (final v in [ax, ay, az, abs]) _clampInt(v * accPerG),
+      _clampInt(gx),
+      _clampInt(gy),
+      _clampInt(shake * 900),
+    ]);
   }
 
   void _simulateLoad(double dt) {
@@ -406,8 +587,22 @@ class MockBoard {
 // chords as spelled notes (tpc on the line of fifths, C = 0), played from the bass upwards
 const _tpc = {'C': 0, 'D': 2, 'E': 4, 'F': -1, 'G': 1, 'A': 3, 'B': 5, 'F#': 6, 'Ab': -4, 'Bb': -2, 'Eb': -3};
 final List<List<int>> _progression = [
-  'C E G', 'A C E', 'F A C', 'G B D F', 'C E G C', 'D F A C', 'G B D F', 'C E G B',
-  'E G C', 'D F# A C', 'G B D', 'A C E G', 'F A C D', 'Ab C Eb', 'G B D F', 'C G C E',
+  'C E G',
+  'A C E',
+  'F A C',
+  'G B D F',
+  'C E G C',
+  'D F A C',
+  'G B D F',
+  'C E G B',
+  'E G C',
+  'D F# A C',
+  'G B D',
+  'A C E G',
+  'F A C D',
+  'Ab C Eb',
+  'G B D F',
+  'C G C E',
 ].map((c) => c.split(' ').map((n) => _tpc[n]!).toList()).toList();
 
 // keys for a chord: the bass near C3..C4, every next tone the nearest key above

@@ -37,8 +37,8 @@ List<int> boardSecond(bool withKeys, [bool splitText = true]) {
 }
 
 List<Uint8List> packets(List<int> bytes) => [
-      for (var k = 0; k < bytes.length; k += 64) Uint8List.fromList(bytes.sublist(k, math.min(bytes.length, k + 64))),
-    ];
+  for (var k = 0; k < bytes.length; k += 64) Uint8List.fromList(bytes.sublist(k, math.min(bytes.length, k + 64))),
+];
 
 /// Answers the connect sequence like the firmware does, streams after 'S'.
 class ScriptedBoard implements Transport {
@@ -323,8 +323,15 @@ void main() {
       double r() => (s = (s * 16807) % 2147483647) / 2147483647;
       for (var k = 0; k < 5000; k++) {
         final id = keyIds[(r() * keyIds.length).floor()];
-        frame(live, id, r() < 0.3 ? (r() * 31).floor() : 0, ((r() - 0.5) * 400).floor(), ((r() - 0.5) * 4000).floor(),
-            ((r() - 0.5) * 4000).floor(), k * 2.0);
+        frame(
+          live,
+          id,
+          r() < 0.3 ? (r() * 31).floor() : 0,
+          ((r() - 0.5) * 400).floor(),
+          ((r() - 0.5) * 4000).floor(),
+          ((r() - 0.5) * 4000).floor(),
+          k * 2.0,
+        );
       }
       expect(live.activeCount(), 0);
       expect(live.pres.every((p) => p == 0), isTrue);

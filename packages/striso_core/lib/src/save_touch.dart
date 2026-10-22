@@ -37,7 +37,9 @@ List<String> candidateRoots() {
 
 bool isStrisoDrive(String root) {
   try {
-    return File('$root${root.endsWith(Platform.pathSeparator) ? '' : Platform.pathSeparator}INFO_UF2.TXT').readAsStringSync(encoding: latin1).contains('Striso');
+    return File(
+      '$root${root.endsWith(Platform.pathSeparator) ? '' : Platform.pathSeparator}INFO_UF2.TXT',
+    ).readAsStringSync(encoding: latin1).contains('Striso');
   } catch (_) {
     return false;
   }

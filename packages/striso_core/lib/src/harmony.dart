@@ -38,7 +38,11 @@ SNote parseNote(String s) {
   if (m == null) throw FormatException("bad note '$s'");
   var acc = 0;
   for (final ch in m[2]!.split('')) {
-    acc += (ch == '#' || ch == '♯') ? 1 : ch == 'x' ? 2 : -1;
+    acc += (ch == '#' || ch == '♯')
+        ? 1
+        : ch == 'x'
+        ? 2
+        : -1;
   }
   final tpc = _letterTpc[m[1]!]! + 7 * acc;
   final midi = m[3] == null ? null : _letterPc[m[1]!]! + acc + (int.parse(m[3]!) + 1) * 12;
@@ -80,13 +84,31 @@ const Map<String, ScaleDef> scales = {
   'dimhw': ScaleDef('Diminished (half-whole)', 'half-whole diminished', [0, -5, -3, 4, 6, 1, 3, -2], null, 0),
   'dimwh': ScaleDef('Diminished (whole-half)', 'whole-half diminished', [0, 2, -3, -1, -6, -4, 3, 5], null, 0),
 };
-const List<String> scaleOrder = ['off', 'major', 'minor', 'harmonic', 'melodic', 'dorian', 'phrygian', 'lydian', 'mixolydian', 'locrian', 'majpent', 'minpent', 'blues', 'whole', 'dimhw', 'dimwh'];
+const List<String> scaleOrder = [
+  'off',
+  'major',
+  'minor',
+  'harmonic',
+  'melodic',
+  'dorian',
+  'phrygian',
+  'lydian',
+  'mixolydian',
+  'locrian',
+  'majpent',
+  'minpent',
+  'blues',
+  'whole',
+  'dimhw',
+  'dimwh',
+];
 
 /// The tonic spelling with the smaller key signature (Bb major, not A# major); flats on a tie.
 int spellTonic(int pc, [String type = 'major']) {
   final sig = scales[type]?.sig ?? 0;
   final t0 = mod(pc * 7, 12);
-  final cands = [t0, t0 - 12]..sort((a, b) {
+  final cands = [t0, t0 - 12]
+    ..sort((a, b) {
       final c = (a + sig).abs() - (b + sig).abs();
       return c != 0 ? c : (a + sig) - (b + sig);
     });
@@ -100,8 +122,19 @@ class MusicKey {
   final bool raise;
   final Set<int> tpcs, pcs, pool;
   final List<int> degreeFifths, degreePcs;
-  const MusicKey({required this.pc, required this.type, required this.tonic, required this.ref, required this.raise, required this.tpcs,
-      required this.pcs, required this.degreeFifths, required this.degreePcs, required this.pool, required this.name});
+  const MusicKey({
+    required this.pc,
+    required this.type,
+    required this.tonic,
+    required this.ref,
+    required this.raise,
+    required this.tpcs,
+    required this.pcs,
+    required this.degreeFifths,
+    required this.degreePcs,
+    required this.pool,
+    required this.name,
+  });
 }
 
 MusicKey? makeKey(int pc, String type) {
@@ -111,7 +144,13 @@ MusicKey? makeKey(int pc, String type) {
   final tonic = spellTonic(pc, type);
   // the minor family reads against natural minor with the raised 6th and 7th also diatonic; modes
   // read against their own degrees
-  final degreeFifths = sc.raise ? _natMinor : fifths.length == 7 ? fifths : sc.ref == 'minor' ? _natMinor : _major;
+  final degreeFifths = sc.raise
+      ? _natMinor
+      : fifths.length == 7
+      ? fifths
+      : sc.ref == 'minor'
+      ? _natMinor
+      : _major;
   final degreePcs = [for (final f in degreeFifths) pcOf(tonic + f)];
   final pool = {...degreePcs};
   if (sc.raise) pool.addAll([pcOf(tonic + 5), pcOf(tonic + 3)]);
@@ -119,9 +158,17 @@ MusicKey? makeKey(int pc, String type) {
     pool.add(pcOf(tonic + f));
   }
   return MusicKey(
-    pc: mod(pc, 12), type: type, tonic: tonic, ref: sc.ref, raise: sc.raise,
-    tpcs: {for (final f in fifths) tonic + f}, pcs: {for (final f in fifths) pcOf(tonic + f)},
-    degreeFifths: degreeFifths, degreePcs: degreePcs, pool: pool, name: '${tpcName(tonic)} ${sc.key}',
+    pc: mod(pc, 12),
+    type: type,
+    tonic: tonic,
+    ref: sc.ref,
+    raise: sc.raise,
+    tpcs: {for (final f in fifths) tonic + f},
+    pcs: {for (final f in fifths) pcOf(tonic + f)},
+    degreeFifths: degreeFifths,
+    degreePcs: degreePcs,
+    pool: pool,
+    name: '${tpcName(tonic)} ${sc.key}',
   );
 }
 
@@ -136,7 +183,25 @@ KeyRelation keyRelation(MusicKey? key, int tpc) {
   return KeyRelation.out;
 }
 
-const _solfege = {0: 'do', 1: 'sol', 2: 're', 3: 'la', 4: 'mi', 5: 'ti', -1: 'fa', -2: 'te', -3: 'me', -4: 'le', -5: 'ra', 6: 'fi', 7: 'di', 8: 'si', 9: 'ri', 10: 'li', -6: 'se'};
+const _solfege = {
+  0: 'do',
+  1: 'sol',
+  2: 're',
+  3: 'la',
+  4: 'mi',
+  5: 'ti',
+  -1: 'fa',
+  -2: 'te',
+  -3: 'me',
+  -4: 'le',
+  -5: 'ra',
+  6: 'fi',
+  7: 'di',
+  8: 'si',
+  9: 'ri',
+  10: 'li',
+  -6: 'se',
+};
 
 String degreeLabel(MusicKey key, int tpc) {
   final d = tpc - key.tonic;
@@ -215,13 +280,29 @@ const _inversionText = ['root position', 'first inversion', 'second inversion', 
 // intervals (two notes)
 
 const _intervals = {
-  0: ('P1', 'unison'), 1: ('P5', 'perfect fifth'), -1: ('P4', 'perfect fourth'), 2: ('M2', 'major second'),
-  -2: ('m7', 'minor seventh'), 3: ('M6', 'major sixth'), -3: ('m3', 'minor third'), 4: ('M3', 'major third'),
-  -4: ('m6', 'minor sixth'), 5: ('M7', 'major seventh'), -5: ('m2', 'minor second'),
-  6: ('A4', 'tritone (augmented fourth)'), -6: ('d5', 'tritone (diminished fifth)'),
-  7: ('A1', 'augmented unison'), -7: ('d8', 'diminished octave'), 8: ('A5', 'augmented fifth'), -8: ('d4', 'diminished fourth'),
-  9: ('A2', 'augmented second'), -9: ('d7', 'diminished seventh'), 10: ('A6', 'augmented sixth'), -10: ('d3', 'diminished third'),
-  11: ('A3', 'augmented third'), -11: ('d6', 'diminished sixth'),
+  0: ('P1', 'unison'),
+  1: ('P5', 'perfect fifth'),
+  -1: ('P4', 'perfect fourth'),
+  2: ('M2', 'major second'),
+  -2: ('m7', 'minor seventh'),
+  3: ('M6', 'major sixth'),
+  -3: ('m3', 'minor third'),
+  4: ('M3', 'major third'),
+  -4: ('m6', 'minor sixth'),
+  5: ('M7', 'major seventh'),
+  -5: ('m2', 'minor second'),
+  6: ('A4', 'tritone (augmented fourth)'),
+  -6: ('d5', 'tritone (diminished fifth)'),
+  7: ('A1', 'augmented unison'),
+  -7: ('d8', 'diminished octave'),
+  8: ('A5', 'augmented fifth'),
+  -8: ('d4', 'diminished fourth'),
+  9: ('A2', 'augmented second'),
+  -9: ('d7', 'diminished seventh'),
+  10: ('A6', 'augmented sixth'),
+  -10: ('d3', 'diminished third'),
+  11: ('A3', 'augmented third'),
+  -11: ('d6', 'diminished sixth'),
 };
 const _intervals12 = [1, -5, 2, -3, 4, -1, 6, 1, -4, 3, -2, 5];
 
@@ -236,7 +317,16 @@ class Roman {
   final bool maj;
   final List<String> figs;
   final String? applied, special;
-  const Roman({this.acc = 0, this.numeral = '', this.mark = '', this.maj = false, this.figs = const [], this.suffix = '', this.applied, this.special});
+  const Roman({
+    this.acc = 0,
+    this.numeral = '',
+    this.mark = '',
+    this.maj = false,
+    this.figs = const [],
+    this.suffix = '',
+    this.applied,
+    this.special,
+  });
 
   String get text {
     if (special != null) return special!;
@@ -264,8 +354,21 @@ class Harmony {
   String? funcLabel;
   String? tag; // 'borrowed' | 'secondary' | 'chromatic'
 
-  Harmony({required this.kind, required this.name, this.long = '', required this.notes, this.degree, this.solfegeName, this.interval,
-      this.root, this.bass, this.type, this.inversion = 0, this.pcs = const [], this.alt});
+  Harmony({
+    required this.kind,
+    required this.name,
+    this.long = '',
+    required this.notes,
+    this.degree,
+    this.solfegeName,
+    this.interval,
+    this.root,
+    this.bass,
+    this.type,
+    this.inversion = 0,
+    this.pcs = const [],
+    this.alt,
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -291,8 +394,13 @@ Harmony? analyze(List<SNote> input, [MusicKey? key]) {
   final pcs = byPc.keys.toList();
 
   if (pcs.length == 1) {
-    return Harmony(kind: HarmonyKind.note, name: tpcName(bass.tpc), notes: noteNames,
-        degree: key != null ? degreeLabel(key, bass.tpc) : null, solfegeName: key != null ? solfege(key, bass.tpc) : null);
+    return Harmony(
+      kind: HarmonyKind.note,
+      name: tpcName(bass.tpc),
+      notes: noteNames,
+      degree: key != null ? degreeLabel(key, bass.tpc) : null,
+      solfegeName: key != null ? solfege(key, bass.tpc) : null,
+    );
   }
   if (pcs.length == 2) {
     final hi = sorted.firstWhere((n) => pcOf(n.tpc) != pcOf(bass.tpc));
@@ -300,8 +408,13 @@ Harmony? analyze(List<SNote> input, [MusicKey? key]) {
     if (!_intervals.containsKey(d)) d = _intervals12[mod(pcOf(hi.tpc) - pcOf(bass.tpc), 12)];
     final iv = _intervals[d]!;
     final compound = bass.midi != null && hi.midi != null && hi.midi! - bass.midi! > 12;
-    return Harmony(kind: HarmonyKind.interval, name: iv.$1 == 'P5' ? '${tpcName(bass.tpc)}5' : iv.$1, interval: iv.$1,
-        long: iv.$2 + (compound ? ' (compound)' : ''), notes: noteNames);
+    return Harmony(
+      kind: HarmonyKind.interval,
+      name: iv.$1 == 'P5' ? '${tpcName(bass.tpc)}5' : iv.$1,
+      interval: iv.$1,
+      long: iv.$2 + (compound ? ' (compound)' : ''),
+      notes: noteNames,
+    );
   }
 
   // chord: every held pitch class as a candidate root, every chord type
@@ -351,9 +464,15 @@ Harmony? analyze(List<SNote> input, [MusicKey? key]) {
   }
   final slash = bassRel != 0 ? '/${tpcName(bass.tpc)}' : '';
   final chord = Harmony(
-    kind: HarmonyKind.chord, root: rootTpc, bass: bass.tpc, type: type.id,
-    name: tpcName(rootTpc) + type.sym + slash, inversion: inversion,
-    long: inversion >= 0 ? _inversionText[inversion] : 'over ${tpcName(bass.tpc)}', notes: noteNames, pcs: pcs,
+    kind: HarmonyKind.chord,
+    root: rootTpc,
+    bass: bass.tpc,
+    type: type.id,
+    name: tpcName(rootTpc) + type.sym + slash,
+    inversion: inversion,
+    long: inversion >= 0 ? _inversionText[inversion] : 'over ${tpcName(bass.tpc)}',
+    notes: noteNames,
+    pcs: pcs,
     alt: type.id == 'm7b5' ? '${tpcName(rootTpc)}ø7$slash' : null,
   );
   if (key != null) _harmonize(chord, type, key, spelled);
@@ -362,10 +481,21 @@ Harmony? analyze(List<SNote> input, [MusicKey? key]) {
 
 List<String> _figuresOf(ChordType type, int inversion) {
   if (type.cls == ChordClass.triad) {
-    return const [<String>[], ['6'], ['6', '4']].elementAtOrNull(inversion) ?? const [];
+    return const [
+          <String>[],
+          ['6'],
+          ['6', '4'],
+        ].elementAtOrNull(inversion) ??
+        const [];
   }
   if (type.cls == ChordClass.seventh) {
-    return const [['7'], ['6', '5'], ['4', '3'], ['4', '2']].elementAtOrNull(inversion) ?? const ['7'];
+    return const [
+          ['7'],
+          ['6', '5'],
+          ['4', '3'],
+          ['4', '2'],
+        ].elementAtOrNull(inversion) ??
+        const ['7'];
   }
   return const [];
 }
@@ -424,9 +554,13 @@ void _harmonize(Harmony chord, ChordType type, MusicKey key, Set<int> spelled) {
   final rootPc = pcOf(chord.root!);
   final figs = _figuresOf(type, chord.inversion);
   Roman plain(int deg, int acc) => Roman(
-        acc: acc, numeral: type.roman.upper ? _numerals[deg - 1] : _numerals[deg - 1].toLowerCase(),
-        mark: type.roman.mark, maj: type.roman.maj && type.cls == ChordClass.seventh, figs: figs, suffix: type.roman.suffix,
-      );
+    acc: acc,
+    numeral: type.roman.upper ? _numerals[deg - 1] : _numerals[deg - 1].toLowerCase(),
+    mark: type.roman.mark,
+    maj: type.roman.maj && type.cls == ChordClass.seventh,
+    figs: figs,
+    suffix: type.roman.suffix,
+  );
   void out(Roman roman, String? fn, [String? label, String? tag]) {
     chord.roman = roman;
     chord.func = fn;
@@ -437,16 +571,32 @@ void _harmonize(Harmony chord, ChordType type, MusicKey key, Set<int> spelled) {
   String targetRoman(int deg) {
     final q = _triadQualityOn(key, deg);
     final n = q == 'maj' || q == 'aug' ? _numerals[deg - 1] : _numerals[deg - 1].toLowerCase();
-    return n + (q == 'dim' ? '°' : q == 'aug' ? '+' : '');
+    return n +
+        (q == 'dim'
+            ? '°'
+            : q == 'aug'
+            ? '+'
+            : '');
   }
 
   // augmented sixths: on the lowered sixth, with the raised fourth spelled as such
   if (bassRel == 8 && relSet.contains(0) && relSet.contains(6) && spelled.contains(key.tonic + 6)) {
     final rest = relSet.where((r) => r != 8 && r != 0 && r != 6).toList();
-    final kind = rest.isEmpty ? 'It' : rest.length == 1 && rest[0] == 2 ? 'Fr' : rest.length == 1 && rest[0] == 3 ? 'Ger' : null;
+    final kind = rest.isEmpty
+        ? 'It'
+        : rest.length == 1 && rest[0] == 2
+        ? 'Fr'
+        : rest.length == 1 && rest[0] == 3
+        ? 'Ger'
+        : null;
     if (kind != null) {
       chord.name = '${tpcName(chord.bass!)} $kind+6';
-      chord.long = 'augmented sixth (${kind == 'It' ? 'Italian' : kind == 'Fr' ? 'French' : 'German'})';
+      chord.long =
+          'augmented sixth (${kind == 'It'
+              ? 'Italian'
+              : kind == 'Fr'
+              ? 'French'
+              : 'German'})';
       return out(Roman(special: '$kind+6'), 'S', 'Predominant (augmented sixth)', 'chromatic');
     }
   }
@@ -485,14 +635,28 @@ void _harmonize(Harmony chord, ChordType type, MusicKey key, Set<int> spelled) {
     if (rel(rootPc) == 7 && key.ref != null) return out(plain(5, 0), 'D');
     final t = target(mod(rootPc - 7, 12));
     if (t != null) {
-      return out(Roman(numeral: 'V', figs: figs, suffix: type.roman.suffix.isNotEmpty && type.cls == ChordClass.other ? type.roman.suffix : '', applied: targetRoman(t)),
-          'D', 'Dominant of ${targetRoman(t)}', 'secondary');
+      return out(
+        Roman(
+          numeral: 'V',
+          figs: figs,
+          suffix: type.roman.suffix.isNotEmpty && type.cls == ChordClass.other ? type.roman.suffix : '',
+          applied: targetRoman(t),
+        ),
+        'D',
+        'Dominant of ${targetRoman(t)}',
+        'secondary',
+      );
     }
   }
   if (_leadingTypes.contains(type.id)) {
     final t = target(mod(rootPc + 1, 12));
     if (t != null) {
-      return out(Roman(numeral: 'vii', mark: type.roman.mark, figs: figs, applied: targetRoman(t)), 'D', 'Leading-tone chord of ${targetRoman(t)}', 'secondary');
+      return out(
+        Roman(numeral: 'vii', mark: type.roman.mark, figs: figs, applied: targetRoman(t)),
+        'D',
+        'Leading-tone chord of ${targetRoman(t)}',
+        'secondary',
+      );
     }
   }
   if (mixture()) return;

@@ -32,7 +32,18 @@ Case randomCase(double Function() r) {
   T pick<T>(List<T> a) => a[(r() * a.length).floor()];
   final recs = <Record>[];
   final n = (r() * 30).floor();
-  final pool = ['iGoct   ', 'iGpreset', 'fP1presS', 'hP0color', 'sP1name ', 'fCfacC_2', 'fCfacF_1', 'iMint   ', 'fP2veloS', for (final k in keyNames.take(8)) 'fCfac$k'];
+  final pool = [
+    'iGoct   ',
+    'iGpreset',
+    'fP1presS',
+    'hP0color',
+    'sP1name ',
+    'fCfacC_2',
+    'fCfacF_1',
+    'iMint   ',
+    'fP2veloS',
+    for (final k in keyNames.take(8)) 'fCfac$k',
+  ];
   for (var k = 0; k < n; k++) {
     final key = pick(pool);
     final val = pick(['1', '0', '0.5', '-2', '00aa00', 'Pad', '1.2345', '3', '        ', 'x']).padRight(8);
@@ -41,14 +52,16 @@ Case randomCase(double Function() r) {
   const ties = [0.03125, 1.03125, 0.15625, 2.00005, 0.99995, 1.00004, 1.0, 1.00011, 0.1, 10.0, 4.0, 0.5, 0.00005];
   final touch = [
     for (final name in touchNames)
-      (name, toFloat32(() {
-        final (lo, hi) = _range[name]!;
-        return r() < 0.3 ? pick(ties.where((x) => x >= lo && x <= hi).toList()) : lo + r() * (hi - lo);
-      }())),
+      (
+        name,
+        toFloat32(() {
+          final (lo, hi) = _range[name]!;
+          return r() < 0.3 ? pick(ties.where((x) => x >= lo && x <= hi).toList()) : lo + r() * (hi - lo);
+        }()),
+      ),
   ];
   final keys = [
-    for (final name in keyNames)
-      (name, toFloat32(r() < 0.5 ? 1 : (r() < 0.2 ? pick(ties.where((x) => x >= 0.1 && x <= 10).toList()) : 0.6 + r()))),
+    for (final name in keyNames) (name, toFloat32(r() < 0.5 ? 1 : (r() < 0.2 ? pick(ties.where((x) => x >= 0.1 && x <= 10).toList()) : 0.6 + r()))),
   ];
   return Case(configUf2(recs), TouchValues(touch, keys));
 }
@@ -65,8 +78,20 @@ String? findPython() {
 void main() {
   test('fmt8 follows Python formatting, including half-to-even ties and signs', () {
     final want = <double, String>{
-      1.0: '1', 1.5: '1.5', 0.1: '0.1', 2.3: '2.3', 10.0: '10', 0.0: '0', -1.5: '-1.5', 0.03125: '0.0312', 0.15625: '0.1562',
-      1.03125: '1.0312', 0.09375: '0.0938', 123456.789: '123456.7', -0.00001: '-0', 0.99996: '1',
+      1.0: '1',
+      1.5: '1.5',
+      0.1: '0.1',
+      2.3: '2.3',
+      10.0: '10',
+      0.0: '0',
+      -1.5: '-1.5',
+      0.03125: '0.0312',
+      0.15625: '0.1562',
+      1.03125: '1.0312',
+      0.09375: '0.0938',
+      123456.789: '123456.7',
+      -0.00001: '-0',
+      0.99996: '1',
     };
     want.forEach((v, s) => expect(fmt8(v), s, reason: '$v'));
     expect(fmt8(double.nan), '1');
@@ -129,8 +154,12 @@ void main() {
       for (final c in cases)
         {
           'current': base64Encode(c.current),
-          'touch': [for (final (n, v) in c.values.touch) [n, v]],
-          'keys': [for (final (n, v) in c.values.keys) [n, v]],
+          'touch': [
+            for (final (n, v) in c.values.touch) [n, v],
+          ],
+          'keys': [
+            for (final (n, v) in c.values.keys) [n, v],
+          ],
         },
       for (final v in fmtCases) {'fmt8': v},
     ];
@@ -166,9 +195,13 @@ void main() {
       final striso = drive('S', 'UF2 Bootloader v1.0\r\nModel: Striso control board\r\n');
       drive('X', 'UF2 Bootloader\r\nModel: some other board\r\n');
       final steps = <String>[];
-      final save = saveTouch(values,
-          backupDir: '${tmp.path}/backups', progress: steps.add, roots: () => tmp.listSync().whereType<Directory>().map((d) => d.path).toList(),
-          rebootTimeout: const Duration(seconds: 10));
+      final save = saveTouch(
+        values,
+        backupDir: '${tmp.path}/backups',
+        progress: steps.add,
+        roots: () => tmp.listSync().whereType<Directory>().map((d) => d.path).toList(),
+        rebootTimeout: const Duration(seconds: 10),
+      );
       // the board reboots once the file is written: the drive goes away
       while (!File('${striso.path}/NEWCFG.UF2').existsSync()) {
         await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -188,7 +221,13 @@ void main() {
     test('two Striso drives: refuses and writes nothing', () async {
       drive('A', 'Model: Striso');
       drive('B', 'Model: Striso');
-      final r = await saveTouch(values, backupDir: '${tmp.path}/backups', roots: () => [for (final n in ['A', 'B']) '${tmp.path}/$n']);
+      final r = await saveTouch(
+        values,
+        backupDir: '${tmp.path}/backups',
+        roots: () => [
+          for (final n in ['A', 'B']) '${tmp.path}/$n',
+        ],
+      );
       expect(r.ok, isFalse);
       expect(r.message, contains('more than one'));
       expect(File('${tmp.path}/A/NEWCFG.UF2').existsSync() || File('${tmp.path}/B/NEWCFG.UF2').existsSync(), isFalse);
@@ -197,10 +236,14 @@ void main() {
     test('bad values: refused before any drive is looked at', () async {
       var looked = false;
       final bad = TouchValues(values.touch, [...values.keys.sublist(1), ('Q_1', 1.0)]);
-      final r = await saveTouch(bad, backupDir: '${tmp.path}/backups', roots: () {
-        looked = true;
-        return const [];
-      });
+      final r = await saveTouch(
+        bad,
+        backupDir: '${tmp.path}/backups',
+        roots: () {
+          looked = true;
+          return const [];
+        },
+      );
       expect(r.ok, isFalse);
       expect(looked, isFalse);
     });

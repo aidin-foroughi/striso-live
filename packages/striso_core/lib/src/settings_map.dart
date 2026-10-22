@@ -21,8 +21,14 @@ class SettingsGroup {
 
 /// Rim colours of the groups (0xRRGGBB).
 const Map<String, int> groupColors = {
-  SettingsGroup.midi: 0x8fdcec, SettingsGroup.layout: 0x8fdcec, SettingsGroup.sens: 0xf4d27a, SettingsGroup.voice: 0xffffff,
-  SettingsGroup.tuning: 0xb9a3ff, SettingsGroup.preset: 0x8fe3a4, SettingsGroup.midi2: 0x8fdcec, SettingsGroup.system: 0xff8a65,
+  SettingsGroup.midi: 0x8fdcec,
+  SettingsGroup.layout: 0x8fdcec,
+  SettingsGroup.sens: 0xf4d27a,
+  SettingsGroup.voice: 0xffffff,
+  SettingsGroup.tuning: 0xb9a3ff,
+  SettingsGroup.preset: 0x8fe3a4,
+  SettingsGroup.midi2: 0x8fdcec,
+  SettingsGroup.system: 0xff8a65,
 };
 
 class SettingsKey {
@@ -33,12 +39,7 @@ class SettingsKey {
   const SettingsKey(this.group, this.short, this.title, {this.knob, this.detail, this.engine, this.led, this.uncertain = false, this.danger = false});
 
   /// The full description: title (and '?'), the knob, the detail, the key.
-  List<String> describe(int id) => [
-        '$title${uncertain ? ' (?)' : ''}',
-        if (knob != null) 'tilt or circle the key: $knob',
-        ?detail,
-        'key $id',
-      ];
+  List<String> describe(int id) => ['$title${uncertain ? ' (?)' : ''}', if (knob != null) 'tilt or circle the key: $knob', ?detail, 'key $id'];
 }
 
 // the factory settings card (doc/strisoboard-settings.svg, v2.2.1) names tunings 1-8 like this; the
@@ -67,18 +68,32 @@ final Map<int, SettingsKey> settingsKeys = {
   6: const SettingsKey(SettingsGroup.sens, 'Bend', 'Pitch bend sensitivity (sideways tilt)', knob: '0 to 4, steps of 1/4'),
   8: const SettingsKey(SettingsGroup.sens, 'Tilt', 'Tilt (forward/back) sensitivity', knob: '0 to 3, steps of 1/8'),
   for (final e in voiceKeys.entries)
-    e.key: SettingsKey(SettingsGroup.voice, e.value.$1, 'Voice: ${e.value.$1}', engine: e.value.$1, led: e.value.$2,
-        knob: 'step through its presets (the up/down leds show which)',
-        detail: 'A press selects the engine with the preset it had last (remembered while powered).'),
+    e.key: SettingsKey(
+      SettingsGroup.voice,
+      e.value.$1,
+      'Voice: ${e.value.$1}',
+      engine: e.value.$1,
+      led: e.value.$2,
+      knob: 'step through its presets (the up/down leds show which)',
+      detail: 'A press selects the engine with the preset it had last (remembered while powered).',
+    ),
   for (final (n, id) in [34, 36, 38, 23, 25, 27, 29, 31, 33].indexed)
-    id: SettingsKey(SettingsGroup.tuning, n == 0 ? '12TET' : 'T$n',
-        n == 0 ? 'Tuning 0: 12-TET' : "Tuning $n from the board's settings (factory card: ${_cardTunings[n]}?)",
-        knob: 'fine tuning offset, 1/32 semitone per step', uncertain: n != 0),
+    id: SettingsKey(
+      SettingsGroup.tuning,
+      n == 0 ? '12TET' : 'T$n',
+      n == 0 ? 'Tuning 0: 12-TET' : "Tuning $n from the board's settings (factory card: ${_cardTunings[n]}?)",
+      knob: 'fine tuning offset, 1/32 semitone per step',
+      uncertain: n != 0,
+    ),
   for (final (n, id) in [35, 37, 39, 41, 43, 45, 30, 32].indexed)
-    id: SettingsKey(SettingsGroup.preset, 'P${n + 1}', 'Load settings preset ${n + 1}',
-        detail: n == 0
-            ? 'Save to Striso stores the touch settings in preset 1, which the board loads at power-on.'
-            : 'Loads the stored settings of this preset (sensitivities, MIDI, colour).'),
+    id: SettingsKey(
+      SettingsGroup.preset,
+      'P${n + 1}',
+      'Load settings preset ${n + 1}',
+      detail: n == 0
+          ? 'Save to Striso stores the touch settings in preset 1, which the board loads at power-on.'
+          : 'Loads the stored settings of this preset (sensitivities, MIDI, colour).',
+    ),
   51: const SettingsKey(SettingsGroup.midi2, 'Vol', 'Volume (MIDI CC7)', knob: 'volume, 0 to 127'),
   53: const SettingsKey(SettingsGroup.midi2, 'Sust', 'Sustain / decay (pedal)', knob: 'release length, 0 to 1'),
   56: const SettingsKey(SettingsGroup.midi2, 'MPEbd', 'MPE pitch bend range', knob: '12, 24, 48 or 96 semitones'),
@@ -99,8 +114,13 @@ const String settingsBothOctaves = 'Both octave buttons with Settings: reset the
 /// One click on a voice key: on another engine, select it with its remembered preset (like a press
 /// on the Striso); on the current engine, the next preset (the Striso steps with a tilt and stops at
 /// the ends; a click wraps around).
-({int index, String name, int presetIndex, int count})? voiceKeyAction(List<VoiceEntry> voices, int current, String engine,
-    [Map<String, int> remembered = const {}, int dir = 1]) {
+({int index, String name, int presetIndex, int count})? voiceKeyAction(
+  List<VoiceEntry> voices,
+  int current,
+  String engine, [
+  Map<String, int> remembered = const {},
+  int dir = 1,
+]) {
   final list = voices.where((v) => v.engine == engine).toList();
   if (list.isEmpty) return null;
   final at = list.indexWhere((v) => v.index == current);

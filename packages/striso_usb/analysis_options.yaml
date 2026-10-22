@@ -1,0 +1,10 @@
+include: package:lints/recommended.yaml
+
+linter:
+  rules:
+    # libusb names (libusb_bulk_transfer, LIBUSB_ERROR_BUSY) are kept as in libusb.h
+    non_constant_identifier_names: false
+    constant_identifier_names: false
+
+formatter:
+  page_width: 150
