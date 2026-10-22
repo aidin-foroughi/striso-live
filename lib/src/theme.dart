@@ -25,7 +25,7 @@ class Pal {
 }
 
 const String uiFont = 'Bahnschrift';
-const List<String> uiFontFallback = ['DIN Alternate', 'Barlow', 'Segoe UI', 'Helvetica Neue', 'Arial'];
+const List<String> uiFontFallback = ['DIN Alternate', 'Barlow', 'Segoe UI', 'Segoe UI Symbol', 'Helvetica Neue', 'Apple Symbols', 'Arial'];
 const String serifFont = 'Cambria';
 const List<String> serifFallback = ['Georgia', 'Times New Roman', 'Times'];
 const String monoFont = 'Cascadia Mono';
