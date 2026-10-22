@@ -5,10 +5,10 @@
 // 'flutter create' template.
 
 // The application's name. By default this is also the title of the Flutter window.
-PRODUCT_NAME = striso_live
+PRODUCT_NAME = Striso Live
 
 // The application's bundle identifier
 PRODUCT_BUNDLE_IDENTIFIER = org.striso.strisoLive
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 org.striso. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 Striso
