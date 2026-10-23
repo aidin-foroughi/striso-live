@@ -99,12 +99,31 @@ headphone jack keeps working at the same time.
   the toggle is the input level (red at full scale, red when the input is gone, accent while it
   looks); a click opens Setup.
 - **Setup › Audio**: input (automatic finds the Striso by its USB IDs VID 0xF055 / PID 0x57C0, else
-  by its name; or pick any input), output, buffer (64, 128, 256 or 512 frames per period), the
-  latency through the computer, gain (−40 to +6 dB, −6 dB at first), the input meter and the status
-  (playing, the input gone, dropouts). On Windows: **Exclusive input** (on: the Striso's own 24-bit
-  samples in about 3 ms periods; off: shared, 10 ms) and **Exclusive output** (off: shared with other
-  programs; on: the lowest latency, but nothing else can play to that output meanwhile; many
-  outputs allow no less than 10 ms when shared).
+  by a name with "Striso" in it, never by a stored endpoint id; or pick any input), output, buffer,
+  the latency, dropouts, gain (−40 to +6 dB, −6 dB at first), the input meter and the status. On
+  Windows: **Exclusive input** (on: the Striso's own 24-bit samples at the device's shortest period;
+  off: shared, 10 ms) and **Exclusive output** (on by default for wired outputs: the lowest latency,
+  nothing else plays to that output meanwhile; shared with a quiet note when another program holds
+  it; Bluetooth outputs always shared; off: always shared). macOS has no exclusive mode.
+- **Buffer: Auto (recommended)** or 64 / 128 / 256 / 512 frames per period. Auto starts at 256 on an
+  output it does not know, tries a step smaller after 20 s without a dropout (at a quiet moment:
+  a change reopens the devices), steps back at the first output-side dropout, and remembers per
+  output (its WASAPI endpoint id or Core Audio UID, and the share mode) what played cleanly and
+  what did not. It never asks for less than the device's minimum period (Windows reports it; on
+  the development PC every USB device's minimum is 3 ms, 144 frames).
+- **Latency**: the total through the computer and, under it, its parts: input (half the input's
+  wake-up interval and the stream latency the system reports), ring (the passthrough's ring and
+  resampler), output (its buffer and the reported stream latency; Core Audio: device + stream
+  latency + safety offset), USB (the board's ring before each packet, as it reports it).
+- **Dropouts**: how many in the last minute, and where: the board (its ring ran dry, a frame the
+  host skipped, a packet not ready: its own counters, console `StcU`, read every 2 s), the input
+  (late, or the ring full), the output (late beyond what its buffer bridges, or the ring empty).
+  Every dropout is in the console and the log with its time and cause; once a minute the log has
+  the callback timing of both devices.
+- **Striso buffer** (firmware with `Stct`): the board's own buffer before USB: Auto (the smallest
+  that keeps the board at 0 underruns, from 96 frames) or 72 / 96 / 120 / 144. The app sets it on
+  every connection.
+- A Bluetooth output gets one line: "Bluetooth adds ~150–250 ms. Use a wired output for playing."
 - **Record** (Setup › Audio): the Striso's input to a WAV file, 48 kHz stereo, 24 bit when the
   Striso sends 24 (else 16, or 32-bit float), in `Documents\Striso Live Recordings` with a
   timestamped name (`Striso 2026-10-23 14.02.11.wav`). The header shows the time while it records
@@ -113,9 +132,17 @@ headphone jack keeps working at the same time.
   a recording ends with a note when the input goes away. Firmware without USB audio: Setup says
   so.
 - The audio runs in a small native library (`striso_audio`: miniaudio on WASAPI / Core Audio) on
-  its own threads; the app only sets it up and reads levels. Drift between the Striso's clock and
-  the output's is corrected continuously (a resampler steered by the buffer's fill: a few ppm,
-  inaudible), so it never clicks or drifts away.
+  its own threads; the app only sets it up and reads levels, counters and the event log (no lock
+  the audio callbacks take, no allocation in them). Drift between the Striso's clock and the
+  output's is corrected continuously (a resampler steered by the buffer's fill: a few ppm,
+  inaudible), so it never clicks or drifts away. The ring's target follows what the devices do:
+  the longest wait for the input and the output's biggest take over the last half minute
+  (measured in bursts, not callbacks), plus a margin that grows at an underrun and shrinks after
+  stable playing.
+- Real time on Windows: the device threads are TIME_CRITICAL and in MMCSS "Pro Audio" at
+  AVRT_PRIORITY_CRITICAL, exclusive streams are event driven, `timeBeginPeriod(1)` is held while a
+  device is open and the process opts out of power throttling. On macOS Core Audio's own
+  real-time IO thread runs the callbacks.
 
 **Volume.** The Striso's synth is a full-level signal; Through PC starts at −6 dB, but turn the
 computer down before the first try.
@@ -192,8 +219,8 @@ Audio engine checks (none of them plays a sound):
 ```
 cmake -S packages/striso_audio/native -B build/striso_audio     # Windows (macOS: sh packages/striso_audio/native/build_macos.sh --selftest)
 cmake --build build/striso_audio --config Release
-build\striso_audio\Release\striso_audio_check --selftest <scratch dir>   # passthrough, drift servo, resampler, WAV writer, null-backend session
-build\striso_audio\Release\striso_audio_check --list                     # the devices, the Striso marked (opens nothing)
+build\striso_audio\Release\striso_audio_check --selftest <scratch dir>   # passthrough, drift servo, resampler, bursts and late callbacks, the buffer sweep, WAV writer, null-backend sessions
+build\striso_audio\Release\striso_audio_check --list                     # the devices: the Striso marked, transport, device periods, ids (opens no stream)
 build\striso_audio\Release\striso_audio_check --capture 3 take.wav       # the Striso's input only, at most 5 s: format and level
 (cd packages/striso_audio && dart test)                                   # state machine; the dart:ffi binding on the null backend
 (cd packages/striso_audio && dart run bin/audio_check.dart record 3)      # the same through the app's Dart engine
@@ -243,7 +270,7 @@ dart run bin/striso_probe.dart --lib path\to\libusb-1.0.dll connect 1
   map, config UF2 writer and the save flow. `dart test`: ports of the web app's tests, the config
   writer compared byte for byte with the firmware's `tools/striso.py`, the settings map against
   the firmware source when it is checked out (see Firmware cross-checks).
-- `packages/striso_audio`: Through PC and Record. `native/`: the C library (miniaudio 0.11.25,
+- `packages/striso_audio`: Through PC and Record. `native/`: the C library (miniaudio 0.11.25 with one local patch,
   vendored with its licence in `native/third_party/miniaudio`; the passthrough with its drift servo
   and resampler, the WAV writer, the self-test; `build_macos.sh`, `CMakeLists.txt`), `lib/`: its
   `dart:ffi` binding and the Through PC state machine (`ThroughPc`), with a fake backend for tests.
