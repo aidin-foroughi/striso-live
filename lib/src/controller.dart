@@ -654,6 +654,7 @@ class AppController extends ChangeNotifier implements MorphHost {
           }
         });
     unawaited(_pollLoad(c));
+    unawaited(_pollUsbAudio(c));
     return true;
   }
 
@@ -1121,6 +1122,50 @@ class AppController extends ChangeNotifier implements MorphHost {
 
   // ---------------------------------------------------------------------------------------------
   // synth load
+
+  /// While Through PC plays: the board's own USB audio counters every 2 s (StcU; they reset on
+  /// every call), so a dropout can be told apart: on the board, in the computer's input, in its
+  /// output. The first reply after starting only sets the baseline (it counts since whenever U
+  /// was last asked). Firmware that does not answer is not asked again in this session.
+  Future<void> _pollUsbAudio(StrisoClient c) async {
+    var misses = 0;
+    var baseline = true;
+    while (identical(client, c) && !_disposed && misses < 3) {
+      await Future<void>.delayed(const Duration(seconds: 2));
+      if (!identical(client, c) || connecting || saving) continue;
+      if (!audio.playing) {
+        baseline = true;
+        continue;
+      }
+      final s = await c.getUsbAudioStats();
+      if (!identical(client, c)) return;
+      if (s == null) {
+        misses++;
+        if (misses == 3) log('the board does not report its USB audio counters (StcU): board-side dropouts are not counted');
+        continue;
+      }
+      misses = 0;
+      if (baseline) {
+        baseline = false;
+        if (s.drops > 0) log('board USB audio before this: ${s.underruns ?? 0} underruns, ${s.overruns ?? 0} overruns (not counted)');
+        continue;
+      }
+      audio.boardStats(
+        BoardAudioStats(
+          sent: s.sent,
+          missed: s.missed,
+          underruns: s.underruns,
+          overruns: s.overruns,
+          primes: s.primes,
+          ringFiltered: s.ringFiltered?.toDouble(),
+          ringMin: s.ringMin,
+          ringMax: s.ringMax,
+          ringTarget: s.ringTarget,
+          streaming: s.streaming,
+        ),
+      );
+    }
+  }
 
   Future<void> _pollLoad(StrisoClient c) async {
     while (identical(client, c) && !_disposed) {

@@ -406,6 +406,8 @@ class MockBoard {
       _rxPayload.clear();
     } else if (ch == 'N') {
       _printTuning();
+    } else if (ch == 'U') {
+      _printUsbAudio();
     } else if (ch == 'I') {
       _print('stklimit    stack     addr   unused refs prio     state         name\r\n(mock device)\r\n');
     } else if (ch == 'P') {
@@ -446,6 +448,24 @@ class MockBoard {
   }
 
   // the N reply: the tuning and what every key plays (see tuning.dart for the format)
+  /// Board-side USB audio drops the demo reports at the next StcU (tests).
+  int usbAudioUnderruns = 0;
+  DateTime _usbAudioAt = DateTime.now();
+
+  /// StcU as the firmware prints it (usb_audio.c), counters since the last call.
+  void _printUsbAudio() {
+    final now = DateTime.now();
+    final ms = now.difference(_usbAudioAt).inMilliseconds.clamp(1, 600000);
+    _usbAudioAt = now;
+    final und = usbAudioUnderruns;
+    usbAudioUnderruns = 0;
+    _print('usb audio: streaming 48000 Hz 24 bit (alt 1), source synth\r\n');
+    _print('since last U: packets sent $ms missed 0 built $ms (47:${ms ~/ 400} 48:${ms - 2 * (ms ~/ 400)} 49:${ms ~/ 400})\r\n');
+    _print('rate: ${ms * 48} frames in $ms ms of host clock = 48000.000 Hz\r\n');
+    _print('ring: level 150 now, 146 filtered, 98..190 before packets (target 144 of 512)\r\n');
+    _print('underruns $und overruns 0 primes 0; packet build avg 900 max 1400 cycles\r\n');
+  }
+
   void _printTuning() {
     final sb = StringBuffer()
       ..write('tuning $tuning ${floatToHex(notegen1)} ${floatToHex(notegen0)} ${floatToHex(noteOffset)} ')

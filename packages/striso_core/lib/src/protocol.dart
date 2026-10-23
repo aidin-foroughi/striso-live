@@ -65,6 +65,9 @@ class Cmd {
 
   /// The tuning and every key's pitch (firmware with StcN; older boards answer with nothing).
   static Uint8List tuning() => commandChar('N');
+
+  /// USB audio status and counters since the last call (firmware with USB audio).
+  static Uint8List usbAudio() => commandChar('U');
   static Uint8List bootloader() => commandChar('B');
 }
 

@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'protocol.dart';
 import 'transport.dart';
 import 'tuning.dart';
+import 'usb_audio_stats.dart';
 
 const _paramIntervalMs = 16; // at most ~60 writes per second per parameter
 const _streamSilenceMs = 3000;
@@ -307,6 +308,21 @@ class StrisoClient {
       return Take.done;
     }, timeout: timeout);
     return r.state['k'] as ({bool ok, int id})?;
+  }
+
+  /// The board's USB audio counters since the last call (StcU); they reset on every call. Null when
+  /// the firmware does not answer (no USB audio) or the reply has none of its lines.
+  Future<UsbAudioStats?> getUsbAudioStats() async {
+    final r = await request(
+      Cmd.usbAudio(),
+      (l, s) {
+        if (!usbAudioLine.hasMatch(l.trim())) return Take.no;
+        return RegExp(r'\bprimes\b', caseSensitive: false).hasMatch(l) ? Take.done : Take.more;
+      },
+      timeout: const Duration(milliseconds: 500),
+      idle: const Duration(milliseconds: 120),
+    );
+    return parseUsbAudioStats(r.lines);
   }
 
   /// A console command for the console drawer; replies are collected until quiet.

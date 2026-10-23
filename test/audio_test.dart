@@ -66,14 +66,14 @@ void main() {
     }
     expect(
       fake2.last,
-      const AudioConfig(
+      AudioConfig(
         run: true,
         input: 'Striso Synth (Striso Synth)',
         output: 'Headphones (USB)',
         period: 64,
         monitor: true,
         exclusive: false,
-        exclusiveOutput: true,
+        exclusiveOutput: Platform.isWindows, // exclusive output on a wired output, Windows only
       ),
     );
     expect(fake2.gain, closeTo(gainOf(-12), 1e-9));
@@ -119,13 +119,28 @@ void main() {
     await tester.tap(find.byKey(const Key('audio-through')));
     await ticks(tester, ctl);
     expect(find.textContaining('Playing through the computer · 48 kHz · 24-bit'), findsOneWidget);
-    expect(find.text('7.5 ms'), findsOneWidget);
-    expect(find.text('7.5 ms · no dropouts'), findsOneWidget);
+    // Auto starts safe; the latency with its parts (in, ring, out, USB: the board's 3 ms target + the packet)
+    expect(find.text('Recommended · now 256 frames · the output wakes every 5.3 ms'), findsOneWidget);
+    expect(find.text('11.8 ms'), findsOneWidget);
+    expect(find.text('IN 0.5 · RING 2.0 · OUT 5.3 · USB ~4.0'), findsOneWidget);
+    expect(find.text('0 in the last minute'), findsOneWidget);
+    expect(find.text('BOARD 0 · INPUT 0 · OUTPUT 0'), findsOneWidget);
+    expect(find.textContaining('no dropouts in the last minute'), findsOneWidget);
 
-    // the buffer
-    await tester.tap(find.text('256'));
+    // a dropout, by side
+    fake.dropout(input: true);
+    await ticks(tester, ctl, 1);
+    expect(find.text('1 in the last minute'), findsOneWidget);
+    expect(find.text('BOARD 0 · INPUT 1 · OUTPUT 0'), findsOneWidget);
+
+    // a manual buffer
+    await tester.tap(find.byKey(const Key('audio-buffer-128')));
     await ticks(tester, ctl, 2);
-    expect(fake.last.period, 256);
+    expect(fake.last.period, 128);
+    expect(find.byKey(const Key('audio-auto-line')), findsNothing);
+    await tester.tap(find.byKey(const Key('audio-buffer-0')));
+    await ticks(tester, ctl, 2);
+    expect(ctl.audio.prefs.isAuto, isTrue);
 
     // record (to a temp folder through the documents dir)
     fake.documents = tmp.path;
@@ -144,6 +159,18 @@ void main() {
     expect(find.byKey(const Key('rec-indicator')), findsNothing);
     expect(find.byKey(const Key('audio-reveal')), findsOneWidget);
     expect(find.textContaining('.wav'), findsOneWidget);
+    ctl.dispose();
+  });
+
+  testWidgets('a Bluetooth output: a one-line note under the output', (tester) async {
+    final fake = FakeAudioBackend(outputs: [const AudioDevice('Speakers (EDIFIER MR5)', id: 'bt', transport: AudioTransport.bluetooth, isDefault: true)]);
+    final ctl = await boot(tester, fake);
+    ctl.setTab(AppTab.setup);
+    await tester.pump(const Duration(milliseconds: 300));
+    ctl.audio.setThrough(true);
+    await ticks(tester, ctl);
+    expect(find.text('Bluetooth adds ~150–250 ms. Use a wired output for playing.'), findsOneWidget);
+    expect(fake.last.exclusiveOutput, isFalse);
     ctl.dispose();
   });
 

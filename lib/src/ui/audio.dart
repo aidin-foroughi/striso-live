@@ -197,6 +197,21 @@ class _AudioSectionState extends State<AudioSection> {
     return w;
   }
 
+  /// A row whose value has a second line under it (micro type): the label stays on the first.
+  Widget _rowTall(String label, Widget child) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: Space.xs + 2),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 84,
+          child: Text(label, style: ui(TypeSize.body, color: Pal.text2)),
+        ),
+        Expanded(child: child),
+      ],
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -256,6 +271,7 @@ class _AudioSectionState extends State<AudioSection> {
                 ),
               ),
             ),
+            if (a.outputHint != null) _Hint(a.outputHint!, warn: a.outputBluetooth),
             _row(
               'Buffer',
               FittedBox(
@@ -264,7 +280,14 @@ class _AudioSectionState extends State<AudioSection> {
                 child: Seg<int>(
                   value: p.period,
                   onChanged: rec ? (_) {} : a.setPeriod,
+                  keys: {for (final f in [AudioPrefs.auto, ...AudioPrefs.periods]) f: Key('audio-buffer-$f')},
                   items: [
+                    (
+                      AudioPrefs.auto,
+                      'Auto',
+                      'Recommended. Starts safe, gets quicker while it plays without a dropout, steps back at the first one, '
+                          'and remembers the best for each output',
+                    ),
                     for (final f in AudioPrefs.periods)
                       (f, '$f', '$f frames per period (${(f / 48).toStringAsFixed(1)} ms): smaller is quicker, larger survives a busy computer'),
                   ],
@@ -272,7 +295,9 @@ class _AudioSectionState extends State<AudioSection> {
               ),
               tip: rec ? 'Stop the recording to change the buffer' : null,
             ),
-            _row('Latency', Align(alignment: Alignment.centerLeft, child: _Latency(widget.ctl))),
+            _AutoLine(widget.ctl),
+            _rowTall('Latency', _Latency(widget.ctl)),
+            _rowTall('Dropouts', _Dropouts(widget.ctl)),
             if (Platform.isWindows)
               _row(
                 '',
@@ -294,8 +319,9 @@ class _AudioSectionState extends State<AudioSection> {
                   child: Toggle(value: p.exclusiveOutput, onChanged: a.setExclusiveOutput, label: 'Exclusive output'),
                 ),
                 tip:
-                    'On: the output plays only the Striso, for the lowest latency (many outputs allow no less than 10 ms when shared). '
-                    'Other programs cannot play to it meanwhile. Falls back to shared when it cannot.',
+                    'On: a wired output plays only the Striso, for the lowest latency (shared, most outputs allow no less than 10 ms). '
+                    'Other programs cannot play to it meanwhile; it falls back to shared when another program holds it. '
+                    'Bluetooth outputs always play shared.',
               ),
             _row('Gain', _Gain(a)),
             _row('Level', _LevelBars(widget.ctl)),
@@ -314,6 +340,57 @@ class _AudioSectionState extends State<AudioSection> {
   }
 }
 
+String _ms(double v) => v.toStringAsFixed(1);
+
+/// A quiet line under a row: a 6 px pip and small text (accent for a warning).
+class _Hint extends StatelessWidget {
+  final String text;
+  final bool warn;
+  const _Hint(this.text, {this.warn = false});
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(left: 84, bottom: Space.xs),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(padding: const EdgeInsets.only(top: 5), child: Pip(warn ? Pal.accent : Pal.text3, size: 6)),
+        const SizedBox(width: Space.s),
+        Expanded(
+          child: Text(text, key: const Key('audio-output-hint'), style: ui(TypeSize.small, color: warn ? Pal.text1 : Pal.text2)),
+        ),
+      ],
+    ),
+  );
+}
+
+/// Under the buffer: what Auto chose and why (small text3), or nothing for a manual size.
+class _AutoLine extends StatelessWidget {
+  final AppController ctl;
+  const _AutoLine(this.ctl);
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: ctl.audioLevels,
+    builder: (context, _) {
+      final a = ctl.audio;
+      if (!a.prefs.isAuto) return const SizedBox.shrink();
+      final st = a.st;
+      final dev = a.playing && st.playbackBuffer > 0 && st.playbackRate > 0
+          ? ' · the output wakes every ${_ms(st.playbackBuffer / st.playbackRate * 1000)} ms'
+          : '';
+      final phase = a.autoBuffer.phase;
+      return Padding(
+        padding: const EdgeInsets.only(left: 84, bottom: Space.xs),
+        child: Text(
+          'Recommended · now ${a.period} frames$dev${phase.isNotEmpty ? ' · $phase' : ''}',
+          key: const Key('audio-auto-line'),
+          style: ui(TypeSize.small, color: Pal.text3),
+        ),
+      );
+    },
+  );
+}
+
+/// The total through the computer and, always next to it in micro type, its parts.
 class _Latency extends StatelessWidget {
   final AppController ctl;
   const _Latency(this.ctl);
@@ -324,14 +401,79 @@ class _Latency extends StatelessWidget {
       final a = ctl.audio;
       final st = a.st;
       final on = a.playing && st.latencyMs > 0;
+      final b = a.breakdown;
+      final inRate = st.captureRate > 0 ? st.captureRate : 48000, outRate = st.playbackRate > 0 ? st.playbackRate : 48000;
+      String per(int min, int def, int rate) => min > 0 ? '${_ms(min / rate * 1000)} ms minimum, ${_ms(def / rate * 1000)} ms default' : 'not reported';
+      final tip = on
+          ? [
+              'Through the computer, ${_ms(b.total)} ms:',
+              '· input ${_ms(b.input)} ms: half its ${_ms(st.capNominalUs / 1000)} ms wake-up interval'
+                  '${st.captureStreamLatency > 0 ? ' + ${_ms(st.captureStreamLatency / inRate * 1000)} ms the system reports' : ''}',
+              '· ring ${_ms(b.ring)} ms: the passthrough (it aims at ${_ms(st.targetMs)} ms; margin ${_ms(st.marginMs)} ms)',
+              '· output ${_ms(b.output)} ms: ${st.playbackBuffer} frames per wake-up${st.playbackExclusive ? ' (exclusive)' : ' (shared)'}'
+                  '${st.playbackStreamLatency > 0 ? ' + ${_ms(st.playbackStreamLatency / outRate * 1000)} ms the system reports' : ''}',
+              '· USB ${_ms(b.usb)} ms: the board’s ring before each 1 ms packet, ${b.usbMeasured ? 'as it reports it' : 'its target (estimated)'}',
+              'Device periods: input ${per(st.captureDevMin, st.captureDevDefault, inRate)}; output ${per(st.playbackDevMin, st.playbackDevDefault, outRate)}.',
+              'The synth itself adds its block before USB, as at the headphone jack. Clock drift corrected: ${st.driftPpm.toStringAsFixed(0)} ppm.',
+            ].join('\n')
+          : 'The latency shows while Through PC plays';
       return Tooltip(
-        message: on
-            ? 'Through the computer: input period ${(st.capturePeriod / (st.captureRate > 0 ? st.captureRate : 48000) * 1000).toStringAsFixed(1)} ms'
-                  ' + ring ${st.ringMs.toStringAsFixed(1)} ms (aims at ${st.targetMs.toStringAsFixed(1)})'
-                  ' + output buffer. The board adds about 3 ms before USB, the output device its own.\n'
-                  'Clock drift corrected: ${st.driftPpm.toStringAsFixed(0)} ppm'
-            : 'The latency shows while Through PC plays',
-        child: Text(on ? '${st.latencyMs.toStringAsFixed(1)} ms' : '–', key: const Key('audio-latency'), style: ui(TypeSize.body)),
+        message: tip,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(on ? '${_ms(b.total)} ms' : '–', key: const Key('audio-latency'), style: ui(TypeSize.body)),
+            if (on) ...[
+              const SizedBox(height: 2),
+              Text(
+                'in ${_ms(b.input)} · ring ${_ms(b.ring)} · out ${_ms(b.output)} · usb ${b.usbMeasured ? '' : '~'}${_ms(b.usb)}'.toUpperCase(),
+                key: const Key('audio-breakdown'),
+                style: microStyle(color: Pal.text3),
+              ),
+            ],
+          ],
+        ),
+      );
+    },
+  );
+}
+
+/// "0 in the last minute" and where they happened: board · input · output.
+class _Dropouts extends StatelessWidget {
+  final AppController ctl;
+  const _Dropouts(this.ctl);
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: ctl.audioLevels,
+    builder: (context, _) {
+      final a = ctl.audio;
+      if (!a.playing) return Text('–', style: ui(TypeSize.body, color: Pal.text3));
+      final m = a.dropoutsLastMinute();
+      final n = m.values.fold(0, (x, y) => x + y);
+      final st = a.st;
+      final tip = [
+        'Dropouts heard in the last minute, by where they happened:',
+        '· board: its ring ran dry or overflowed (its own counters, read every 2 s)',
+        '· input: the Striso’s audio reached the computer late, or the ring was full',
+        '· output: the output woke up late, or took more than the ring held',
+        'Input wakes every ${_ms(st.capNominalUs / 1000)} ms (longest ${_ms(st.capRecentGapUs / 1000)} ms lately, ${st.inLate} late); '
+            'output every ${_ms(st.playNominalUs / 1000)} ms (longest ${_ms(st.playRecentGapUs / 1000)} ms, ${st.outLate} late).',
+        'Threads: input ${RtFlags.text(st.rtCapture)}; output ${RtFlags.text(st.rtPlayback)}. Each dropout is in the console with its cause.',
+      ].join('\n');
+      return Tooltip(
+        message: tip,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('$n in the last minute', key: const Key('audio-dropouts'), style: ui(TypeSize.body, color: n > 0 ? Pal.text1 : Pal.text2)),
+            const SizedBox(height: 2),
+            Text(
+              'board ${m[DropSide.board]} · input ${m[DropSide.input]} · output ${m[DropSide.output]}'.toUpperCase(),
+              key: const Key('audio-dropouts-by-side'),
+              style: microStyle(color: Pal.text3),
+            ),
+          ],
+        ),
       );
     },
   );
