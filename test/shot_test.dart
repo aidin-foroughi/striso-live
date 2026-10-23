@@ -1,6 +1,7 @@
 // Not a test: renders each tab with the demo board into PNGs for a look (headless, no window).
 //   flutter test test/shot_test.dart --dart-define=SHOT=path/to/prefix
-// writes prefix_play.png, prefix_sound.png, prefix_setup.png, prefix_settings.png.
+// writes prefix_play.png, prefix_sound.png, prefix_setup.png, prefix_settings.png (Through PC on,
+// a fake audio input), prefix_recording.png.
 import 'dart:io';
 import 'dart:ui' as dui;
 
@@ -8,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:striso_audio/striso_audio.dart';
 import 'package:striso_live/main.dart';
 import 'package:striso_live/src/controller.dart';
 import 'package:striso_live/src/store.dart';
@@ -43,12 +45,15 @@ void main() {
     });
     tester.view.physicalSize = Size(width, height);
     tester.view.devicePixelRatio = 1;
-    final ctl = AppController(options: const AppOptions(noUsb: true), store: Store.memory());
+    final audio = FakeAudioBackend()..documents = Directory.systemTemp.path;
+    final ctl = AppController(options: const AppOptions(noUsb: true), store: Store.memory(), audioBackend: audio);
     ctl.setKey(root: 0, scale: 'major');
     await tester.pumpWidget(RepaintBoundary(key: const Key('shot'), child: StrisoLiveApp(ctl)));
     Future<void> run(int n) async {
       for (var i = 0; i < n; i++) {
         await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+        audio.run(1920, level: 0.3);
+        ctl.audio.tick();
         await tester.pump(const Duration(milliseconds: 40));
       }
     }
@@ -65,6 +70,7 @@ void main() {
     }
 
     await tester.tap(find.byKey(const Key('btn-demo')));
+    ctl.audio.setThrough(true);
     await run(40);
     final b = ctl.demoBoard!;
     b.autoplay = false;
@@ -85,6 +91,12 @@ void main() {
     await save('sound');
     ctl.setTab(AppTab.setup);
     await save('setup');
+    ctl.audio.startRecording();
+    await run(4);
+    audio.run(48000 * 83);
+    await save('recording');
+    ctl.audio.stopRecording();
+    await run(4);
     ctl.setSetupMode(SetupMode.equalizer);
     ctl.eqSelect(27);
     await save('equalizer');

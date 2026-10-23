@@ -66,8 +66,13 @@ Connect says there is no usable driver, the Zadig tool can set WinUSB for *Stris
 2. The app is signed ad hoc only, so Gatekeeper refuses a double-click the first time:
    right-click the app, choose **Open**, then **Open** again. Or in Terminal:
    `xattr -dr com.apple.quarantine "/Applications/Striso Live.app"`.
-3. libusb is inside the app (`Contents/Frameworks/libusb-1.0.0.dylib`). The app is not
-   sandboxed: it needs USB and it writes the settings to the Striso's update drive in /Volumes.
+3. libusb is inside the app (`Contents/Frameworks/libusb-1.0.0.dylib`), and the audio engine
+   (`libstriso_audio.dylib`). The app is not sandboxed: it needs USB and it writes the settings to
+   the Striso's update drive in /Volumes.
+4. The first time Through PC or Record opens the Striso's input, macOS asks whether Striso Live
+   may use audio input (the input counts as a microphone). If you said no: System Settings ›
+   Privacy & Security › Microphone, Striso Live on. The ad hoc signature changes with every
+   update, so macOS may ask again after one.
 
 ### Good to know
 
@@ -82,6 +87,38 @@ Connect says there is no usable driver, the Zadig tool can set WinUSB for *Stris
   morph corners), `logs/striso-live.log` (also in the console drawer) and `backups/` (the board's
   previous settings, saved before every Save to Striso).
 - **Errors** never open a native dialog: they go to the console drawer and the log file.
+
+### Through PC and Record
+
+Firmware with USB audio (the board shows up as the input **Striso Synth**: UAC1, 48 kHz stereo,
+24 bit) plays its synth through the computer's speakers or interface, no DAW needed. The
+headphone jack keeps working at the same time.
+
+- **Through PC** (header, next to the connection; off until you turn it on, then remembered): the
+  Striso's input plays to the default output, or the one chosen in Setup › Audio. The pip next to
+  the toggle is the input level (red at full scale, red when the input is gone, accent while it
+  looks); a click opens Setup.
+- **Setup › Audio**: input (automatic finds the Striso by its USB IDs VID 0xF055 / PID 0x57C0, else
+  by its name; or pick any input), output, buffer (64, 128, 256 or 512 frames per period), the
+  latency through the computer, gain (−40 to +6 dB, −6 dB at first), the input meter and the status
+  (playing, the input gone, dropouts). On Windows: **Exclusive input** (on: the Striso's own 24-bit
+  samples in about 3 ms periods; off: shared, 10 ms) and **Exclusive output** (off: shared with other
+  programs; on: the lowest latency, but nothing else can play to that output meanwhile; many
+  outputs allow no less than 10 ms when shared).
+- **Record** (Setup › Audio): the Striso's input to a WAV file, 48 kHz stereo, 24 bit when the
+  Striso sends 24 (else 16, or 32-bit float), in `Documents\Striso Live Recordings` with a
+  timestamped name (`Striso 2026-10-23 14.02.11.wav`). The header shows the time while it records
+  (a click stops); Show in folder when it is done. It records with Through PC off too.
+- A board that restarts (a firmware update, Save to Striso) or is replugged comes back by itself;
+  a recording ends with a note when the input goes away. Firmware without USB audio: Setup says
+  so.
+- The audio runs in a small native library (`striso_audio`: miniaudio on WASAPI / Core Audio) on
+  its own threads; the app only sets it up and reads levels. Drift between the Striso's clock and
+  the output's is corrected continuously (a resampler steered by the buffer's fill: a few ppm,
+  inaudible), so it never clicks or drifts away.
+
+**Volume.** The Striso's synth is a full-level signal; Through PC starts at −6 dB, but turn the
+computer down before the first try.
 
 ### Save to Striso
 
@@ -101,7 +138,7 @@ whose `INFO_UF2.TXT` names the Striso (and only when there is exactly one), back
 - **Sound**: every voice and effect parameter, undo/redo, Reset, Mutate, A/B, Save sound, Copy as
   C; My sounds; the morph pad (closed until you open it).
 - **Setup**: Sensitivity, Key equalizer or Settings keys on the big board; Save to Striso;
-  motion; firmware.
+  Audio (Through PC, devices, Record); motion; firmware.
 - **Stage mode** (F or F11, Esc leaves): only the board and the chord, larger.
 - After a reconnect, if the board lost your edits (a restart, Save to Striso), a toast offers to
   restore the edited sound.
@@ -122,6 +159,7 @@ resets; Alt+click locks against Mutate.
 | `--fake-save[=fail]` | Save to Striso runs every step except the drive (works in the demo) |
 | `--hidden` | Windows: the window starts minimized and off-screen |
 | `--smoke=<s>` | log a line and quit after s seconds (implies `--hidden` on Windows) |
+| `--no-audio` | no Through PC or Record (the audio library is not loaded) |
 
 `STRISO_LIVE_HOME` moves the data folder (tests, smoke runs).
 
@@ -143,6 +181,24 @@ flutter build macos --release                # universal (arm64 + x86_64)
 sh tool/package_macos.sh [libusb-1.0.0.dylib]   # libusb into the app, dist/*.zip and *.dmg; default: brew's libusb
 ```
 
+`flutter build windows` also builds the audio engine (`packages/striso_audio/native`, through
+`windows/CMakeLists.txt`) and puts `striso_audio.dll` next to the exe. On macOS
+`tool/package_macos.sh` builds `libstriso_audio.dylib` universal into the bundle; for `flutter run`
+on macOS build it once with `sh packages/striso_audio/native/build_macos.sh` and point
+`STRISO_AUDIO_LIB` at `packages/striso_audio/native/build/macos/libstriso_audio.dylib`.
+
+Audio engine checks (none of them plays a sound):
+
+```
+cmake -S packages/striso_audio/native -B build/striso_audio     # Windows (macOS: sh packages/striso_audio/native/build_macos.sh --selftest)
+cmake --build build/striso_audio --config Release
+build\striso_audio\Release\striso_audio_check --selftest <scratch dir>   # passthrough, drift servo, resampler, WAV writer, null-backend session
+build\striso_audio\Release\striso_audio_check --list                     # the devices, the Striso marked (opens nothing)
+build\striso_audio\Release\striso_audio_check --capture 3 take.wav       # the Striso's input only, at most 5 s: format and level
+(cd packages/striso_audio && dart test)                                   # state machine; the dart:ffi binding on the null backend
+(cd packages/striso_audio && dart run bin/audio_check.dart record 3)      # the same through the app's Dart engine
+```
+
 Run it from the build: `build\windows\x64\runner\Release\StrisoLive.exe` (Windows) or
 `open "build/macos/Build/Products/Release/Striso Live.app"`; `--demo --no-usb` without a board.
 
@@ -154,7 +210,8 @@ writer byte for byte with the firmware's `tools/striso.py` (through its `tools/.
 `$STRISO_FW_DIR`, else in `../striso-control-firmware` next to this repository, and skip with a
 message when there is none. `STRISO_PYTHON` overrides the Python for the config test.
 
-**CI.** `.github/workflows/striso-live-flutter.yml` runs the tests and builds both platforms on
+**CI.** `.github/workflows/striso-live-flutter.yml` runs the tests (with the audio engine's native
+self-test and package tests) and builds both platforms on
 windows-latest and macos-latest (with a universal libusb for macOS) for every push to main and
 every pull request, and uploads the zips and the dmg as workflow artifacts. It clones the firmware
 next to the app so the cross-checks run.
@@ -182,6 +239,12 @@ dart run bin/striso_probe.dart --lib path\to\libusb-1.0.dll connect 1
   map, config UF2 writer and the save flow. `dart test`: ports of the web app's tests, the config
   writer compared byte for byte with the firmware's `tools/striso.py`, the settings map against
   the firmware source when it is checked out (see Firmware cross-checks).
+- `packages/striso_audio`: Through PC and Record. `native/`: the C library (miniaudio 0.11.25,
+  vendored with its licence in `native/third_party/miniaudio`; the passthrough with its drift servo
+  and resampler, the WAV writer, the self-test; `build_macos.sh`, `CMakeLists.txt`), `lib/`: its
+  `dart:ffi` binding and the Through PC state machine (`ThroughPc`), with a fake backend for tests.
+  miniaudio rather than a Dart package: no maintained Dart package does low-latency duplex
+  capture to playback on both WASAPI and Core Audio, and none keeps the audio off the Dart thread.
 - `packages/striso_usb`: libusb-1.0 through `dart:ffi` (own thin bindings: no maintained package
   fits), the I/O in a background isolate with 16 bulk IN transfers in flight; the UI never waits
   on USB.

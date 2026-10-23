@@ -9,6 +9,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:striso_audio/striso_audio.dart';
 import 'package:striso_core/striso_core.dart';
 
 import 'app_log.dart';
@@ -130,10 +131,10 @@ class SettingsVoice {
 }
 
 class AppOptions {
-  final bool demo, noUsb;
+  final bool demo, noUsb, noAudio;
   final String? fakeSave; // null, 'ok' or 'fail'
   final bool reducedMotion;
-  const AppOptions({this.demo = false, this.noUsb = false, this.fakeSave, this.reducedMotion = false});
+  const AppOptions({this.demo = false, this.noUsb = false, this.noAudio = false, this.fakeSave, this.reducedMotion = false});
 
   static AppOptions parse(List<String> args) {
     String? fake;
@@ -144,6 +145,7 @@ class AppOptions {
     return AppOptions(
       demo: args.contains('--demo'),
       noUsb: args.contains('--no-usb'),
+      noAudio: args.contains('--no-audio'),
       fakeSave: fake,
       reducedMotion: args.contains('--reduced-motion'),
     );
@@ -160,6 +162,15 @@ class AppController extends ChangeNotifier implements MorphHost {
   final Store store;
   final UsbBackend? usb;
   final String backupDir;
+
+  /// Through PC: the Striso's USB audio through the computer, and recording it.
+  late final ThroughPc audio;
+
+  /// Through PC's state and choices changed (toggle, status line, pickers).
+  final audioState = Pulse();
+
+  /// About 20 times a second while audio runs: levels, latency, the recording's time.
+  final audioLevels = Pulse();
 
   final live = LiveState();
   final history = History();
@@ -235,9 +246,18 @@ class AppController extends ChangeNotifier implements MorphHost {
   bool _disposed = false;
   int _toastId = 0;
 
-  AppController({required this.options, required this.store, this.usb, String? backupDir})
+  AppController({required this.options, required this.store, this.usb, AudioBackend? audioBackend, String? backupDir})
     : backupDir = backupDir ?? '${appSupportDir()}${Platform.pathSeparator}backups' {
     _loadPrefs();
+    audio = ThroughPc(
+      backend: audioBackend,
+      prefs: AudioPrefs.fromJson(store.raw('audio')),
+      boardOnUsb: () => (client != null && mode == ConnMode.usb) || _lastPresent == true,
+      onPrefs: (p) => store.set('audio', p.toJson()),
+      log: (s) => log(s),
+    );
+    audio.addListener(audioState.ping);
+    audio.addLevelListener(audioLevels.ping);
     live.pressListeners.add((id, _) {
       if (eqFollow) eqSelect(id);
     });
@@ -284,8 +304,10 @@ class AppController extends ChangeNotifier implements MorphHost {
   String? get intent => store.get<String>(_intentKey);
   void _setIntent(String v) => store.set(_intentKey, v);
 
-  /// Starts presence polling and, when the user left the board connected, connects.
+  /// Starts presence polling and, when the user left the board connected, connects. Through PC
+  /// starts too (it plays at once when it was left on).
   Future<void> start() async {
+    audio.start();
     if (options.demo) {
       await connectDemo();
       return;
@@ -345,6 +367,7 @@ class AppController extends ChangeNotifier implements MorphHost {
     _presenceTimer?.cancel();
     _syncTimer?.cancel();
     _editsTimer?.cancel();
+    audio.dispose();
     final c = client;
     client = null;
     if (c != null) unawaited(c.disconnect().catchError((_) {}));
@@ -354,6 +377,7 @@ class AppController extends ChangeNotifier implements MorphHost {
 
   /// Let go of the board before the window closes.
   Future<void> shutdown() async {
+    audio.dispose(); // finishes a recording's file, closes the audio devices
     final c = client;
     client = null;
     if (c != null) {

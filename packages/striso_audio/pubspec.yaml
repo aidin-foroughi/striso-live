@@ -1,0 +1,14 @@
+name: striso_audio
+description: The Striso's USB audio input through the computer (play through, record to WAV) for Striso Live, on a small native library (miniaudio) through dart:ffi.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  ffi: ^2.1.0
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6

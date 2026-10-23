@@ -8,5 +8,10 @@
 	<false/>
 	<key>com.apple.security.device.usb</key>
 	<true/>
+	<!-- the Striso's USB audio input (Through PC, Record); needed under the sandbox or the
+	     hardened runtime, harmless without. macOS still asks the user once (Info.plist,
+	     NSMicrophoneUsageDescription). -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
 </dict>
 </plist>

@@ -1,0 +1,10 @@
+include: package:lints/recommended.yaml
+
+linter:
+  rules:
+    # struct fields keep their names from striso_audio.h (capture_state, is_default)
+    non_constant_identifier_names: false
+    constant_identifier_names: false
+
+formatter:
+  page_width: 150

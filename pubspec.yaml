@@ -14,6 +14,8 @@ dependencies:
     path: packages/striso_core
   striso_usb:
     path: packages/striso_usb
+  striso_audio:
+    path: packages/striso_audio
 
 dev_dependencies:
   flutter_test:

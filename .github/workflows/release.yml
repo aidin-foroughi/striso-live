@@ -75,8 +75,13 @@ jobs:
         run: |
           flutter pub get
           (cd packages/striso_core && dart test)
+          cmake -S packages/striso_audio/native -B build/striso_audio
+          cmake --build build/striso_audio --config Release
+          build/striso_audio/Release/striso_audio_check.exe --selftest "$RUNNER_TEMP"
+          (cd packages/striso_audio && dart test)
           flutter analyze
           (cd packages/striso_usb && dart analyze)
+          (cd packages/striso_audio && dart analyze)
           flutter test
 
       - name: Build
@@ -90,6 +95,7 @@ jobs:
           if (-not $p.WaitForExit(60000)) { $p.Kill(); throw 'smoke run did not quit' }
           if ($p.ExitCode -ne 0) { throw "smoke run exit code $($p.ExitCode)" }
           if (-not (Select-String -Path "$env:STRISO_LIVE_HOME\logs\striso-live.log" -Pattern 'smoke: ok')) { throw 'no smoke line' }
+          if (-not (Select-String -Path "$env:STRISO_LIVE_HOME\logs\striso-live.log" -Pattern 'audio: engine striso_audio')) { throw 'striso_audio.dll did not load' }
 
       - name: Portable zip
         shell: pwsh
@@ -162,8 +168,11 @@ jobs:
         run: |
           flutter pub get
           (cd packages/striso_core && dart test)
+          sh packages/striso_audio/native/build_macos.sh --selftest
+          (cd packages/striso_audio && dart test)
           flutter analyze
           (cd packages/striso_usb && dart analyze)
+          (cd packages/striso_audio && dart analyze)
           flutter test
 
       - name: libusb, universal (arm64 + x86_64)
@@ -182,7 +191,7 @@ jobs:
       - name: Build (universal)
         run: flutter build macos --release
 
-      - name: Package (libusb in the bundle, ad hoc signature, zip and dmg)
+      - name: Package (striso_audio and libusb in the bundle, ad hoc signature, zip and dmg)
         run: sh tool/package_macos.sh "$RUNNER_TEMP/libusb/lib/libusb-1.0.0.dylib"
 
       - name: Smoke run (demo board, no USB)

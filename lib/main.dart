@@ -4,6 +4,7 @@
 //   --demo            start with the simulated board
 //   --no-usb          never touch USB (smoke tests, screenshots)
 //   --fake-save[=fail] Save to Striso goes through every step except the drive
+//   --no-audio        no Through PC / Record (the audio library is not loaded)
 //   --smoke=<s>       log a smoke line and quit after s seconds (with --hidden in the runner:
 //                     the window stays minimized and off-screen)
 //
@@ -16,6 +17,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart' show LicenseEntryWithLineBreaks, LicenseRegistry;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:striso_audio/striso_audio.dart' show NativeAudioBackend;
 import 'package:striso_core/striso_core.dart' show Transport;
 import 'package:striso_usb/striso_usb.dart';
 
@@ -79,10 +81,18 @@ void main(List<String> args) {
     });
     final options = AppOptions.parse(args);
     appLog.info('Striso Live ${args.isEmpty ? '' : '(${args.join(' ')}) '}on ${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
+    // the audio library is only loaded here; it opens nothing until Through PC or Record is on
+    final audio = options.noAudio ? null : NativeAudioBackend.tryLoad();
+    if (audio != null) {
+      appLog.info('audio: engine ${audio.description}');
+    } else if (!options.noAudio) {
+      appLog.err('audio: engine missing: ${NativeAudioBackend.loadError}');
+    }
     final ctl = AppController(
       options: options,
       store: Store('$home${Platform.pathSeparator}settings.json'),
       usb: options.noUsb ? null : NativeUsbBackend(),
+      audioBackend: audio,
     );
     _controller = ctl;
     runApp(StrisoLiveApp(ctl));
@@ -90,7 +100,10 @@ void main(List<String> args) {
     final smoke = args.where((a) => a.startsWith('--smoke=')).map((a) => double.tryParse(a.substring(8))).firstOrNull;
     if (smoke != null) {
       Timer(Duration(milliseconds: (smoke * 1000).round()), () async {
-        appLog.info('smoke: ok after ${smoke}s, ${ctl.connected ? 'connected (${ctl.mode.name})' : 'not connected'}, ${ctl.voices.length} voices');
+        appLog.info(
+          'smoke: ok after ${smoke}s, ${ctl.connected ? 'connected (${ctl.mode.name})' : 'not connected'}, ${ctl.voices.length} voices, '
+          'audio ${ctl.audio.state.name}',
+        );
         // the same way out as closing the window: the exit handler lets go of the board
         if (!closeOwnWindow()) await ServicesBinding.instance.exitApplication(AppExitType.cancelable);
       });

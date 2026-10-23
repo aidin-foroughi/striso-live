@@ -18,5 +18,9 @@ install_name_tool -id "@rpath/libusb-1.0.0.dylib" "$APP/Contents/Frameworks/libu
 echo "libusb: $(lipo -archs "$APP/Contents/Frameworks/libusb-1.0.0.dylib")"
 otool -L "$APP/Contents/Frameworks/libusb-1.0.0.dylib"
 codesign --force --sign - "$APP/Contents/Frameworks/libusb-1.0.0.dylib"
+# striso_audio, built into the bundle by tool/package_macos.sh, when it is there
+if [ -f "$APP/Contents/Frameworks/libstriso_audio.dylib" ]; then
+  codesign --force --sign - "$APP/Contents/Frameworks/libstriso_audio.dylib"
+fi
 codesign --force --deep --sign - "$APP"
 codesign --verify --deep --verbose=2 "$APP"

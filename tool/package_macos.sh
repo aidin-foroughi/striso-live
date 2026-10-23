@@ -1,8 +1,10 @@
 #!/bin/sh
 # Package the macOS app after `flutter build macos --release` (run from anywhere):
 #   tool/package_macos.sh [path/to/libusb-1.0.0.dylib]      (default: brew's libusb)
-# Puts libusb into the bundle and signs it ad hoc (tool/bundle_libusb_macos.sh), checks that the
-# app and libusb run on Apple silicon and Intel, and writes
+# Builds striso_audio into the bundle (packages/striso_audio/native/build_macos.sh: the Striso's
+# USB audio through the computer), puts libusb into it and signs it ad hoc
+# (tool/bundle_libusb_macos.sh), checks that the app and both libraries run on Apple silicon and
+# Intel, and writes
 #   dist/StrisoLive-<version>-macos.zip   the app (unzip, move to Applications)
 #   dist/StrisoLive-<version>-macos.dmg   the app and an Applications link (drag to install)
 set -eu
@@ -12,11 +14,13 @@ version=$(sed -n 's/^version: *\([0-9][0-9.]*\).*/\1/p' pubspec.yaml)
 APP="build/macos/Build/Products/Release/Striso Live.app"
 [ -d "$APP" ] || { echo "no $APP: run flutter build macos --release first" >&2; exit 1; }
 
+sh packages/striso_audio/native/build_macos.sh "$APP/Contents/Frameworks"
 sh tool/bundle_libusb_macos.sh "$APP" ${1:+"$1"}
 
 # every Mach-O in the bundle must hold both architectures
 bad=0
 for f in "$APP/Contents/MacOS/Striso Live" "$APP/Contents/Frameworks/libusb-1.0.0.dylib" \
+         "$APP/Contents/Frameworks/libstriso_audio.dylib" \
          "$APP/Contents/Frameworks/App.framework/App" \
          "$APP/Contents/Frameworks/FlutterMacOS.framework/FlutterMacOS"; do
   archs=$(lipo -archs "$f" 2>/dev/null || echo "missing")

@@ -1,5 +1,6 @@
-// The header (DESIGN.md 3): brand and name, the tabs centred, the CPU sparkline, the connection
-// (a click opens the console) and Connect / Disconnect. In stage mode it shrinks to a 24 px strip.
+// The header (DESIGN.md 3): brand and name, the tabs centred, the CPU sparkline, Through PC (a
+// toggle and a level pip; the recording time while recording), the connection (a click opens the
+// console) and Connect / Disconnect. In stage mode it shrinks to a 24 px strip.
 
 import 'dart:math' as math;
 
@@ -8,6 +9,7 @@ import 'package:striso_core/striso_core.dart';
 
 import '../controller.dart';
 import '../theme.dart';
+import 'audio.dart';
 import 'chrome.dart';
 
 class TopBar extends StatelessWidget {
@@ -17,10 +19,16 @@ class TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: ctl,
+      listenable: Listenable.merge([ctl, ctl.audioState]),
       builder: (context, _) => LayoutBuilder(
         builder: (context, box) {
           final narrow = box.maxWidth < 1100;
+          // Through PC's label only where there is room; the status text gets what is left of the
+          // right half after the centred tabs, so the two never meet
+          final throughLabel = box.maxWidth >= 1280;
+          final rightRoom = box.maxWidth / 2 - 110 - Space.gutter;
+          final others = (ctl.connected ? 56 + Space.s + 32 + Space.xl : 0) + (throughLabel ? 118 : 46) + Space.l + (ctl.audio.recording ? 60 : 0) + 16 + Space.m + 104;
+          final statusMax = (rightRoom - others).clamp(72.0, narrow ? 140.0 : 280.0);
           return Container(
             height: Sizes.header,
             color: Pal.bg0,
@@ -38,7 +46,10 @@ class TopBar extends StatelessWidget {
                     ],
                     const Spacer(),
                     if (ctl.connected) ...[CpuIndicator(ctl), const SizedBox(width: Space.xl)],
-                    ConnectionStatus(ctl, maxWidth: narrow ? 140 : 280),
+                    ThroughToggle(ctl, label: throughLabel),
+                    RecIndicator(ctl),
+                    const SizedBox(width: Space.l),
+                    ConnectionStatus(ctl, maxWidth: statusMax),
                     const SizedBox(width: Space.m),
                     Btn(
                       ctl.connectLabel,

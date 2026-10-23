@@ -6,6 +6,7 @@ $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*([0-9.]+)').M
 $src = 'build\windows\x64\runner\Release'
 if (-not (Test-Path "$src\StrisoLive.exe")) { throw "no $src\StrisoLive.exe: run flutter build windows --release first" }
 if (-not (Test-Path "$src\libusb-1.0.dll")) { throw "libusb-1.0.dll is missing from the build" }
+if (-not (Test-Path "$src\striso_audio.dll")) { throw "striso_audio.dll is missing from the build" }
 New-Item -ItemType Directory -Force dist | Out-Null
 $stage = "dist\Striso Live"
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }

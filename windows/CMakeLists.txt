@@ -52,6 +52,12 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")
 
+# striso_audio (packages/striso_audio/native): the Striso's USB audio through the computer
+# (miniaudio, WASAPI), built with the app; its self-test tool is built on its own (README).
+set(STRISO_AUDIO_CHECK OFF CACHE BOOL "" FORCE)
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../packages/striso_audio/native" "striso_audio")
+add_dependencies(${BINARY_NAME} striso_audio)
+
 
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
@@ -85,6 +91,9 @@ install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/libusb/libusb-1.0.dll" "${CMAKE_CURRENT_SOURCE_DIR}/libusb/LIBUSB-NOTICE.txt"
   DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
+
+# striso_audio.dll next to the exe (lib/src/native.dart in striso_audio loads it from there)
+install(FILES "$<TARGET_FILE:striso_audio>" DESTINATION "${CMAKE_INSTALL_PREFIX}" COMPONENT Runtime)
 
 if(PLUGIN_BUNDLED_LIBRARIES)
   install(FILES "${PLUGIN_BUNDLED_LIBRARIES}"

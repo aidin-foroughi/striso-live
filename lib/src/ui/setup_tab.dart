@@ -1,6 +1,6 @@
 // Setup (DESIGN.md 3): a mode control (Sensitivity, Key equalizer, Settings keys) changes the
-// board's overlay and the right column; Save to Striso, the motion sensor and the firmware are
-// always at the lower right.
+// board's overlay and the right column; Save to Striso, Audio (Through PC, devices, Record), the
+// motion sensor and the firmware are always at the lower right.
 
 import 'dart:math' as math;
 
@@ -11,6 +11,7 @@ import 'package:striso_core/striso_core.dart';
 
 import '../controller.dart';
 import '../theme.dart';
+import 'audio.dart';
 import 'board_view.dart';
 import 'chrome.dart';
 import 'live_panel.dart';
@@ -77,6 +78,8 @@ class SetupTab extends StatelessWidget {
                 },
                 const SizedBox(height: Space.xxl),
                 SaveBox(ctl),
+                const SizedBox(height: Space.xxl),
+                AudioSection(ctl),
                 const SizedBox(height: Space.xl),
                 if (c.maxWidth >= 1100) ...[MotionRow(ctl), const SizedBox(height: Space.l), FirmwareRow(ctl)],
                 const SizedBox(height: Space.m),
