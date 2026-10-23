@@ -11,6 +11,7 @@ import 'dart:typed_data';
 import 'layout.dart';
 import 'protocol.dart';
 import 'transport.dart';
+import 'tuning.dart';
 
 typedef _P = (String name, String group, double min, double max, int kind, double def);
 
@@ -240,6 +241,12 @@ class MockBoard {
   late final List<double> touch;
   late final List<double> keyFactors;
   late final Float32List gain;
+
+  // the tuning, as Instrument in synth_control.cpp holds it (semitones)
+  int tuning = 0;
+  double notegen0 = 12, notegen1 = 7, noteOffset = 0;
+  int tuningColor = 0x00aa00;
+  final keyOffset = Float64List(61);
   bool streaming = false;
   bool autoplay, motionEnabled;
   int idleFrames;
@@ -379,6 +386,8 @@ class MockBoard {
     } else if (ch == 'Q') {
       _rxNeed = 6;
       _rxPayload.clear();
+    } else if (ch == 'N') {
+      _printTuning();
     } else if (ch == 'I') {
       _print('stklimit    stack     addr   unused refs prio     state         name\r\n(mock device)\r\n');
     } else if (ch == 'P') {
@@ -417,6 +426,38 @@ class MockBoard {
     }
     _print(sb.toString());
   }
+
+  // the N reply: the tuning and what every key plays (see tuning.dart for the format)
+  void _printTuning() {
+    final sb = StringBuffer()
+      ..write('tuning $tuning ${floatToHex(notegen1)} ${floatToHex(notegen0)} ${floatToHex(noteOffset)} ')
+      ..write('${tuningColor.toRadixString(16).padLeft(6, '0')} ${floatToHex(startNote.toDouble())} 61\r\n');
+    for (var n = 0; n < 61; n++) {
+      sb.write('$n ${firmwareKeyName(n)} ${floatToHex(keyPitch(buttonNumberMap[n]))} ${floatToHex(keyOffset[n])}\r\n');
+    }
+    _print(sb.toString());
+  }
+
+  /// What button [id] plays, MIDI-like semitones (Button::note).
+  double keyPitch(int id) {
+    final n = keyNumberOf[id];
+    return startNote + noteOffset + notegen0 * c0[id] + notegen1 * c1[id] + (n == null ? 0 : keyOffset[n]);
+  }
+
+  /// load_tuning(n): the settings card's tunings 0..8 (the fine tune is kept, as the board does).
+  void loadTuning(int n) {
+    final t = factoryTunings[n.clamp(0, factoryTunings.length - 1)];
+    tuning = t.index;
+    notegen1 = toFloat32(t.fifth / 100);
+    notegen0 = toFloat32(t.octave / 100);
+    tuningColor = t.color;
+    for (var k = 0; k < 61; k++) {
+      keyOffset[k] = toFloat32(factoryKeyOffset(t, k) / 100);
+    }
+  }
+
+  /// The fine tune in cents (the knob on the tuning keys), e.g. -31.77 for A = 432 Hz.
+  void fineTune(double cents) => noteOffset = toFloat32(cents / 100);
 
   bool setParam(int target, int index, double v) {
     if (target == Target.touch) {

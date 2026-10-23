@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'protocol.dart';
 import 'transport.dart';
+import 'tuning.dart';
 
 const _paramIntervalMs = 16; // at most ~60 writes per second per parameter
 const _streamSilenceMs = 3000;
@@ -273,6 +274,28 @@ class StrisoClient {
     final h = r.state['header'] as ({int target, String name, int count})?;
     if (h == null) return null;
     return ParamList(target, h.name, h.count, r.state['params'] as List<Param>, !r.timedOut);
+  }
+
+  /// The tuning and the pitch of every key (StcN). Null when the firmware does not answer.
+  Future<TuningInfo?> getTuning() async {
+    final r = await request(
+      Cmd.tuning(),
+      (l, s) {
+        if (tuningHeaderLine.hasMatch(l)) {
+          s['header'] = true;
+          return Take.more;
+        }
+        if (s['header'] == true && tuningKeyLine.hasMatch(l)) {
+          final n = ((s['keys'] ??= 0) as int) + 1;
+          s['keys'] = n;
+          return n >= 61 ? Take.done : Take.more;
+        }
+        return Take.no;
+      },
+      timeout: const Duration(milliseconds: 700),
+      idle: const Duration(milliseconds: 90),
+    );
+    return parseTuningReply(r.lines);
   }
 
   /// A console command for the console drawer; replies are collected until quiet.

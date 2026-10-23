@@ -457,6 +457,8 @@ class PlayToolbar extends StatelessWidget {
     (Names.letters, 'D  note'),
     (Names.degrees, '1 2 3  degrees'),
     (Names.solfege, 'do re  solfège'),
+    (Names.pitch, 'Pitch  quarter tones, as the board plays'),
+    (Names.cents, 'Cents  from 12-TET'),
     (Names.off, '—  no labels'),
   ];
 
@@ -466,40 +468,148 @@ class PlayToolbar extends StatelessWidget {
       listenable: ctl,
       builder: (context, _) {
         final t = ctl.live.transpose;
-        return SizedBox(
-          height: Sizes.toolbar,
-          child: Row(
-            children: [
-              KeyPicker(ctl),
-              const SizedBox(width: Space.s),
-              Tooltip(
-                message: 'Key labels: note names with octave, note names, scale degrees or solfège (with a key), or none',
-                waitDuration: const Duration(milliseconds: 900),
-                child: SmallSelect<Names>(
-                  key: const Key('names'),
-                  value: ctl.names,
-                  items: [for (final (n, l) in names) (n, l.split('  ').first)],
-                  onChanged: ctl.setNames,
-                ),
-              ),
-              if (t != 0) ...[
+        return LayoutBuilder(
+          builder: (context, c) {
+            // the controls scroll inside their share when the toolbar is narrow (never overflow)
+            final controls = Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                KeyPicker(ctl),
                 const SizedBox(width: Space.s),
-                Btn(
-                  'Transposed ${t > 0 ? '+' : '−'}${t.abs() % 12 == 0 ? '${t.abs() ~/ 12} oct' : '${t.abs()} st'}  ✕',
-                  kind: BtnKind.ghost,
-                  tooltip: 'Guessed from the octave buttons. Click to reset to D4 in the middle.',
-                  onPressed: ctl.resetTranspose,
+                Tooltip(
+                  message:
+                      'Key labels: note names with octave, note names, scale degrees or solfège (with a key), '
+                      'the pitch the board plays in quarter-tone notation, its cents from 12-TET, or none',
+                  waitDuration: const Duration(milliseconds: 900),
+                  child: SmallSelect<Names>(
+                    key: const Key('names'),
+                    value: ctl.names,
+                    items: [for (final (n, l) in names) (n, l.split('  ').first)],
+                    onChanged: ctl.setNames,
+                  ),
                 ),
+                const SizedBox(width: Space.s),
+                TuningChip(ctl),
+                if (t != 0) ...[
+                  const SizedBox(width: Space.s),
+                  Btn(
+                    'Transposed ${t > 0 ? '+' : '−'}${t.abs() % 12 == 0 ? '${t.abs() ~/ 12} oct' : '${t.abs()} st'}  ✕',
+                    kind: BtnKind.ghost,
+                    tooltip: 'Guessed from the octave buttons. Click to reset to D4 in the middle.',
+                    onPressed: ctl.resetTranspose,
+                  ),
+                ],
               ],
-              const SizedBox(width: Space.l),
-              Expanded(
-                child: Align(alignment: Alignment.centerRight, child: HoverReadout(ctl)),
+            );
+            return SizedBox(
+              height: Sizes.toolbar,
+              child: Row(
+                children: [
+                  // the controls take their own width, up to all but 200 px; the readout the rest
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: (c.maxWidth - 200).clamp(120.0, c.maxWidth)),
+                    child: ClipRect(
+                      child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: controls),
+                    ),
+                  ),
+                  const SizedBox(width: Space.l),
+                  Expanded(
+                    child: Align(alignment: Alignment.centerRight, child: HoverReadout(ctl)),
+                  ),
+                  if (showSound && ctl.voiceName.isNotEmpty) ...[
+                    const SizedBox(width: Space.l),
+                    Flexible(child: SoundName(ctl, size: TypeSize.title)),
+                  ],
+                ],
               ),
-              if (showSound && ctl.voiceName.isNotEmpty) ...[const SizedBox(width: Space.l), SoundName(ctl, size: TypeSize.title)],
-            ],
-          ),
+            );
+          },
         );
       },
+    );
+  }
+}
+
+/// The active tuning, named from the board's N reply ("31-TET", "custom: fifth 696.8 ¢"), and the
+/// fine tune as a reference pitch ("A = 432.0 Hz (−32 ¢)"). The menu holds the pitch reference
+/// and, in the demo, the simulated board's tunings.
+class TuningChip extends StatelessWidget {
+  final AppController ctl;
+  const TuningChip(this.ctl, {super.key});
+
+  static const demoTunings = [(0, '12-TET'), (1, '31-TET'), (2, '19-TET'), (3, 'Pythagorean'), (8, 'Just 7-limit')];
+
+  @override
+  Widget build(BuildContext context) {
+    final t = ctl.tuning;
+    final supported = ctl.tuningSupported == true;
+    final name = ctl.tuningName;
+    final ref = t?.referenceText;
+    final tip = !ctl.connected
+        ? 'The tuning the board plays (read from it once connected)'
+        : supported
+        ? '${t!.naming.name}: fifth ${t.fifthCents.toStringAsFixed(1)} ¢, octave ${t.octaveCents.toStringAsFixed(1)} ¢'
+              '${t.hasKeyOffsets ? ', per-key offsets' : ''}${ref != null ? '. Fine tune: $ref' : ''}'
+              '\nPitch labels are notated relative to this reference.'
+        : 'This firmware does not report its tuning (no N command): labels assume 12-TET from the layout';
+    final face = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(name, key: const Key('tuning-chip'), style: ui(TypeSize.small, color: supported ? Pal.text1 : Pal.text3, weight: FontWeight.w500)),
+        if (ref != null) ...[
+          const SizedBox(width: Space.s),
+          Text(ref, key: const Key('reference-chip'), style: ui(TypeSize.small, color: Pal.text2)),
+        ],
+      ],
+    );
+    return Tooltip(
+      message: tip,
+      waitDuration: const Duration(milliseconds: 700),
+      child: PopupMenuButton<String>(
+        tooltip: '',
+        position: PopupMenuPosition.under,
+        constraints: const BoxConstraints(minWidth: 220),
+        onSelected: (v) {
+          if (v == 'abs') ctl.setPitchRef(PitchRef.absolute);
+          if (v == 'root') ctl.setPitchRef(PitchRef.root);
+          if (v == 'fine:432') {
+            ctl.demoTuning(0, fineCents: -31.77);
+          } else if (v.startsWith('demo:')) {
+            ctl.demoTuning(int.parse(v.substring(5)), fineCents: 0);
+          }
+        },
+        itemBuilder: (_) => [
+          PopupMenuItem(enabled: false, height: Sizes.row, child: Text('Pitch labels relative to', style: microStyle())),
+          for (final (v, l, r) in [('abs', 'A = 440 Hz (the board’s D)', PitchRef.absolute), ('root', 'the key’s root', PitchRef.root)])
+            PopupMenuItem(
+              value: v,
+              height: Sizes.row,
+              child: Text(l, style: ui(TypeSize.body, color: ctl.pitchRef == r ? Pal.accent : Pal.text1)),
+            ),
+          if (ctl.playable) ...[
+            const PopupMenuDivider(),
+            PopupMenuItem(enabled: false, height: Sizes.row, child: Text('Demo board tuning', style: microStyle())),
+            for (final (n, l) in demoTunings)
+              PopupMenuItem(
+                value: 'demo:$n',
+                height: Sizes.row,
+                child: Text(l, style: ui(TypeSize.body, color: t?.index == n && (t?.offsetCents.abs() ?? 0) < 0.5 ? Pal.accent : Pal.text1)),
+              ),
+            PopupMenuItem(
+              value: 'fine:432',
+              height: Sizes.row,
+              child: Text('12-TET at A = 432 Hz', style: ui(TypeSize.body, color: t?.index == 0 && (t?.offsetCents ?? 0) < -1 ? Pal.accent : Pal.text1)),
+            ),
+          ],
+        ],
+        child: Container(
+          height: Sizes.control,
+          padding: const EdgeInsets.symmetric(horizontal: Space.s + 2),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(Radii.small), color: supported || ctl.playable ? Pal.bg2 : Colors.transparent),
+          alignment: Alignment.center,
+          child: face,
+        ),
+      ),
     );
   }
 }
@@ -581,7 +691,9 @@ class SoundName extends StatelessWidget {
         ),
         if (engine.isNotEmpty) ...[
           const SizedBox(width: Space.s),
-          Text(engineInfo(engine).label.toLowerCase(), style: ui(TypeSize.small, color: engineColor(engine))),
+          Flexible(
+            child: Text(engineInfo(engine).label.toLowerCase(), maxLines: 1, overflow: TextOverflow.ellipsis, style: ui(TypeSize.small, color: engineColor(engine))),
+          ),
         ],
         if (ctl.mode == ConnMode.demo && ctl.connected) ...[
           const SizedBox(width: Space.s),

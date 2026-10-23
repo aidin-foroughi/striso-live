@@ -62,6 +62,9 @@ class Cmd {
   static Uint8List params(int target) => commandChar('pfgk'[target]);
   static Uint8List streamOn() => commandChar('S');
   static Uint8List streamOff() => commandChar('s');
+
+  /// The tuning and every key's pitch (firmware with StcN; older boards answer with nothing).
+  static Uint8List tuning() => commandChar('N');
   static Uint8List bootloader() => commandChar('B');
 }
 

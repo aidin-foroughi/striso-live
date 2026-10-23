@@ -13,6 +13,7 @@ import 'package:striso_core/striso_core.dart';
 
 import '../controller.dart';
 import '../theme.dart';
+import 'accidentals.dart';
 import 'paint_util.dart';
 
 final List<(int, int, int)> _heat = () {
@@ -271,9 +272,13 @@ class BoardPainter extends CustomPainter {
             ctl.eqSelected,
           ].join(',')
         : '';
-    final setSig = _settings ? '${ctl.current}|${ctl.voices.length}|${ctl.settingsSelected}' : '';
+    final setSig = _settings ? '${ctl.current}|${ctl.voices.length}|${ctl.settingsSelected}|${ctl.tuning?.index}|${ctl.tuningShort}' : '';
+    final t = ctl.tuning;
+    final tuneSig = ctl.names == Names.pitch || ctl.names == Names.cents
+        ? '${t?.index}|${t?.fifth}|${t?.octave}|${t?.offset}|${t == null ? 0 : Object.hashAll(t.notes.values)}|${ctl.pitchRef.name}'
+        : '';
     return '${size.width.toStringAsFixed(1)}x${size.height.toStringAsFixed(1)}|${live.transpose}|${live.transposeFifths}|'
-        '${ctl.currentKey?.name}|${ctl.names.name}|$labelScale|$eqSig|$setSig';
+        '${ctl.currentKey?.name}|${ctl.names.name}|$labelScale|$eqSig|$setSig|$tuneSig';
   }
 
   @override
@@ -364,11 +369,24 @@ class BoardPainter extends CustomPainter {
       drawText(c, text, Offset(cx, cy), text.length > 2 ? math.max(11.0, big * 0.85) : big, col, weight: FontWeight.w500);
       return;
     }
+    final small = math.max(9.0, r * 0.4 * labelScale).roundToDouble();
+    if (mode == Names.pitch) {
+      // the pitch the board plays, named by its nearest quarter tone, the rest in the accidental
+      drawQtLabel(c, ctl.qtLabel(k.id), Offset(cx, cy), big, col, small: boardWidth < 700 ? null : small);
+      return;
+    }
+    if (mode == Names.cents) {
+      // the spelled name small on top, the cents from 12-TET under it
+      final l = ctl.qtLabel(k.id);
+      final text = centsText(l.centsFrom12);
+      drawText(c, n.text, Offset(cx, cy - r * 0.34), small, _a(col, 0.8), weight: FontWeight.w500);
+      drawText(c, text, Offset(cx, cy + r * 0.2), text.length > 3 ? math.max(11.0, big * 0.8) : big * 0.9, col, weight: FontWeight.w500);
+      return;
+    }
     if (mode != Names.octave) {
       drawText(c, n.text, Offset(cx, cy), big, col, weight: FontWeight.w500);
       return;
     }
-    final small = math.max(9.0, r * 0.4 * labelScale).roundToDouble();
     final w = textWidth(n.text, big, weight: FontWeight.w500);
     final left = cx - (w + 2 + small * 0.6) / 2;
     drawText(c, n.text, Offset(left, cy), big, col, weight: FontWeight.w500, align: -1);
@@ -421,12 +439,15 @@ class BoardPainter extends CustomPainter {
       }
       final v = f.engine != null ? voices[f.engine] : null;
       final col = f.engine != null ? engineColor(f.engine!) : (f.danger ? Pal.error : rgb(groupColors[f.group] ?? 0xffffff));
+      // the tuning the board plays now, named from its values when it reports them
+      final tuningIndex = f.group == SettingsGroup.tuning ? tuningKeyIds.indexOf(k.id) : -1;
+      final currentTuning = tuningIndex >= 0 && ctl.tuning != null && ctl.tuning!.index == tuningIndex;
       c.drawCircle(center, r, Paint()..color = BoardPal.natural);
-      if (v != null && v.current) c.drawCircle(center, r, Paint()..color = _a(col, 0.15));
+      if ((v != null && v.current) || currentTuning) c.drawCircle(center, r, Paint()..color = _a(col, 0.15));
       final rim = _stroke(v != null && v.count == 0 ? _a(col, 0.3) : col, 1.5);
       f.uncertain ? dashedCircle(c, center, r - 0.75, rim, s * 1.2, s * 0.8) : c.drawCircle(center, r - 0.75, rim);
       if (k.id == ctl.settingsSelected) c.drawCircle(center, r + 3, _stroke(Pal.accent, 2));
-      final label = f.short + (f.uncertain ? '?' : '');
+      final label = (currentTuning ? ctl.tuningShort : f.short) + (f.uncertain ? '?' : '');
       final size = math.max(10.0, r * (label.length > 5 ? 0.4 : (label.length > 3 ? 0.48 : 0.58))).roundToDouble();
       drawText(c, label, Offset(center.dx, center.dy - (v != null ? r * 0.16 : 0)), size, f.danger ? Pal.error : Pal.text1, weight: FontWeight.w500);
       if (v != null) {

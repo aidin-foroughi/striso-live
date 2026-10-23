@@ -15,3 +15,4 @@ export 'src/save_touch.dart';
 export 'src/settings_map.dart';
 export 'src/touch.dart';
 export 'src/transport.dart';
+export 'src/tuning.dart';

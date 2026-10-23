@@ -180,6 +180,17 @@ class HarmonyStrip extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(key?.name ?? 'No key', style: ui(TypeSize.body, color: key == null ? Pal.text3 : Pal.text1)),
+              if (ctl.nonTwelve)
+                Tooltip(
+                  message: 'Chords, scales and roman numerals are named by the keys’ spelling, as in 12-TET; the board plays ${ctl.tuningName}.',
+                  child: Text(
+                    'chords by spelling · board in ${ctl.tuningName}',
+                    key: const Key('tuning-note'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: ui(TypeSize.small, color: Pal.text3),
+                  ),
+                ),
               if (bh != null)
                 Tooltip(
                   message:
@@ -342,8 +353,16 @@ class HoverReadout extends StatelessWidget {
         } else if (id >= 0) {
           final n = noteName(id, live.transpose, live.transposeFifths);
           final f = ctl.tab == AppTab.setup ? ctl.keyParam(id)?.value : null;
+          final pitchy = ctl.names == Names.pitch || ctl.names == Names.cents || ctl.nonTwelve;
+          final q = pitchy ? ctl.qtLabel(id) : null;
           text = [
             n.full,
+            if (q != null) ...[
+              '${centsText(q.centsFrom12, decimals: 1)} ¢ vs 12-TET',
+              if (q.nearest != 0 || q.frac.abs() >= qtDrawThreshold)
+                'nearest quarter tone ${q.letter} ${q.accidentalName}${q.frac.abs() >= qtDrawThreshold ? ' ${centsText(q.fracCents)} ¢' : ''}',
+              if (q.respelled) 'respelled',
+            ],
             'key $id',
             'pressure ${live.raw[id].toStringAsFixed(3)}',
             'velocity ${live.vpres[id].toStringAsFixed(2)}',

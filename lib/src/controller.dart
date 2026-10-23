@@ -39,7 +39,12 @@ enum Dot { off, on, demo, busy }
 
 enum InviteState { idle, connecting, reconnect }
 
-enum Names { octave, letters, degrees, solfege, off }
+/// Key labels: spelled names (with or without the octave), degrees, solfège, the pitch as the
+/// board plays it in quarter-tone notation, its cents from 12-TET, or none.
+enum Names { octave, letters, degrees, solfege, pitch, cents, off }
+
+/// What pitch labels are measured against: A = 440 Hz (the board's D is exact), or the key's root.
+enum PitchRef { absolute, root }
 
 enum AppTab { play, sound, setup }
 
@@ -217,6 +222,7 @@ class AppController extends ChangeNotifier implements MorphHost {
 
   // view state
   Names names = Names.octave;
+  PitchRef pitchRef = PitchRef.absolute;
   int keyRoot = 0;
   String keyScale = 'off';
   MusicKey? currentKey;
@@ -263,8 +269,13 @@ class AppController extends ChangeNotifier implements MorphHost {
     });
     live.releaseListeners.add((_, _) => values.ping());
     live.controlListeners.add((id, down, before) {
-      // the settings button is how voices change on the instrument: check after it is released
-      if (id == Idc.alt && !down && before) Timer(const Duration(milliseconds: 350), syncVoice);
+      // the settings button is how voices and tunings change on the instrument: check after it is released
+      if (id == Idc.alt && !down && before) {
+        Timer(const Duration(milliseconds: 350), () {
+          syncVoice();
+          refreshTuning();
+        });
+      }
     });
   }
 
@@ -274,6 +285,7 @@ class AppController extends ChangeNotifier implements MorphHost {
   void _loadPrefs() {
     final n = store.get<String>('names');
     names = Names.values.firstWhere((x) => x.name == n, orElse: () => Names.octave);
+    pitchRef = PitchRef.values.firstWhere((x) => x.name == store.get<String>('pitchRef'), orElse: () => PitchRef.absolute);
     final k = store.raw('key');
     if (k is Map) {
       keyRoot = (k['root'] as num?)?.toInt() ?? 0;
@@ -367,6 +379,7 @@ class AppController extends ChangeNotifier implements MorphHost {
     _presenceTimer?.cancel();
     _syncTimer?.cancel();
     _editsTimer?.cancel();
+    _tuningPoll?.cancel();
     audio.dispose();
     final c = client;
     client = null;
@@ -623,9 +636,10 @@ class AppController extends ChangeNotifier implements MorphHost {
     if (m == ConnMode.usb) status = 'Connected \u00b7 reading parameters';
     notifyListeners();
     listsReady = refreshParams(allTargets, voiceChanged: true)
-        .then((_) {
+        .then((_) async {
           if (m == ConnMode.usb && identical(client, c)) _trace('all lists');
           if (identical(client, c)) _offerRestore();
+          if (identical(client, c)) await refreshTuning();
         })
         .whenComplete(() {
           if (identical(client, c)) {
@@ -687,6 +701,10 @@ class AppController extends ChangeNotifier implements MorphHost {
     loadNa = false;
     loadHist.clear();
     _transport = null;
+    tuning = null;
+    tuningSupported = null;
+    _tuningSuggested = false;
+    _scheduleTuningPoll(); // stops it: no client
     harmony.reset();
     notifyListeners();
     values.ping();
@@ -1128,6 +1146,132 @@ class AppController extends ChangeNotifier implements MorphHost {
     names = n;
     store.set('names', n.name);
     notifyListeners();
+    _scheduleTuningPoll();
+  }
+
+  void setPitchRef(PitchRef r) {
+    pitchRef = r;
+    store.set('pitchRef', r.name);
+    notifyListeners();
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // the board's tuning (StcN): what every key plays
+
+  /// The tuning as the board last reported it; null before the first reply or without support.
+  TuningInfo? tuning;
+
+  /// null: not asked yet; false: the firmware gave no reply (no N command); true: it answers.
+  bool? tuningSupported;
+  bool _tuningSuggested = false, _tuningBusy = false;
+  Timer? _tuningPoll;
+
+  /// Pitch labels want the tuning: N is asked for on connect, after the Settings button is
+  /// released, and every 2 s while pitch or cents labels show (a cheap one-line poll).
+  bool get _wantsTuningPoll => client != null && (names == Names.pitch || names == Names.cents) && tuningSupported != false;
+
+  void _scheduleTuningPoll() {
+    _tuningPoll?.cancel();
+    _tuningPoll = null;
+    if (!_wantsTuningPoll) return;
+    _tuningPoll = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (!_wantsTuningPoll) {
+        _tuningPoll?.cancel();
+        _tuningPoll = null;
+        return;
+      }
+      if (!connecting && !saving) refreshTuning();
+    });
+  }
+
+  /// Ask the board for its tuning. Old firmware answers with nothing: that is remembered for the
+  /// session and the labels fall back to 12-TET from the layout.
+  Future<void> refreshTuning() async {
+    final c = client;
+    if (c == null || _tuningBusy) return;
+    _tuningBusy = true;
+    try {
+      final t = await c.getTuning();
+      if (!identical(c, client)) return;
+      if (t == null) {
+        if (tuningSupported == null) log('no tuning reply (StcN): labels assume 12-TET from the layout');
+        tuningSupported = false;
+        tuning = null;
+      } else {
+        if (tuningSupported != true) log('tuning: ${t.naming.name}${t.referenceText != null ? ', ${t.referenceText}' : ''}');
+        tuningSupported = true;
+        final was = tuning?.naming.name;
+        tuning = t;
+        if (!t.isPlain12 && !_tuningSuggested && names != Names.pitch && names != Names.cents) {
+          _tuningSuggested = true;
+          toastAction(
+            'The Striso plays ${t.naming.name}${t.referenceText != null ? ' at ${t.referenceText}' : ''}',
+            'Pitch labels',
+            () => setNames(Names.pitch),
+          );
+        } else if (was != null && was != t.naming.name) {
+          toast('Tuning: ${t.naming.name}');
+        }
+      }
+      notifyListeners();
+    } finally {
+      _tuningBusy = false;
+      _scheduleTuningPoll();
+    }
+  }
+
+  /// The tuning's names: from the N reply, else 12-TET (the layout's assumption).
+  String get tuningName => tuning?.naming.name ?? '12-TET';
+  String get tuningShort => tuning?.naming.short ?? '12TET';
+
+  /// The board plays something other than 12-TET (chord names stay spelled, 12-TET by letter).
+  bool get nonTwelve {
+    final t = tuning;
+    return t != null && (t.hasKeyOffsets || (t.fifthCents - 700).abs() >= 0.02 || (t.octaveCents - 1200).abs() >= 0.05);
+  }
+
+  /// What a key plays, MIDI-like semitones: the board's word, else 12-TET from the layout.
+  double keyPitch(int id) => tuning?.pitchOfButton(id) ?? (startNote + pitchOf(id) + live.transpose).toDouble();
+
+  /// The pitch a label is drawn from: the fine tune is taken out (the chip shows it), and with the
+  /// root reference the key's root is made exact.
+  double labelPitch(int id) {
+    var p = keyPitch(id) - (tuning?.offset ?? 0);
+    if (pitchRef == PitchRef.root) p -= rootShift;
+    return p;
+  }
+
+  /// How far the key root's key is from 12-TET (semitones), the shift the root reference removes.
+  double get rootShift {
+    final t = tuning;
+    if (t == null) return 0;
+    final tonic = currentKey?.tonic ?? 0; // C when there is no key
+    // the key with this spelling nearest the middle of the board
+    int? best;
+    for (final id in keyIds) {
+      if (keyTpc(id, live.transposeFifths) != tonic) continue;
+      if (best == null || pitchOf(id).abs() < pitchOf(best).abs()) best = id;
+    }
+    if (best == null) return 0;
+    final p = t.pitchOfButton(best);
+    if (p == null) return 0;
+    final nominal = startNote + pitchOf(best) + live.transpose;
+    return p - t.offset - nominal;
+  }
+
+  /// The quarter-tone label of a key on its spelled letter.
+  QtLabel qtLabel(int id) {
+    final n = noteName(id, live.transpose, live.transposeFifths);
+    return quarterToneLabel(labelPitch(id), n.letter, nominalMidi: n.midi);
+  }
+
+  /// Demo: load one of the settings card's tunings on the simulated board, and the fine tune.
+  void demoTuning(int n, {double? fineCents}) {
+    final b = demoBoard;
+    if (b == null) return;
+    b.loadTuning(n);
+    if (fineCents != null) b.fineTune(fineCents);
+    refreshTuning();
   }
 
   void setKey({int? root, String? scale}) {

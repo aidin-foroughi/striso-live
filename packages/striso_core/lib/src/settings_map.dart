@@ -5,6 +5,7 @@
 // Port of tools/app/js/settings.js.
 
 import 'protocol.dart' show VoiceEntry;
+import 'tuning.dart' show factoryTunings;
 
 const List<String> howToSettings = [
   'Hold the square Settings button (bottom left) and press a key: the key does its setting instead of playing.',
@@ -42,10 +43,13 @@ class SettingsKey {
   List<String> describe(int id) => ['$title${uncertain ? ' (?)' : ''}', if (knob != null) 'tilt or circle the key: $knob', ?detail, 'key $id'];
 }
 
-// the factory tunings 1-8 (config.h fT<n>..., as on the settings card); the configuration editor can
-// change them, which the board doesn't report, so the details say so
-const _cardTunings = ['12-TET', '31-TET', '19-TET', 'Pythagoras', '5-TET', '7-TET', 'Bohlen-Pierce 1', 'Bohlen-Pierce 2', 'Just 7-limit'];
-const _cardTuningsShort = ['12TET', '31TET', '19TET', 'Pyth', '5TET', '7TET', 'BP1', 'BP2', 'Just'];
+// the factory tunings 0-8 (config.h fT<n>..., as on the settings card: tuning.dart); the
+// configuration editor can change them, which only the N command reports, so the details say so
+final List<String> cardTunings = [for (final t in factoryTunings) t.name];
+final List<String> cardTuningsShort = [for (final t in factoryTunings) t.short];
+
+/// The button id of each tuning key, by tuning index 0..8 (row 5 in config_but).
+const List<int> tuningKeyIds = [34, 36, 38, 23, 25, 27, 29, 31, 33];
 
 /// Engine and indicator led colour per voice key, as config_voice(engine, r, g, b).
 const Map<int, (String, List<int>)> voiceKeys = {
@@ -78,11 +82,11 @@ final Map<int, SettingsKey> settingsKeys = {
       knob: 'step through its presets (the up/down leds show which)',
       detail: 'A press selects the engine with the preset it had last (remembered while powered).',
     ),
-  for (final (n, id) in [34, 36, 38, 23, 25, 27, 29, 31, 33].indexed)
+  for (final (n, id) in tuningKeyIds.indexed)
     id: SettingsKey(
       SettingsGroup.tuning,
-      _cardTuningsShort[n],
-      'Tuning $n: ${_cardTunings[n]}',
+      cardTuningsShort[n],
+      'Tuning $n: ${cardTunings[n]}',
       knob: 'fine tuning offset, 1/32 semitone per step',
       detail: n == 0 ? null : 'Factory tuning; the configuration editor can change it.',
     ),
