@@ -4,6 +4,7 @@
 /// the status; the audio stays on the native threads.
 library;
 
+export 'src/auto_buffer.dart';
 export 'src/backend.dart';
 export 'src/fake.dart';
 export 'src/native.dart' show NativeAudioBackend, StrisoAudioLib, strisoAudioCandidates, backendSystem, backendNull;

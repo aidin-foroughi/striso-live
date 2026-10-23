@@ -1,6 +1,8 @@
 // A scriptable AudioBackend for tests: devices come and go, configure applies at once (or when
 // told), the input can be lost, macOS permission can be pending or denied. No audio, no files.
 
+import 'dart:math' as math;
+
 import 'backend.dart';
 
 class FakeAudioBackend implements AudioBackend {
@@ -18,6 +20,20 @@ class FakeAudioBackend implements AudioBackend {
 
   /// macOS: Mic.* (Mic.na elsewhere).
   int mic = Mic.na;
+
+  /// The smallest period each output (by name; '' the default) plays without dropouts: below it,
+  /// every [run] brings a dropout (ring empty, the output's side).
+  Map<String, int> stableFrom = {};
+
+  /// The smallest device buffer each output gives (its minimum period), by name.
+  Map<String, int> minBuffer = {};
+
+  /// Another program holds the output exclusively: exclusive requests open it shared.
+  bool exclusiveBusy = false;
+
+  /// The library's clock (us), moved on by [run] and [advance].
+  int nowUs = 0;
+  final eventLog = <AudioEvent>[];
   bool micRequested = false;
 
   final configs = <AudioConfig>[];
@@ -65,6 +81,29 @@ class FakeAudioBackend implements AudioBackend {
 
   @override
   List<AudioDevice> devices({required bool capture}) => capture ? _listedIn : _listedOut;
+
+  @override
+  List<AudioEvent> events(int afterSeq) => eventLog.where((e) => e.seq > afterSeq).toList();
+
+  void _event(int type, int a, int b, int c) {
+    eventLog.add(AudioEvent(eventLog.length + 1, type, nowUs, a, b, c));
+    _st = _copy(eventSeq: eventLog.length, nowUs: nowUs);
+  }
+
+  void advance(Duration d) {
+    nowUs += d.inMicroseconds;
+    _st = _copy(nowUs: nowUs);
+  }
+
+  /// A dropout now: the ring empty (input late with [input]), counted like the native side.
+  void dropout({bool input = false}) {
+    if (_st.playback != DevState.running) return;
+    _st = _copy(underruns: _st.underruns + 1);
+    _event(Ev.ringEmpty, 48, input ? 4200 : 300, input ? 1 : 0);
+  }
+
+  /// The period the output runs at, or 0.
+  int get runningPeriod => _st.playback == DevState.running ? _pending.period : 0;
 
   @override
   int configure(AudioConfig c) {
@@ -115,10 +154,16 @@ class FakeAudioBackend implements AudioBackend {
       captureBits: cap == DevState.running ? (c.exclusive ? 24 : -32) : 0,
       captureExclusive: cap == DevState.running && c.exclusive,
       playback: play,
-      playbackExclusive: play == DevState.running && c.exclusiveOutput,
+      playbackExclusive: play == DevState.running && c.exclusiveOutput && !exclusiveBusy,
+      playbackExclResult: play == DevState.running && c.exclusiveOutput && exclusiveBusy ? -17 : 0,
+      playbackBuffer: play == DevState.running ? math.max(c.period, minBuffer[c.output] ?? 0) : 0,
+      underruns: 0,
+      inMs: play == DevState.running ? 0.5 : 0,
+      ringMs: play == DevState.running ? 2.0 : 0,
+      outMs: play == DevState.running ? c.period / 48 : 0,
       playbackError: pe,
       playbackRate: play == DevState.running ? 48000 : 0,
-      latencyMs: play == DevState.running ? 7.5 : 0,
+      latencyMs: play == DevState.running ? 2.5 + c.period / 48 : 0,
       streaming: play == DevState.running,
       record: keepRec ? RecState.on : (_st.record == RecState.on ? RecState.stopped : _st.record),
       recordError: keepRec ? AudioErr.ok : (_st.record == RecState.on ? AudioErr.ok : _st.recordError),
@@ -152,10 +197,15 @@ class FakeAudioBackend implements AudioBackend {
   /// The output stops by itself.
   void loseOutput() => _st = _copy(playback: DevState.lost, playbackError: AudioErr.lost, streaming: false);
 
-  /// Input frames pass (levels, recording length).
+  /// Input frames pass (levels, recording length); the clock moves on by them. Below the output's
+  /// [stableFrom] each call brings a dropout.
   void run(int frames, {double level = 0.25}) {
     if (_st.capture != DevState.running) return;
+    nowUs += frames * 1000000 ~/ 48000;
+    final min = stableFrom[_pending.output];
+    if (min != null && _st.playback == DevState.running && _pending.period < min) dropout();
     _st = _copy(
+      nowUs: nowUs,
       levelL: level,
       levelR: level,
       captureCallbacks: _st.captureCallbacks + frames ~/ 128,
@@ -224,6 +274,14 @@ class FakeAudioBackend implements AudioBackend {
     int? recordBits,
     int? recordFrames,
     int? micPermission,
+    int? underruns,
+    int? playbackExclResult,
+    int? playbackBuffer,
+    double? inMs,
+    double? ringMs,
+    double? outMs,
+    int? nowUs,
+    int? eventSeq,
   }) {
     final s = _st;
     return AudioStatus(
@@ -254,6 +312,14 @@ class FakeAudioBackend implements AudioBackend {
       recordBits: recordBits ?? s.recordBits,
       recordFrames: recordFrames ?? s.recordFrames,
       micPermission: micPermission ?? s.micPermission,
+      underruns: underruns ?? s.underruns,
+      playbackExclResult: playbackExclResult ?? s.playbackExclResult,
+      playbackBuffer: playbackBuffer ?? s.playbackBuffer,
+      inMs: inMs ?? s.inMs,
+      ringMs: ringMs ?? s.ringMs,
+      outMs: outMs ?? s.outMs,
+      nowUs: nowUs ?? s.nowUs,
+      eventSeq: eventSeq ?? s.eventSeq,
     );
   }
 }

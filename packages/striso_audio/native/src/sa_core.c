@@ -91,6 +91,104 @@ void sa_sinc_table(float* table, double cutoff, double beta) {
     }
 }
 
+/* ---------------------------------------------------------------- timing */
+
+void sa_wmax_put(sa_wmax* w, float v, uint32_t now) {
+    if (!w->started) {
+        memset(w->b, 0, sizeof(w->b));
+        w->i = 0;
+        w->t0 = now;
+        w->started = 1;
+    }
+    for (int rot = 0; (uint32_t)(now - w->t0) >= SA_WBUCKET_US; rot++) {
+        if (rot >= SA_WBUCKETS) { /* a long pause: everything is old */
+            memset(w->b, 0, sizeof(w->b));
+            w->t0 = now;
+            break;
+        }
+        w->i = (w->i + 1) % SA_WBUCKETS;
+        w->b[w->i] = 0;
+        w->t0 += SA_WBUCKET_US;
+    }
+    if (v > w->b[w->i]) w->b[w->i] = v;
+}
+
+float sa_wmax_get(const sa_wmax* w) {
+    float m = 0;
+    for (int i = 0; i < SA_WBUCKETS; i++)
+        if (w->b[i] > m) m = w->b[i];
+    return m;
+}
+
+uint32_t sa_timing_cb(sa_timing* t, uint32_t frames, uint32_t now) {
+    if (!t->have) {
+        t->have = 1;
+        t->start_us = t->end_us = now;
+        t->frames = frames;
+        return 0;
+    }
+    if ((uint32_t)(now - t->end_us) <= SA_BURST_US) {
+        t->frames += frames;
+        t->end_us = now;
+        if (t->frames > sa_ld(&t->st_burst_max)) sa_st(&t->st_burst_max, t->frames);
+        return 0;
+    }
+    /* the burst before is complete; this callback starts the next */
+    uint32_t gap = now - t->start_us;
+    if (gap == 0) gap = 1;
+    float fb = (float)t->frames;
+    t->burst_s = t->bursts ? t->burst_s + 0.05 * (fb - t->burst_s) : fb;
+    sa_wmax_put(&t->burst_w, fb, now);
+    if (t->bursts < 8) {
+        /* the first intervals after opening: the smallest is the best guess of the period */
+        t->nominal_us = (t->nominal_us <= 0 || gap < t->nominal_us) ? gap : t->nominal_us + 0.2 * (gap - t->nominal_us);
+    } else if (gap < 1.5 * t->nominal_us) {
+        t->nominal_us += 0.05 * (gap - t->nominal_us);
+    } else {
+        t->nominal_us += 0.002 * (gap - t->nominal_us); /* late ones barely move it */
+    }
+    t->bursts++;
+    if (t->bursts > 2) { /* not the start-up's */
+        if (gap > t->max_gap_us) t->max_gap_us = gap;
+        sa_wmax_put(&t->gap_w, (float)gap, now);
+    }
+    t->last_gap_us = gap;
+    t->start_us = t->end_us = now;
+    t->frames = frames;
+    sa_st(&t->st_nominal_us, (uint32_t)(t->nominal_us + 0.5));
+    sa_st(&t->st_max_gap_us, t->max_gap_us);
+    sa_st(&t->st_recent_gap_us, (uint32_t)sa_wmax_get(&t->gap_w));
+    sa_st(&t->st_burst, (uint32_t)(t->burst_s + 0.5));
+    float bm = sa_wmax_get(&t->burst_w);
+    sa_st(&t->st_burst_max, (uint32_t)(bm > frames ? bm : frames));
+    return gap;
+}
+
+/* ---------------------------------------------------------------- events */
+
+void sa_evq_push(sa_evq* q, int32_t type, uint32_t t_us, int32_t a, int32_t b, int32_t c) {
+    uint32_t w = q->w, r = sa_ld(&q->r);
+    if (w - r >= SA_EVQ) {
+        sa_inc(&q->lost);
+        return;
+    }
+    sa_evq_item* it = &q->it[w & (SA_EVQ - 1)];
+    it->type = type;
+    it->t_us = t_us;
+    it->a = a;
+    it->b = b;
+    it->c = c;
+    sa_st(&q->w, w + 1);
+}
+
+int sa_evq_pop(sa_evq* q, sa_evq_item* out) {
+    uint32_t r = q->r, w = sa_ld(&q->w);
+    if (r == w) return 0;
+    *out = q->it[r & (SA_EVQ - 1)];
+    sa_st(&q->r, r + 1);
+    return 1;
+}
+
 /* ---------------------------------------------------------------- passthrough */
 
 #define SA_KP 0.5            /* ratio correction per second of fill error */
@@ -99,7 +197,10 @@ void sa_sinc_table(float* table, double cutoff, double beta) {
 #define SA_FILL_TAU 0.2      /* s, smoothing of the virtual fill */
 #define SA_FADE_IN_S 0.005
 #define SA_FADE_OUT_S 0.002
-#define SA_MARGIN_FRAMES 64  /* at 48 kHz: 1.3 ms of scheduling slack on top of the periods */
+#define SA_SAFETY_S 0.0005   /* on top of the measured need: the servo's own wobble */
+#define SA_HYST_S 0.00025    /* the target only moves down by more than this */
+#define SA_CALM_US 15000000u /* the margin shrinks after this long without an underrun */
+#define SA_START_MARGIN_S 0.001 /* the margin to start with (the servo finds the drift meanwhile) */
 
 static void rs_reset(sa_pass* p) {
     memset(p->x, 0, (size_t)SA_HALF * 2 * sizeof(float));
@@ -107,7 +208,7 @@ static void rs_reset(sa_pass* p) {
     p->pos = SA_HALF - 1;
 }
 
-int sa_pass_init(sa_pass* p, double fs_in, double fs_out, uint32_t in_period) {
+int sa_pass_init(sa_pass* p, double fs_in, double fs_out, uint32_t in_hint) {
     memset(p, 0, sizeof(*p));
     if (fs_in <= 0 || fs_out <= 0) return -1;
     if (sa_ring_init(&p->ring, 16384) != 0) return -1;
@@ -124,10 +225,18 @@ int sa_pass_init(sa_pass* p, double fs_in, double fs_out, uint32_t in_period) {
     /* below the output's Nyquist when going down in rate */
     sa_sinc_table(p->table, 0.94 * (p->ratio_nom > 1 ? 1 / p->ratio_nom : 1.0), 7.0);
     rs_reset(p);
-    p->last_block = in_period;
-    p->in_period = p->in_hint = in_period > 0 ? in_period : 128;
+    p->last_block = in_hint;
+    p->in_hint = in_hint > 0 ? in_hint : 128;
     p->gain_s = -1; /* first pull takes the gain as it is */
+    p->min_slack = 1e9;
+    /* start with room for the servo to find the clocks' drift; stable playing gives it back */
+    p->margin = SA_START_MARGIN_S * fs_in;
     return 0;
+}
+
+void sa_pass_set_output(sa_pass* p, uint32_t out_hint, double out_slack_us) {
+    p->out_hint = out_hint;
+    p->out_slack_us = out_slack_us;
 }
 
 void sa_pass_free(sa_pass* p) {
@@ -139,62 +248,108 @@ void sa_pass_free(sa_pass* p) {
 }
 
 void sa_pass_push(sa_pass* p, const float* in, uint32_t frames, uint32_t now_us) {
+    uint32_t gap = sa_timing_cb(&p->tin, frames, now_us);
+    if (gap) {
+        sa_st(&p->last_in_gap_us, gap);
+        double nom = p->tin.nominal_us;
+        if (nom > 0 && p->tin.bursts > 4 && gap > 1.5 * nom + 500) {
+            sa_inc(&p->in_late);
+            sa_evq_push(&p->ev_in, SA_EV_IN_LATE, now_us, (int32_t)gap, (int32_t)nom, (int32_t)sa_ring_fill(&p->ring));
+        }
+    }
+    /* what the output side plans for: the longest wait for the input, its biggest burst */
+    double wait = sa_wmax_get(&p->tin.gap_w) * 1e-6 * p->fs_in;
+    double burst = sa_wmax_get(&p->tin.burst_w);
+    if (p->tin.frames > burst) burst = p->tin.frames;
+    sa_stf(&p->st_in_gap, (float)wait);
+    sa_stf(&p->st_in_burst, (float)burst);
+
     uint32_t n = sa_ring_write(&p->ring, in, frames);
-    if (n < frames) sa_inc(&p->overruns);
+    if (n < frames) {
+        sa_inc(&p->overruns);
+        sa_evq_push(&p->ev_in, SA_EV_IN_OVERRUN, now_us, (int32_t)(frames - n), (int32_t)sa_ring_fill(&p->ring), 0);
+    }
     sa_st(&p->last_block, frames);
     sa_st(&p->stamp_us, now_us);
     sa_inc(&p->pushes);
 }
 
-/* frames the input has produced since its last block, from the clock */
-static double since_block(sa_pass* p, uint32_t now_us, uint32_t stamp, uint32_t lb) {
-    if (sa_ld(&p->pushes) == 0) return 0;
-    double el = (double)(int32_t)(now_us - stamp) * 1e-6 * p->fs_in;
-    if (el < 0) el = 0;
-    if (el > 1.5 * lb) el = 1.5 * lb;
-    return el;
-}
-
-static void pull_block(sa_pass* p, float* out, uint32_t n, uint32_t now_us, float gain) {
+static void pull_block(sa_pass* p, float* out, uint32_t n, uint32_t now_us, float gain, double out_burst) {
     const double fs_in = p->fs_in, fs_out = p->fs_out;
     /* a consistent (stamp, fill) pair */
-    uint32_t s1 = sa_ld(&p->stamp_us), lb = sa_ld(&p->last_block), fill = sa_ring_fill(&p->ring);
+    uint32_t s1 = sa_ld(&p->stamp_us), fill = sa_ring_fill(&p->ring);
     uint32_t s2 = sa_ld(&p->stamp_us);
     if (s1 != s2) {
-        lb = sa_ld(&p->last_block);
         fill = sa_ring_fill(&p->ring);
         s1 = s2;
     }
-    if (lb == 0) lb = n;
-    double el = since_block(p, now_us, s1, lb);
+    /* the input: the longest wait and the biggest burst it showed (at least what its device said) */
+    double wait = sa_ldf(&p->st_in_gap), in_burst = sa_ldf(&p->st_in_burst);
+    if (wait < p->in_hint) wait = p->in_hint;
+    if (in_burst < 1) in_burst = p->in_hint;
+    /* frames the input has produced since its last block (at most one longest wait) */
+    double el = 0;
+    if (sa_ld(&p->pushes) > 0) {
+        el = (double)(int32_t)(now_us - s1) * 1e-6 * fs_in;
+        if (el < 0) el = 0;
+        if (el > wait) el = wait;
+    }
     double backlog = (double)p->have - p->pos;
     double fv = fill + backlog + el;
-    /* the input's typical block (a late block that comes with the next does not move it) */
-    p->in_period += 0.02 * ((double)lb - p->in_period);
-    double ip_ = p->in_period > p->in_hint ? p->in_period : p->in_hint;
-    double target = 1.25 * ip_ + n * p->ratio_nom + SA_MARGIN_FRAMES * fs_in / 48000.0 + p->margin;
-    p->target = target;
+    const double safety = SA_SAFETY_S * fs_in, hyst = SA_HYST_S * fs_in;
+    /* what the ring must hold: the longest wait for the input + the output's biggest take + the
+       resampler's look-ahead + safety + the margin earned by underruns */
+    double computed = wait + out_burst * p->ratio_nom + SA_HALF + 2 + safety + p->margin;
+    /* hysteresis: up at once, down only by more than hyst */
+    if (computed > p->target_used || computed < p->target_used - hyst) p->target_used = computed;
+    double target = p->target_used;
+    if (p->started && fabs(target - p->target) >= 24 * fs_in / 48000) {
+        sa_inc(&p->retargets);
+        sa_evq_push(&p->ev_out, SA_EV_TARGET, now_us, (int32_t)target, (int32_t)p->target, target < p->target ? 1 : 0);
+        p->target = target;
+    } else if (!p->started) {
+        p->target = target;
+    }
     p->out_period = n;
     double dt = n / fs_out;
 
     if (!p->running) {
         double need0 = ceil((n - 1) * p->ratio_nom) + SA_HALF + 2;
-        if (fv >= target && fill >= need0) {
+        /* only once the input's timing is known (a few bursts): the target plans for its interval */
+        int timed = p->fixed_ratio > 0 || *(volatile uint32_t*)&p->tin.bursts >= 4;
+        if (fv >= target && fill >= need0 && timed) {
+            /* begin at the target: what came in while waiting would only wind up the servo
+               (silence so far, nothing is heard of the cut) */
+            double extra = fv - target;
+            if (extra > fill - need0) extra = fill - need0;
+            if (extra >= 1) {
+                sa_ring_skip(&p->ring, (uint32_t)extra);
+                fill = sa_ring_fill(&p->ring);
+                fv = fill + backlog + el;
+            }
             rs_reset(p);
+            p->stream_us = now_us;
             p->running = 1;
             p->fade = 0;
             if (!p->started) {
                 p->fill_s = fv;
                 p->integ = 0;
-                p->ring_s = fv - ip_ / 2.0;
+                p->ring_s = fill + SA_HALF;
             }
+            p->calm_t0 = now_us;
+            p->min_slack = 1e9;
             p->started = 1;
+            p->target = target;
+            sa_evq_push(&p->ev_out, SA_EV_STREAM, now_us, (int32_t)target, (int32_t)p->margin, 0);
+            /* the history was reset: the backlog changed */
+            backlog = (double)p->have - p->pos;
         } else {
             memset(out, 0, (size_t)n * 2 * sizeof(float));
             p->peak *= (float)exp(-dt / 0.3);
             sa_stf(&p->st_peak, p->peak);
             sa_st(&p->streaming, 0);
             sa_stf(&p->st_target, (float)target);
+            sa_stf(&p->st_margin, (float)p->margin);
             return;
         }
     }
@@ -202,24 +357,47 @@ static void pull_block(sa_pass* p, float* out, uint32_t n, uint32_t now_us, floa
     /* the servo: hold the smoothed virtual fill at the target */
     double a = 1 - exp(-dt / SA_FILL_TAU);
     p->fill_s += a * (fv - p->fill_s);
-    p->ring_s += a * ((fv - ip_ / 2.0) - p->ring_s);
     double e = (p->fill_s - target) / fs_in; /* seconds */
     p->integ += e * dt;
     double ilim = SA_MAXCORR / SA_KI;
     if (p->integ > ilim) p->integ = ilim;
     if (p->integ < -ilim) p->integ = -ilim;
     double corr = SA_KP * e + SA_KI * p->integ;
-    if (corr > SA_MAXCORR) corr = SA_MAXCORR;
-    if (corr < -SA_MAXCORR) corr = -SA_MAXCORR;
+    int at_limit = 0;
+    if (corr > SA_MAXCORR) {
+        corr = SA_MAXCORR;
+        at_limit = 1;
+    }
+    if (corr < -SA_MAXCORR) {
+        corr = -SA_MAXCORR;
+        at_limit = 1;
+    }
+    /* (right after priming the fill overshoots by up to an input burst: not worth a word) */
+    if (at_limit && p->fixed_ratio <= 0 && (uint32_t)(now_us - p->stream_us) > 1000000u) {
+        if (!p->clamped || (uint32_t)(now_us - p->clamp_us) > 1000000u) {
+            sa_inc(&p->clamps);
+            sa_evq_push(&p->ev_out, SA_EV_SERVO_LIMIT, now_us, (int32_t)(corr * 1e6), (int32_t)(fv - target), 0);
+            p->clamp_us = now_us;
+        }
+        p->clamped = 1;
+    } else {
+        p->clamped = 0;
+    }
     double r = p->fixed_ratio > 0 ? p->fixed_ratio : p->ratio_nom * (1 + corr);
 
     /* after a stall the ring may hold far too much: cut back (faded) */
-    double too_full = target + (4.0 * ip_ > 2048 + n ? 4.0 * ip_ : 2048.0 + n);
+    double too_full = target + (4.0 * in_burst > 2048 + n ? 4.0 * in_burst : 2048.0 + n);
     int resync = fv > too_full;
 
     /* bring in the input this block needs */
     uint32_t need_have = (uint32_t)floor(p->pos + (n - 1) * r) + SA_HALF + 1;
-    uint32_t deficit = 0;
+    /* how much was to spare (for tightening the margin) */
+    double slack = fill + (double)p->have - need_have;
+    if (slack < p->min_slack) p->min_slack = slack;
+    /* the ring's real delay, for the latency: what waits beyond the read point, mid-take */
+    p->ring_s += a * ((fill + backlog - 0.5 * n * r) - p->ring_s);
+
+    uint32_t deficit = 0, stop_at = n;
     double dr = 0; /* rate change per output frame (only while running dry) */
     int underrun = 0;
     uint32_t fade_in = (uint32_t)(SA_FADE_IN_S * fs_out), fade_out = (uint32_t)(SA_FADE_OUT_S * fs_out);
@@ -238,18 +416,22 @@ static void pull_block(sa_pass* p, float* out, uint32_t n, uint32_t now_us, floa
                (r + r_end) / 2 * (n - 1) = what is left; no kink when at least half is there */
             double left = (double)p->have - SA_HALF - 1 - p->pos;
             if (left < 0) left = 0;
-            double r0 = r, r1 = n > 1 ? 2 * left / (n - 1) - r : 0;
-            if (r1 < 0) {
-                r0 = n > 1 ? 2 * left / (n - 1) : 0;
-                r1 = 0;
+            double r1 = n > 1 ? 2 * left / (n - 1) - r : 0;
+            if (r1 >= 0) {
+                dr = n > 1 ? (r1 - r) / (n - 1) : 0;
+            } else {
+                /* less than half a block left: slow down from the rate it had (no pitch jump) to a
+                   stop where the input ends, and be silent from there */
+                double m = r > 0 ? 2 * left / r : 0;
+                dr = m > 1 ? -r / m : -r;
+                stop_at = (uint32_t)ceil(m);
+                if (stop_at < 1) stop_at = 1;
             }
-            r = r0;
-            dr = n > 1 ? (r1 - r0) / (n - 1) : 0;
         }
     }
 
     /* fades: in after a start, out before an underrun's gap or a cut */
-    uint32_t out_end = n; /* when fading out: silent from here (an underrun fades the whole block) */
+    uint32_t out_end = stop_at < n ? stop_at : n; /* when fading out: silent from here (an underrun fades the whole block) */
     uint32_t out_start = underrun ? 0 : (out_end > fade_out ? out_end - fade_out : 0);
     const float step_in = 1.0f / fade_in;
 
@@ -294,6 +476,7 @@ static void pull_block(sa_pass* p, float* out, uint32_t n, uint32_t now_us, floa
         if (m > peak) peak = m;
         pos += r;
         r += dr;
+        if (r < 0) r = 0, dr = 0;
     }
 
     /* drop the history behind the window */
@@ -310,21 +493,37 @@ static void pull_block(sa_pass* p, float* out, uint32_t n, uint32_t now_us, floa
         p->running = 0;
         p->fade = 0;
         /* more room next time: what was missing, and then some */
-        double grow = 1.5 * deficit + 32;
-        if (grow < n / 2.0) grow = n / 2.0;
-        if (grow < ip_ / 2.0) grow = ip_ / 2.0;
+        double grow = 1.5 * deficit + 16;
+        if (grow < 0.25e-3 * fs_in) grow = 0.25e-3 * fs_in;
         double cap = 0.05 * fs_in; /* 50 ms */
         p->margin = p->margin + grow > cap ? cap : p->margin + grow;
         sa_inc(&p->underruns);
+        /* the cause: the input is late right now (its last block is older than its interval allows), or not */
+        uint32_t since = now_us - s1, nom = (uint32_t)p->tin.nominal_us;
+        int input_late = nom > 0 && since > 1.5 * nom + 500;
+        sa_evq_push(&p->ev_out, SA_EV_RING_EMPTY, now_us, (int32_t)deficit, (int32_t)since, input_late);
+        p->calm_t0 = now_us;
+        p->min_slack = 1e9;
     } else if (resync) {
         uint32_t f = sa_ring_fill(&p->ring);
-        double keep = target - 1.25 * ip_;
+        double keep = target - wait;
         if (keep < 0) keep = 0;
         if (f > keep) sa_ring_skip(&p->ring, f - (uint32_t)keep);
         rs_reset(p);
         p->fade = 0;
         p->fill_s = target;
         sa_inc(&p->resyncs);
+        sa_evq_push(&p->ev_out, SA_EV_RESYNC, now_us, (int32_t)(f > keep ? f - (uint32_t)keep : 0), (int32_t)f, 0);
+    } else if ((uint32_t)(now_us - p->calm_t0) >= SA_CALM_US) {
+        /* stable for a while: give back some of the margin, if the smallest slack seen allows it */
+        if (p->margin > 0) {
+            double dec = 0.25 * p->margin;
+            if (dec < 8) dec = 8;
+            if (dec > p->margin) dec = p->margin;
+            if (p->min_slack > dec + safety) p->margin -= dec;
+        }
+        p->calm_t0 = now_us;
+        p->min_slack = 1e9;
     }
 
     float decay = (float)exp(-dt / 0.3);
@@ -333,14 +532,33 @@ static void pull_block(sa_pass* p, float* out, uint32_t n, uint32_t now_us, floa
     sa_stf(&p->st_fill, (float)p->fill_s);
     sa_stf(&p->st_ring, (float)(p->ring_s > 0 ? p->ring_s : 0));
     sa_stf(&p->st_target, (float)target);
+    sa_stf(&p->st_margin, (float)p->margin);
     sa_stf(&p->st_ppm, (float)(corr * 1e6));
     sa_st(&p->streaming, p->running ? 1u : 0u);
 }
 
 void sa_pass_pull(sa_pass* p, float* out, uint32_t frames, uint32_t now_us, float gain) {
+    uint32_t gap = sa_timing_cb(&p->tout, frames, now_us);
+    if (gap) {
+        double nom = p->tout.nominal_us;
+        if (nom > 0 && p->tout.bursts > 4 && gap > 1.5 * nom + 500) {
+            /* later than the device can bridge: it played silence (exclusive mode: more than one
+               period late; shared: more than the rest of its buffer) */
+            double slack = p->out_slack_us > 0 ? p->out_slack_us : nom;
+            int glitch = p->running && gap > nom + slack + 250;
+            sa_inc(&p->out_late);
+            if (glitch) sa_inc(&p->out_glitches);
+            sa_evq_push(&p->ev_out, SA_EV_OUT_LATE, now_us, (int32_t)gap, (int32_t)nom, glitch);
+        }
+    }
+    /* the output's biggest single take: its bursts, at least its device buffer */
+    double ob = sa_wmax_get(&p->tout.burst_w);
+    if (p->tout.frames > ob) ob = p->tout.frames;
+    if (p->out_hint > ob) ob = p->out_hint;
+    if (frames > ob) ob = frames;
     while (frames > 0) {
         uint32_t n = frames > SA_MAXBLOCK ? SA_MAXBLOCK : frames;
-        pull_block(p, out, n, now_us, gain);
+        pull_block(p, out, n, now_us, gain, ob);
         out += (size_t)n * 2;
         frames -= n;
         now_us += (uint32_t)(n * 1e6 / p->fs_out);

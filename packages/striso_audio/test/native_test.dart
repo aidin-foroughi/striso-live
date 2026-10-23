@@ -83,6 +83,12 @@ void main() {
     expect(String.fromCharCodes(bytes.sublist(0, 4)), 'RIFF');
     expect(String.fromCharCodes(bytes.sublist(8, 12)), 'WAVE');
 
+    // the event log: both devices opened, streaming started; ids and the breakdown
+    final evs = b.events(0);
+    expect(evs.map((e) => e.type), containsAll([Ev.open, Ev.stream]));
+    expect(ins.first.id, isNotEmpty);
+    expect(s.latencyMs, closeTo(s.inMs + s.ringMs + s.outMs, 0.01));
+
     final g2 = b.configure(AudioConfig.off);
     s = await until((s) => s.configGen >= g2);
     expect(s.capture, DevState.closed);
@@ -90,4 +96,48 @@ void main() {
     b.shutdown();
     dir.deleteSync(recursive: true);
   }, skip: skip);
+
+  // Auto on the real library and its threads (the null backend wakes about every 10 ms, so its
+  // periods differ little; what matters here: it tightens without a dropout on a clean system,
+  // and backs off when the output's wake-ups come late beyond what the buffer bridges)
+  test('Auto on the null backend: tightens cleanly, backs off under late callbacks', () async {
+    final b = NativeAudioBackend.tryLoad(explicit: lib, backend: backendNull)!;
+
+    final logs = <String>[];
+    AudioPrefs? saved;
+    final pc = ThroughPc(
+      backend: b,
+      prefs: const AudioPrefs(through: true, input: 'NULL Capture Device'),
+      log: logs.add,
+      onPrefs: (p) => saved = p,
+      windows: false,
+      autoTiming: const AutoTiming(tighten: Duration(seconds: 2), remember: Duration(seconds: 4), grace: Duration(milliseconds: 800), backoffWait: Duration(milliseconds: 500)),
+    );
+    Future<void> run(double seconds) async {
+      final end = DateTime.now().add(Duration(milliseconds: (seconds * 1000).round()));
+      while (DateTime.now().isBefore(end)) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+
+        pc.tick();
+      }
+    }
+
+    await run(13);
+    final sizes = logs.where((l) => l.startsWith('audio: AudioConfig(run')).map((l) => RegExp(r'", (\d+), monitor').firstMatch(l)?.group(1)).toList();
+    printOnFailure(logs.join('\n'));
+    expect(sizes.first, '256');
+    expect(sizes, contains('64'), reason: 'tightened all the way on a clean system');
+    expect(pc.dropoutsLastMinute().values.fold(0, (a, n) => a + n), 0, reason: 'no dropout while tightening');
+    expect(saved?.autoMemory.values.any((m) => m.stable != null), isTrue, reason: 'a size remembered as stable');
+
+    // every 10th output wake-up 1-25 ms late: more than the 10 ms the null device bridges
+    b.testJitter(25000, 10, output: true);
+    await run(4);
+    b.testJitter(0, 0);
+    expect(logs.where((l) => l.contains('dropout: output late')), isNotEmpty);
+    expect(logs.where((l) => l.contains('backing off')), isNotEmpty);
+    expect(saved!.autoMemory.values.any((m) => m.failed != null), isTrue);
+    expect(pc.period, greaterThan(64));
+    pc.dispose();
+  }, skip: skip, timeout: const Timeout(Duration(seconds: 60)));
 }

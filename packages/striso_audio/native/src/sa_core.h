@@ -9,9 +9,14 @@
  *       target by a PI servo on the resampling ratio, so the ring neither runs dry nor fills up
  *       when the two devices' clocks differ (they always do: the Striso runs on its codec clock).
  *       A correction of 100 ppm is 0.17 cents: inaudible.
- * The target is one input period + one output period + a margin; the margin grows after an
- * underrun. Underrun: the block fades out, the output primes again and fades in. Too full (after
- * a stall): fade out, cut back to the target, fade in.
+ * The target is what the ring must hold so the output never finds it empty: the longest wait for
+ * the input (its largest interval between bursts, measured over the last half minute) + the output's
+ * largest single take + the resampler's look-ahead + a small safety, + a margin that grows after an
+ * underrun and shrinks again after stable playing (hysteresis: only when the smallest slack seen
+ * allows it). Measuring bursts, not callbacks, matters: miniaudio splits a device buffer into
+ * several callbacks, and a shared-mode input brings ten 1 ms packets at once.
+ * Underrun: the block fades out, the output primes again and fades in. Too full (after a stall):
+ * fade out, cut back to the target, fade in.
  */
 #ifndef SA_CORE_H
 #define SA_CORE_H
@@ -76,6 +81,64 @@ void sa_ring_skip(sa_ring* rb, uint32_t frames);                        /* consu
  * the input's Nyquist, each phase normalised to unity gain at DC. */
 void sa_sinc_table(float* table, double cutoff, double beta);
 
+/* ---------------------------------------------------------------- timing of one side */
+
+/* A device's callbacks seen as bursts: callbacks that follow each other within SA_BURST_US are one
+ * burst (miniaudio splits a device buffer into several callbacks; Windows' shared-mode input
+ * delivers ten 1 ms packets at once). Kept by the side's own thread; the results are published as
+ * atomics for the other threads. */
+#define SA_BURST_US 500u
+#define SA_WBUCKETS 8          /* windowed maxima: 8 buckets ... */
+#define SA_WBUCKET_US 4000000u /* ... of 4 s: the last 28..32 s */
+
+typedef struct sa_wmax {
+    float b[SA_WBUCKETS];
+    int i;
+    uint32_t t0;
+    int started;
+} sa_wmax;
+
+void sa_wmax_put(sa_wmax* w, float v, uint32_t now_us);
+float sa_wmax_get(const sa_wmax* w);
+
+typedef struct sa_timing {
+    int have;               /* a burst has started */
+    uint32_t start_us;      /* when the current burst started */
+    uint32_t end_us;        /* when its last callback was */
+    uint32_t frames;        /* frames in the current burst */
+    uint32_t bursts;        /* bursts completed */
+    double nominal_us;      /* typical interval between burst starts (0: not known yet) */
+    double burst_s;         /* typical burst size (frames, smoothed) */
+    uint32_t max_gap_us;    /* largest interval since the start */
+    uint32_t last_gap_us;
+    sa_wmax gap_w, burst_w; /* the largest interval and burst over the last half minute */
+    /* published */
+    volatile uint32_t st_nominal_us, st_max_gap_us, st_recent_gap_us, st_burst, st_burst_max;
+} sa_timing;
+
+/* A callback of `frames` at now_us. Returns the interval (us) when it starts a new burst, else 0. */
+uint32_t sa_timing_cb(sa_timing* t, uint32_t frames, uint32_t now_us);
+
+/* ---------------------------------------------------------------- events */
+
+/* What happened, for the log and the dropout counters (SA_EV_* in striso_audio.h). One queue per
+ * producer thread (capture, playback), drained by the control thread. */
+#define SA_EVQ 64
+typedef struct sa_evq_item {
+    int32_t type;
+    uint32_t t_us;
+    int32_t a, b, c;
+} sa_evq_item;
+
+typedef struct sa_evq {
+    sa_evq_item it[SA_EVQ];
+    volatile uint32_t w, r;
+    volatile uint32_t lost;
+} sa_evq;
+
+void sa_evq_push(sa_evq* q, int32_t type, uint32_t t_us, int32_t a, int32_t b, int32_t c); /* producer */
+int sa_evq_pop(sa_evq* q, sa_evq_item* out);                                              /* consumer: 1 if one */
+
 /* ---------------------------------------------------------------- passthrough */
 typedef struct sa_pass {
     sa_ring ring;
@@ -84,6 +147,12 @@ typedef struct sa_pass {
     volatile uint32_t last_block; /* its size in frames */
     volatile uint32_t overruns;
     volatile uint32_t pushes;
+    volatile uint32_t in_late;    /* input bursts later than they should be */
+    volatile uint32_t st_in_gap;  /* float: the largest input interval of the last half minute, input frames */
+    volatile uint32_t st_in_burst;/* float: the largest input burst of the last half minute, frames */
+    volatile uint32_t last_in_gap_us; /* the interval before the latest input burst */
+    sa_timing tin;
+    sa_evq ev_in;
 
     /* consumer side (playback thread) */
     double fs_in, fs_out, ratio_nom;
@@ -96,23 +165,37 @@ typedef struct sa_pass {
     float fade;         /* 0..1 */
     float gain_s;       /* smoothed gain */
     double integ, fill_s, target, margin;
-    double in_period, in_hint; /* the input's block size: smoothed, and as the device reported it */
+    double in_hint;     /* the input device's buffer (frames): the smallest interval to plan for */
+    double out_hint;    /* the output device's buffer (output frames): the smallest burst to plan for */
+    double out_slack_us;/* how late an output burst may be before the device runs dry (0: one interval) */
     uint32_t out_period;
+    double target_used; /* the target with hysteresis */
+    uint32_t calm_since_us, calm_t0; /* tightening: no underrun since; the window's start */
+    double min_slack;   /* the smallest margin before a pull in this window (input frames) */
+    uint32_t clamp_us;  /* when the servo last reported hitting its limit */
+    uint32_t stream_us; /* when it last started playing */
+    int clamped;
+    sa_timing tout;
+    sa_evq ev_out;
 
     /* statistics, read by the control thread */
-    volatile uint32_t underruns, resyncs, streaming;
+    volatile uint32_t underruns, resyncs, streaming, out_late, out_glitches, clamps, retargets;
     volatile uint32_t st_fill;    /* float: smoothed virtual fill, input frames */
-    volatile uint32_t st_ring;    /* float: smoothed real ring + backlog, input frames */
+    volatile uint32_t st_ring;    /* float: mean delay in the ring and the resampler, input frames */
     volatile uint32_t st_target;  /* float: input frames */
     volatile uint32_t st_ppm;     /* float */
     volatile uint32_t st_peak;    /* float: output peak (decaying) */
+    volatile uint32_t st_margin;  /* float: the extra margin after underruns, input frames */
     double ring_s;
     float peak;
     double fixed_ratio; /* tests: > 0 replaces the servo */
 } sa_pass;
 
-/* in_period: the input's period in frames (a hint; the servo follows what arrives). */
-int sa_pass_init(sa_pass* p, double fs_in, double fs_out, uint32_t in_period);
+/* in_hint: the input device's buffer in frames; out_hint: the output device's (output frames);
+ * out_slack_us: how late an output burst may come before the device plays silence (exclusive mode:
+ * one period; shared: the rest of the buffer). Hints are floors; the target follows what arrives. */
+int sa_pass_init(sa_pass* p, double fs_in, double fs_out, uint32_t in_hint);
+void sa_pass_set_output(sa_pass* p, uint32_t out_hint, double out_slack_us);
 void sa_pass_free(sa_pass* p);
 void sa_pass_push(sa_pass* p, const float* in, uint32_t frames, uint32_t now_us);
 void sa_pass_pull(sa_pass* p, float* out, uint32_t frames, uint32_t now_us, float gain);

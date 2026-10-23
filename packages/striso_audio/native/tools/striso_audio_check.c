@@ -166,7 +166,7 @@ int main(int argc, char** argv) {
     const char* dir = ".";
     for (int i = 1; i < argc; i++)
         if (strcmp(argv[i], "--selftest") != 0) dir = argv[i];
-    static char report[16384];
+    static char report[65536];
     int fails = sa_selftest(dir, report, (int)sizeof(report));
     fputs(report, stdout);
     return fails;

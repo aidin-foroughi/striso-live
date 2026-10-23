@@ -30,7 +30,7 @@ extern "C" {
 #endif
 
 /* Bumped whenever a struct or a function below changes. */
-#define SA_API_VERSION 1
+#define SA_API_VERSION 2
 
 /* sa_init backends */
 #define SA_BACKEND_SYSTEM 0 /* WASAPI on Windows, Core Audio on macOS */
@@ -72,15 +72,54 @@ extern "C" {
 #define SA_MIC_DENIED 2
 #define SA_MIC_AUTHORIZED 3
 
+/* how a device is connected (sa_device.transport) */
+#define SA_TRANSPORT_UNKNOWN 0
+#define SA_TRANSPORT_USB 1
+#define SA_TRANSPORT_BLUETOOTH 2 /* classic or LE: adds 150-250 ms */
+#define SA_TRANSPORT_BUILTIN 3
+#define SA_TRANSPORT_HDMI 4      /* HDMI or DisplayPort */
+#define SA_TRANSPORT_VIRTUAL 5   /* aggregate, virtual, AirPlay, remote desktop */
+#define SA_TRANSPORT_THUNDERBOLT 6
+#define SA_TRANSPORT_PCI 7
+
 /* One device of the last enumeration. All fields 4 bytes wide (no padding). */
 typedef struct sa_device {
     char name[256];         /* UTF-8, NUL terminated */
+    char id[256];           /* stable id: WASAPI endpoint id (Windows), device UID (macOS), else the name */
     int32_t is_default;     /* the system's default device of its kind */
     int32_t is_striso;      /* identified as the Striso by USB VID 0xF055 / PID 0x57C0 */
     int32_t native_bits;    /* 16, 24, 32 (integer), -32 (float) or 0 (unknown) */
     int32_t native_rate;    /* Hz or 0 */
     int32_t native_channels;
+    int32_t transport;      /* SA_TRANSPORT_* */
+    int32_t reserved[2];
 } sa_device;
+
+/* events (sa_event.type), each with its cause */
+#define SA_EV_IN_LATE 1      /* an input burst came late. a: interval us, b: typical us, c: ring frames left */
+#define SA_EV_IN_OVERRUN 2   /* the ring was full: input dropped (ring full). a: frames dropped */
+#define SA_EV_RING_EMPTY 3   /* the output found the ring empty (a dropout). a: frames short, b: the input's last interval us, c: 1 when the input was late (cause: input late), 0 (cause: output took more than planned) */
+#define SA_EV_OUT_LATE 4     /* an output burst came late. a: interval us, b: typical us, c: 1 when later than the device can bridge (a dropout: output late) */
+#define SA_EV_RESYNC 5       /* the ring was too full after a stall and was cut back (a dropout). a: frames cut */
+#define SA_EV_SERVO_LIMIT 6  /* the drift servo hit its limit. a: ppm */
+#define SA_EV_TARGET 7       /* the ring target moved. a: new target frames, b: old, c: 1 tighter, 0 looser */
+#define SA_EV_STREAM 8       /* the output started playing the input. a: target frames */
+#define SA_EV_OPEN 9         /* a device opened. a: 1 capture / 0 playback, b: buffer frames, c: 1 exclusive */
+#define SA_EV_RT 10          /* real-time scheduling of a device thread. a: 1 capture / 0 playback, b: SA_RT_* flags */
+
+/* sa_status.rt_* flags */
+#define SA_RT_MMCSS 1        /* the thread is in MMCSS "Pro Audio" (Windows) */
+#define SA_RT_CRITICAL 2     /* ... at AVRT_PRIORITY_CRITICAL */
+#define SA_RT_TIME_CRITICAL 4/* THREAD_PRIORITY_TIME_CRITICAL */
+#define SA_RT_HAL 8          /* macOS: Core Audio's real-time IO thread */
+
+typedef struct sa_event {
+    uint32_t seq;            /* 1, 2, 3, ... */
+    int32_t type;            /* SA_EV_* */
+    uint32_t t_lo, t_hi;     /* microseconds since sa_init */
+    int32_t a, b, c;
+    int32_t reserved;
+} sa_event;
 
 /* Status, read with sa_get_status. Every field 4 bytes wide (no padding). */
 typedef struct sa_status {
@@ -131,6 +170,30 @@ typedef struct sa_status {
     int32_t mic_permission;   /* SA_MIC_* */
     int32_t playback_exclusive; /* Windows: the output opened in exclusive mode */
     uint32_t reserved[3];
+
+    /* API 2: what the devices report, the latency breakdown, dropouts by cause, callback timing */
+    int32_t capture_buffer;   /* frames the input device delivers per wake-up (its buffer) */
+    int32_t capture_dev_min;  /* Windows: the device's minimum and default period (frames); 0 unknown */
+    int32_t capture_dev_default;
+    int32_t capture_stream_latency; /* frames the system reports on top of the buffer (WASAPI stream latency; Core Audio device + stream latency + safety offset) */
+    int32_t capture_excl_result;    /* the ma_result of a failed exclusive attempt (0: none) */
+    int32_t playback_buffer;
+    int32_t playback_dev_min;
+    int32_t playback_dev_default;
+    int32_t playback_stream_latency;
+    int32_t playback_excl_result;   /* MA_BUSY (-17): another program holds the output */
+    int32_t playback_transport;     /* SA_TRANSPORT_* of the open output */
+    float in_ms, out_ms;      /* latency breakdown: input (buffer + reported), output (buffer + reported); ring_ms above */
+    float margin_ms;          /* the ring target's extra margin after underruns */
+    uint32_t in_late, out_late, out_glitches, servo_limits, retargets, events_lost;
+    uint32_t cap_nominal_us, cap_max_gap_us, cap_recent_gap_us, cap_burst, cap_burst_max;
+    uint32_t play_nominal_us, play_max_gap_us, play_recent_gap_us, play_burst, play_burst_max;
+    uint32_t now_lo, now_hi;  /* the library's clock (us since sa_init), for the events' times */
+    uint32_t event_seq;       /* the newest event */
+    int32_t rt_capture, rt_playback, rt_control; /* SA_RT_* */
+    int32_t timer_1ms;        /* Windows: timeBeginPeriod(1) is held */
+    int32_t power_throttling_off; /* Windows: the process asked not to be throttled */
+    uint32_t reserved2[4];
 } sa_status;
 
 /* Version of this library (SA_API_VERSION) and of miniaudio (e.g. "0.11.25"). */
@@ -157,7 +220,9 @@ SA_API int32_t sa_device_get(int32_t capture, int32_t i, sa_device* out);
  *   run      0: everything closed (a recording is finished first)
  *   input    exact device name, or "" for the Striso (VID/PID, else a name with "Striso")
  *   output   exact device name, or "" for the system default (followed when it changes)
- *   period   frames per device period (e.g. 64, 128, 256)
+ *   period   frames per device period (e.g. 64, 128, 256). In exclusive mode this is the device's
+ *            real period (one buffer per wake-up, at least the device's minimum); in shared mode a
+ *            request the system may round up.
  *   monitor  1: play the input to the output; 0: input only (meters, recording)
  *   exclusive  Windows, SA_EXCLUSIVE_* flags: try the input (1) and/or the output (2) in
  *            exclusive mode first (lower latency; the input in its own format); each falls back to
@@ -178,6 +243,11 @@ SA_API void sa_record_stop(void);
 
 SA_API void sa_get_status(sa_status* out);
 
+/* Copies up to max events newer than after_seq, oldest first; returns how many. The library keeps
+ * the last 512. */
+SA_API int32_t sa_get_events(uint32_t after_seq, sa_event* out, int32_t max);
+SA_API int32_t sa_sizeof_event(void);
+
 /* The user's Documents folder (Windows: the known folder, also when moved to OneDrive; macOS:
  * ~/Documents), UTF-8, into out. Returns its length or 0. */
 SA_API int32_t sa_documents_dir(char* out, int32_t size);
@@ -185,6 +255,10 @@ SA_API int32_t sa_documents_dir(char* out, int32_t size);
 /* macOS: asks the user for audio input permission (the system prompt); the answer arrives in
  * status.mic_permission. Elsewhere does nothing. */
 SA_API void sa_request_mic(void);
+
+/* Tests on the null backend only: every_n-th input callback (and, with output 1, output callback)
+ * comes up to max_late_us late (the callback sleeps). 0 turns it off. Ignored on the system backend. */
+SA_API void sa_test_jitter(int32_t max_late_us, int32_t every_n, int32_t output);
 
 /* Self-tests of the passthrough math, the resampler, the drift servo, the WAV writer and a
  * session on the null backend. Writes a report (UTF-8 lines) into report and its scratch files

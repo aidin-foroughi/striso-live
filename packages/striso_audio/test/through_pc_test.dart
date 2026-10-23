@@ -14,7 +14,7 @@ class Rig {
   final logs = <String>[];
   late final Directory dir;
 
-  Rig({AudioPrefs prefs = const AudioPrefs(), void Function(FakeAudioBackend)? setup}) {
+  Rig({AudioPrefs prefs = const AudioPrefs(), void Function(FakeAudioBackend)? setup, bool windows = true, AutoTiming timing = const AutoTiming()}) {
     setup?.call(fake);
     dir = Directory.systemTemp.createTempSync('striso_audio_test');
     pc = ThroughPc(
@@ -25,7 +25,18 @@ class Rig {
       log: logs.add,
       clock: () => now,
       recordingsDir: () => '${dir.path}${Platform.pathSeparator}Striso Live Recordings',
+      windows: windows,
+      autoTiming: timing,
     );
+  }
+
+  /// Plays for [seconds]: 50 ms ticks, the input at [level] (0: quiet) moving the fake's clock.
+  void play(double seconds, {double level = 0}) {
+    for (var t = 0; t < seconds * 1000; t += 50) {
+      now = now.add(const Duration(milliseconds: 50));
+      fake.run(2400, level: level);
+      pc.tick();
+    }
   }
 
   /// Ticks every 50 ms for [ms].
@@ -67,9 +78,26 @@ void main() {
   });
 
   group('AudioPrefs', () {
-    test('defaults: off, the Striso, the default output, 128 frames, -6 dB, exclusive input, shared output', () {
+    test('defaults: off, the Striso, the default output, Auto, -6 dB, exclusive input, exclusive output (wired)', () {
       const p = AudioPrefs();
-      expect([p.through, p.input, p.output, p.period, p.gainDb, p.exclusive, p.exclusiveOutput], [false, null, null, 128, -6, true, false]);
+      expect([p.through, p.input, p.output, p.period, p.gainDb, p.exclusive, p.exclusiveOutput], [false, null, null, AudioPrefs.auto, -6, true, true]);
+      expect(p.isAuto, isTrue);
+    });
+    test('settings from before Auto: Auto and exclusive output; from now on what was chosen', () {
+      final old = AudioPrefs.fromJson({'through': true, 'period': 64, 'exclusiveOutput': false});
+      expect([old.period, old.exclusiveOutput, old.through], [AudioPrefs.auto, true, true]);
+      final v2 = AudioPrefs.fromJson({'v': 2, 'period': 64, 'exclusiveOutput': false});
+      expect([v2.period, v2.exclusiveOutput], [64, false]);
+      final mem = AudioPrefs.fromJson({
+        'v': 2,
+        'auto': {
+          'dock|exclusive': {'stable': 128, 'failed': 64, 'failedAt': 1000, 'floor': 999},
+          7: 'nonsense',
+        },
+      });
+      expect(mem.autoMemory.keys, ['dock|exclusive']);
+      expect(mem.autoMemory['dock|exclusive'], AutoMemory(stable: 128, failed: 64, failedAt: DateTime.fromMillisecondsSinceEpoch(1000)));
+      expect(AudioPrefs.fromJson(mem.toJson()), mem);
     });
     test('JSON round trip', () {
       const p = AudioPrefs(
@@ -85,8 +113,8 @@ void main() {
       expect(AudioPrefs.fromJson(const AudioPrefs().toJson()), const AudioPrefs());
     });
     test('bad values from disk fall back', () {
-      final p = AudioPrefs.fromJson({'through': 'yes', 'period': 100, 'gainDb': 50, 'input': '', 'exclusive': 0});
-      expect([p.through, p.period, p.gainDb, p.input, p.exclusive], [false, 128, AudioPrefs.maxDb, null, true]);
+      final p = AudioPrefs.fromJson({'v': 2, 'through': 'yes', 'period': 100, 'gainDb': 50, 'input': '', 'exclusive': 0});
+      expect([p.through, p.period, p.gainDb, p.input, p.exclusive], [false, AudioPrefs.auto, AudioPrefs.maxDb, null, true]);
       expect(AudioPrefs.fromJson('nonsense'), const AudioPrefs());
       expect(AudioPrefs.fromJson(null), const AudioPrefs());
     });
@@ -123,13 +151,13 @@ void main() {
       r = Rig();
       r.pc.setThrough(true);
       r.run(300);
-      expect(r.fake.last, AudioConfig(run: true, input: striso.name, output: '', period: 128, monitor: true, exclusive: true));
+      expect(r.fake.last, AudioConfig(run: true, input: striso.name, output: '', period: AutoBuffer.safe, monitor: true, exclusive: true, exclusiveOutput: true));
       expect(r.pc.state, ThroughState.running);
       expect(r.pc.playing, isTrue);
       expect(r.pc.message, contains('Playing through the computer'));
       expect(r.pc.message, contains('48 kHz'));
       expect(r.pc.message, contains('24-bit'));
-      expect(r.pc.liveLine, '7.5 ms · no dropouts');
+      expect(r.pc.liveLine, 'no dropouts in the last minute · exclusive output');
       expect(r.pc.tone, Tone.ok);
       expect(r.saved.last.through, isTrue);
       expect(r.fake.gain, closeTo(gainOf(-6), 1e-9));
@@ -251,6 +279,9 @@ void main() {
       r.run(300);
       r.pc.setPeriod(64);
       r.pc.setExclusive(false);
+      r.pc.setExclusiveOutput(false);
+      r.run(100);
+      expect(r.fake.last.exclusiveOutput, isFalse, reason: 'turned off: shared');
       r.pc.setExclusiveOutput(true);
       r.run(100);
       expect(r.fake.last.period, 64);
@@ -286,7 +317,7 @@ void main() {
       r = Rig();
       r.pc.startRecording();
       r.run(200);
-      expect(r.fake.last, AudioConfig(run: true, input: striso.name, period: 128, monitor: false, exclusive: true));
+      expect(r.fake.last, AudioConfig(run: true, input: striso.name, period: AutoBuffer.safe, monitor: false, exclusive: true, exclusiveOutput: true));
       expect(r.pc.recording, isTrue);
       final path = r.pc.recordingPath!;
       expect(path, endsWith('${Platform.pathSeparator}Striso Live Recordings${Platform.pathSeparator}Striso 2026-10-23 14.02.11.wav'));

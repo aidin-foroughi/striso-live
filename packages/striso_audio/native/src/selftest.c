@@ -203,7 +203,7 @@ static void test_drift(void) {
         snprintf(what, sizeof(what),
                  "drift %s: %u underruns (%u after settling), %u resyncs, servo %+.0f ppm (mean), ring %.2f ms (target %.2f), max step %.4f",
                  cases[i].name, r.underruns, r.underruns_late, r.resyncs, r.final_ppm, r.ring_ms_late, r.target_ms_late, r.max_d2);
-        int ok = r.underruns_late == 0 && r.resyncs == 0 && r.overruns == 0 && r.streaming && r.max_d2 < 0.01 && fabs(r.final_ppm - cases[i].ppm) < 20 + 0.1 * fabs(cases[i].ppm);
+        int ok = r.underruns_late == 0 && r.resyncs == 0 && r.overruns == 0 && r.streaming && r.max_d2 < 0.01 && fabs(r.final_ppm - cases[i].ppm) < 30 + 0.1 * fabs(cases[i].ppm); /* + the margin given back meanwhile (~17 ppm) */
         check(ok, what);
     }
 }
@@ -230,6 +230,244 @@ static void test_glitches(void) {
     snprintf(what, sizeof(what), "input stops 300 ms (replug): %u underruns, back to streaming %s, max step %.4f at %.3f s (faded)", r.underruns,
              r.streaming ? "yes" : "no", r.max_d2, r.max_d2_t);
     check(r.underruns >= 1 && r.max_d2 < 0.01 && r.streaming, what);
+}
+
+/* ---------------------------------------------------------------- realistic timing */
+
+/* The Striso sends a USB packet every 1 ms: 47, 48 or 49 frames (its clock against the host's).
+ * Windows delivers them in batches: one buffer per wake-up in exclusive mode (1..3 packets),
+ * ten at once in shared mode. miniaudio may split a device buffer into several callbacks. Any
+ * callback can be late (a busy system: DPCs, other drivers); the next comes on time again. */
+typedef struct {
+    const char* name;
+    double ppm;            /* input clock vs the output's */
+    int batch;             /* packets per input delivery */
+    int in_split;          /* callbacks per input delivery */
+    uint32_t pp;           /* output frames per wake-up */
+    int out_split;         /* callbacks per output wake-up */
+    double in_late_p, out_late_p;  /* chance that a delivery / wake-up is late */
+    double late_min_us, late_max_us;
+    double jitter_us;      /* small jitter on everything */
+    double seconds, settle;
+    int exclusive_out;     /* the device runs dry when a wake-up is a period late */
+} rt_cfg;
+
+typedef struct {
+    uint32_t ring_empty, ring_empty_after, glitches, glitches_after, in_late, out_late, overruns, resyncs, retargets;
+    uint32_t cause_input, cause_output;
+    double latency_ms, ring_ms, target_ms, margin_ms;
+    double max_d2;
+} rt_res;
+
+static double urand(uint32_t* s) { return (lcg(s) % 1000000) / 1000000.0; }
+
+static void simulate_rt(const rt_cfg* c, rt_res* r) {
+    const double fs = 48000;
+    sa_pass p;
+    memset(r, 0, sizeof(*r));
+    uint32_t in_hint = (uint32_t)(48 * c->batch);
+    if (sa_pass_init(&p, fs, fs, in_hint) != 0) {
+        r->ring_empty = 9999;
+        return;
+    }
+    double period_us = c->pp / fs * 1e6;
+    sa_pass_set_output(&p, c->pp, c->exclusive_out ? period_us : 0);
+    uint32_t seed = 777;
+    float* in = (float*)malloc(sizeof(float) * 2 * 64 * 64);
+    float* out = (float*)malloc(sizeof(float) * 2 * c->pp);
+    double phase = 0, dph = 2 * M_PI * 440 / fs;
+    /* the input: packets every 1 ms of the input clock */
+    double pkt_dt = 1e-3 / (1 + c->ppm * 1e-6);
+    double t_pkt = 0.0002, sent = 0, due = 0;
+    int in_batch_n = 0, in_batch_frames = 0;
+    double t_out_nom = 0.0009;
+    double y1 = 0, y2 = 0;
+    long nout = 0;
+    double lat_sum = 0, ring_sum = 0, tgt_sum = 0, mg_sum = 0;
+    long lat_n = 0;
+    /* pending input delivery */
+    int have_delivery = 0;
+    double t_delivery = 0, t_last_in = 0, t_last_out = 0;
+    int delivery_frames = 0;
+    while (t_out_nom < c->seconds) {
+        /* the next output wake-up (late or not) */
+        double t_out = t_out_nom + urand(&seed) * c->jitter_us * 1e-6;
+        if (urand(&seed) < c->out_late_p) t_out += (c->late_min_us + urand(&seed) * (c->late_max_us - c->late_min_us)) * 1e-6;
+        if (t_out < t_last_out + 20e-6) t_out = t_last_out + 20e-6;
+        t_last_out = t_out;
+        /* deliver every input that arrives before it */
+        for (;;) {
+            if (!have_delivery) {
+                /* collect the next batch of packets */
+                while (in_batch_n < c->batch) {
+                    due += 48;
+                    int n = (int)floor(due - sent + 0.5);
+                    if (urand(&seed) < 0.2 && fabs(due - sent - n) < 0.4) n += urand(&seed) < 0.5 ? -1 : 1;
+                    if (n < 47) n = 47;
+                    if (n > 49) n = 49;
+                    sent += n;
+                    in_batch_frames += n;
+                    in_batch_n++;
+                    t_pkt += pkt_dt;
+                }
+                t_delivery = t_pkt + urand(&seed) * c->jitter_us * 1e-6;
+                if (urand(&seed) < c->in_late_p) t_delivery += (c->late_min_us + urand(&seed) * (c->late_max_us - c->late_min_us)) * 1e-6;
+                /* a late one is followed at once by the next, never overtaken by it */
+                if (t_delivery < t_last_in + 20e-6) t_delivery = t_last_in + 20e-6;
+                t_last_in = t_delivery;
+                delivery_frames = in_batch_frames;
+                in_batch_n = 0;
+                in_batch_frames = 0;
+                have_delivery = 1;
+            }
+            if (t_delivery > t_out) break;
+            int left = delivery_frames, k = 0;
+            for (int s = 0; s < c->in_split; s++) {
+                int part = s == c->in_split - 1 ? left : delivery_frames / c->in_split;
+                for (int i = 0; i < part; i++) {
+                    float v = (float)(0.5 * sin(phase));
+                    in[2 * i] = v;
+                    in[2 * i + 1] = -v;
+                    phase += dph;
+                    if (phase > 2 * M_PI) phase -= 2 * M_PI;
+                }
+                sa_pass_push(&p, in, (uint32_t)part, (uint32_t)((t_delivery + k * 5e-6) * 1e6));
+                left -= part;
+                k++;
+            }
+            have_delivery = 0;
+        }
+        /* the output wake-up, in out_split callbacks */
+        uint32_t e0 = sa_ld(&p.underruns), g0 = sa_ld(&p.out_glitches);
+        for (int s = 0; s < c->out_split; s++) {
+            uint32_t part = c->pp / c->out_split;
+            if (s == c->out_split - 1) part = c->pp - part * (c->out_split - 1);
+            sa_pass_pull(&p, out, part, (uint32_t)((t_out + s * 5e-6) * 1e6), 1.0f);
+            for (uint32_t i = 0; i < part; i++) {
+                double y = out[2 * i];
+                if (nout >= 2) {
+                    double d2 = fabs(y - 2 * y1 + y2);
+                    if (d2 > r->max_d2) r->max_d2 = d2;
+                }
+                y2 = y1;
+                y1 = y;
+                nout++;
+            }
+        }
+        if (t_out_nom > c->settle) {
+            r->ring_empty_after += sa_ld(&p.underruns) - e0;
+            r->glitches_after += sa_ld(&p.out_glitches) - g0;
+            double ring = sa_ldf(&p.st_ring) / fs * 1000;
+            double nom = sa_ld(&p.tin.st_nominal_us) * 1e-3;
+            /* as the app shows it: the wait for the input's next delivery (half its interval),
+               the ring, the output's buffer */
+            lat_sum += nom / 2 + ring + c->pp / fs * 1000;
+            ring_sum += ring;
+            tgt_sum += sa_ldf(&p.st_target) / fs * 1000;
+            mg_sum += sa_ldf(&p.st_margin) / fs * 1000;
+            lat_n++;
+        }
+        t_out_nom += c->pp / fs;
+    }
+    /* the causes the events give */
+    sa_evq_item it;
+    while (sa_evq_pop(&p.ev_out, &it))
+        if (it.type == SA_EV_RING_EMPTY) {
+            if (it.c) r->cause_input++;
+            else r->cause_output++;
+        }
+    while (sa_evq_pop(&p.ev_in, &it)) {
+    }
+    r->ring_empty = sa_ld(&p.underruns);
+    r->glitches = sa_ld(&p.out_glitches);
+    r->in_late = sa_ld(&p.in_late);
+    r->out_late = sa_ld(&p.out_late);
+    r->overruns = sa_ld(&p.overruns);
+    r->resyncs = sa_ld(&p.resyncs);
+    r->retargets = sa_ld(&p.retargets);
+    r->latency_ms = lat_n ? lat_sum / lat_n : 0;
+    r->ring_ms = lat_n ? ring_sum / lat_n : 0;
+    r->target_ms = lat_n ? tgt_sum / lat_n : 0;
+    r->margin_ms = lat_n ? mg_sum / lat_n : 0;
+    free(in);
+    free(out);
+    sa_pass_free(&p);
+}
+
+/* What miniaudio did before (three callbacks per device buffer on both sides) and what Windows'
+ * shared-mode input does (ten packets at once): the target follows the bursts, not the callbacks. */
+static void test_bursts(void) {
+    rt_cfg cases[] = {
+        /* name, ppm, batch, in_split, pp, out_split, in_late_p, out_late_p, late min, max, jitter, s, settle, excl */
+        {"exclusive 4 ms buffers in 3 callbacks each side (the old 64-frame setting)", 40, 4, 3, 192, 3, 0, 0, 0, 0, 150, 30, 3, 1},
+        {"shared input: 10 x 1 ms packets every 10 ms, 128-frame output", -60, 10, 1, 128, 1, 0, 0, 0, 0, 400, 30, 3, 1},
+        {"shared input in 3 callbacks per batch, 64-frame output", 120, 10, 3, 64, 1, 0, 0, 0, 0, 400, 30, 3, 1},
+        {"1 ms packets one by one (UAC 1 ms periods), 48-frame output", -25, 1, 1, 48, 1, 0, 0, 0, 0, 100, 30, 3, 1},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        rt_res r;
+        simulate_rt(&cases[i], &r);
+        char what[400];
+        snprintf(what, sizeof(what), "bursts, %s: %u ring-empty (%u after %.0f s), %u overruns, %u resyncs; latency %.2f ms (ring %.2f, target %.2f, margin %.2f), max step %.4f",
+                 cases[i].name, r.ring_empty, r.ring_empty_after, cases[i].settle, r.overruns, r.resyncs, r.latency_ms, r.ring_ms, r.target_ms, r.margin_ms, r.max_d2);
+        check(r.ring_empty == 0 && r.overruns == 0 && r.resyncs == 0 && r.max_d2 < 0.01, what);
+    }
+}
+
+/* Late callbacks: the counters see them, the ring target absorbs late input, and late output
+ * beyond one period is counted as the device's dropout (exclusive mode cannot bridge it). */
+static void test_late(void) {
+    rt_cfg c = {"late input", 30, 1, 1, 64, 1, 0.01, 0, 1000, 3000, 100, 40, 5, 1};
+    rt_res r;
+    simulate_rt(&c, &r);
+    char what[400];
+    snprintf(what, sizeof(what), "late input (1%% of 1 ms deliveries 1-3 ms late): %u counted late, %u ring-empty (%u after %.0f s; cause input %u, output %u), latency %.2f ms (target %.2f)",
+             r.in_late, r.ring_empty, r.ring_empty_after, c.settle, r.cause_input, r.cause_output, r.latency_ms, r.target_ms);
+    check(r.in_late > 100 && r.ring_empty_after == 0 && r.ring_empty <= 3 && r.cause_output == 0 && r.max_d2 < 0.01, what);
+
+    rt_cfg o = {"late output", -30, 1, 1, 64, 1, 0, 0.01, 1000, 3000, 100, 40, 5, 1};
+    simulate_rt(&o, &r);
+    snprintf(what, sizeof(what), "late output (1%% of 1.33 ms wake-ups 1-3 ms late, exclusive): %u counted late, %u beyond one period (device dropouts), %u ring-empty after settling",
+             r.out_late, r.glitches, r.ring_empty_after);
+    check(r.out_late > 100 && r.glitches > 50 && r.glitches <= r.out_late && r.ring_empty_after == 0, what);
+}
+
+/* The buffer sweep Auto walks: input in 1 ms packets (exclusive) or 10 ms batches (shared), the
+ * output at 64..512 frames, both sides with late wake-ups. The smallest setting without a dropout
+ * is what Auto settles on; its latency is the best this system allows. */
+static void test_sweep(void) {
+    struct {
+        const char* name;
+        int batch;
+        double late_p, late_max;
+    } env[] = {
+        {"exclusive input (1 ms), 0.5% of wake-ups 1-3 ms late", 1, 0.005, 3000},
+        {"exclusive input (3 ms buffers), 0.5% 1-3 ms late", 3, 0.005, 3000},
+        {"shared input (10 x 1 ms every 10 ms), 0.5% 1-3 ms late", 10, 0.005, 3000},
+        {"exclusive input (1 ms), quiet system (0.5% up to 1 ms late)", 1, 0.005, 1000},
+    };
+    const uint32_t sizes[] = {64, 128, 256, 512};
+    for (size_t e = 0; e < sizeof(env) / sizeof(env[0]); e++) {
+        int chosen = -1;
+        double lat[4] = {0};
+        uint32_t drops[4] = {0};
+        for (int k = 0; k < 4; k++) {
+            rt_cfg c = {"sweep", 50, env[e].batch, 1, sizes[k], 1, env[e].late_p, env[e].late_p, 1000, env[e].late_max, 150, 60, 2, 1};
+            rt_res r;
+            simulate_rt(&c, &r);
+            drops[k] = r.ring_empty_after + r.glitches_after;
+            lat[k] = r.latency_ms;
+            if (chosen < 0 && drops[k] == 0) chosen = k;
+        }
+        char what[400];
+        snprintf(what, sizeof(what), "sweep, %s: dropouts 64:%u 128:%u 256:%u 512:%u -> Auto %u frames, %.2f ms through the computer (64: %.2f, 128: %.2f, 256: %.2f)",
+                 env[e].name, drops[0], drops[1], drops[2], drops[3], chosen >= 0 ? sizes[chosen] : 0, chosen >= 0 ? lat[chosen] : 0.0, lat[0], lat[1], lat[2]);
+        /* a setting without dropouts exists, and every larger one is clean too (Auto never needs to
+           go past it) */
+        int ok = chosen >= 0;
+        for (int k = chosen; ok && k < 4; k++) ok = drops[k] == 0;
+        check(ok, what);
+    }
 }
 
 /* least-squares sine fit at a known frequency: gain (dB re amplitude a0) and SNR */
@@ -400,7 +638,7 @@ static void test_session(const char* dir) {
         return;
     }
     sa_status s;
-    check(sa_sizeof_status() == (int32_t)sizeof(sa_status) && sizeof(sa_status) % 4 == 0 && sizeof(sa_device) == 256 + 5 * 4, "struct sizes");
+    check(sa_sizeof_status() == (int32_t)sizeof(sa_status) && sizeof(sa_status) % 4 == 0 && sizeof(sa_device) == 512 + 8 * 4 && sa_sizeof_event() == (int32_t)sizeof(sa_event) && sizeof(sa_event) == 32, "struct sizes");
     if (sa_init(SA_BACKEND_NULL) != SA_OK) {
         check(0, "session: null backend init");
         return;
@@ -472,6 +710,80 @@ static void test_session(const char* dir) {
     check(s.initialised == 0, "session: shutdown");
 }
 
+/* the event log and the counters on the null backend, with late callbacks injected */
+static int has_event(const sa_event* ev, int n, int32_t type, int32_t a) {
+    for (int i = 0; i < n; i++)
+        if (ev[i].type == type && (a < 0 || ev[i].a == a)) return 1;
+    return 0;
+}
+
+static void test_session_jitter(void) {
+    if (sa_internal_inited()) {
+        check(0, "jitter session: the library is in use: skipped");
+        return;
+    }
+    sa_status s;
+    if (sa_init(SA_BACKEND_NULL) != SA_OK) {
+        check(0, "jitter session: null backend init");
+        return;
+    }
+    sa_timer_1ms(1); /* the injected sleeps of 1-3 ms need a 1 ms timer */
+    sa_get_status(&s);
+    g_dev_gen = s.devices_gen;
+    sa_enumerate();
+    wait_for(enumerated, 2000, &s);
+    sa_device cap;
+    memset(&cap, 0, sizeof(cap));
+    if (sa_device_get(1, 0, &cap) != SA_OK) {
+        check(0, "jitter session: no input");
+        sa_shutdown();
+        return;
+    }
+    g_gen = sa_configure(1, cap.name, "", 256, 1, 0);
+    int ok = wait_for(both_running, 3000, &s) && wait_for(streaming, 3000, &s);
+    static sa_event ev[512];
+    int n = sa_get_events(0, ev, 512);
+    int ordered = 1;
+    for (int i = 1; i < n; i++) {
+        uint64_t a = ((uint64_t)ev[i - 1].t_hi << 32) | ev[i - 1].t_lo, b = ((uint64_t)ev[i].t_hi << 32) | ev[i].t_lo;
+        if (ev[i].seq != ev[i - 1].seq + 1 || b < a) ordered = 0;
+    }
+    char what[300];
+    snprintf(what, sizeof(what), "events: %d logged (input and output opened, streaming started), numbered and in time order, ids \"%s\"", n, cap.id);
+    check(ok && n >= 3 && has_event(ev, n, SA_EV_OPEN, 1) && has_event(ev, n, SA_EV_OPEN, 0) && has_event(ev, n, SA_EV_STREAM, -1) && ordered && cap.id[0], what);
+    uint32_t seq = s.event_seq;
+
+    /* every 20th input callback 1-16 ms late (the null backend wakes every 10 ms) */
+    sa_test_jitter(16000, 20, 0);
+    sa_sleep_ms(2500);
+    sa_test_jitter(0, 0, 0);
+    sa_sleep_ms(100);
+    sa_get_status(&s);
+    n = sa_get_events(seq, ev, 512);
+    snprintf(what, sizeof(what), "late input counted: %u late, %u ring-empty, input every %.2f ms (max %.2f ms), ring target %.1f ms", s.in_late, s.underruns,
+             s.cap_nominal_us / 1000.0, s.cap_max_gap_us / 1000.0, s.target_ms);
+    check(s.in_late > 0 && has_event(ev, n, SA_EV_IN_LATE, -1) && s.cap_max_gap_us > s.cap_nominal_us + 5000 && s.underruns <= 3, what);
+
+    /* every 20th output callback 1-16 ms late: beyond one period, a dropout */
+    g_gen = sa_configure(1, cap.name, "", 64, 1, 0);
+    wait_for(both_running, 3000, &s);
+    wait_for(streaming, 3000, &s);
+    seq = s.event_seq;
+    sa_test_jitter(16000, 20, 1);
+    sa_sleep_ms(2500);
+    sa_test_jitter(0, 0, 0);
+    sa_sleep_ms(100);
+    sa_get_status(&s);
+    n = sa_get_events(seq, ev, 512);
+    snprintf(what, sizeof(what), "late output counted: %u late, %u beyond a period, output every %.2f ms (max %.2f ms), latency %.1f ms (in %.1f, ring %.1f, out %.1f)",
+             s.out_late, s.out_glitches, s.play_nominal_us / 1000.0, s.play_max_gap_us / 1000.0, s.latency_ms, s.in_ms, s.ring_ms, s.out_ms);
+    check(s.out_late > 0 && s.out_glitches > 0 && has_event(ev, n, SA_EV_OUT_LATE, -1) && s.latency_ms > 0 && fabsf(s.latency_ms - (s.in_ms + s.ring_ms + s.out_ms)) < 0.01f, what);
+    g_gen = sa_configure(0, "", "", 64, 0, 0);
+    wait_for(applied, 2000, &s);
+    sa_timer_1ms(0);
+    sa_shutdown();
+}
+
 SA_API int32_t sa_selftest(const char* dir, char* report, int32_t report_size) {
     g_rep = report;
     g_rep_size = report_size;
@@ -486,7 +798,11 @@ SA_API int32_t sa_selftest(const char* dir, char* report, int32_t report_size) {
     test_resampler();
     test_drift();
     test_glitches();
+    test_bursts();
+    test_late();
+    test_sweep();
     test_session(d);
+    test_session_jitter();
     say("%d failure%s, %.1f s\n", g_fail, g_fail == 1 ? "" : "s", (sa_now_us() - t0) / 1e6);
     return g_fail;
 }

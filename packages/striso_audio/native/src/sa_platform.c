@@ -23,7 +23,120 @@ uint32_t sa_now_us(void) {
     return (uint32_t)((n / f) * 1000000u + (n % f) * 1000000u / f);
 }
 
+uint64_t sa_now_us64(void) {
+    static LARGE_INTEGER freq;
+    LARGE_INTEGER c;
+    if (freq.QuadPart == 0) QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&c);
+    uint64_t f = (uint64_t)freq.QuadPart, n = (uint64_t)c.QuadPart;
+    return (n / f) * 1000000u + (n % f) * 1000000u / f;
+}
+
 void sa_sleep_ms(int ms) { Sleep((DWORD)(ms < 0 ? 0 : ms)); }
+
+uint32_t sa_thread_id(void) { return (uint32_t)GetCurrentThreadId(); }
+
+/* avrt.dll and winmm.dll are loaded when first needed (no import libraries, no load-time failure
+ * on a system without them) */
+typedef HANDLE(WINAPI* pf_AvSetMmThreadCharacteristicsW)(LPCWSTR, LPDWORD);
+typedef BOOL(WINAPI* pf_AvSetMmThreadPriority)(HANDLE, int);
+typedef UINT(WINAPI* pf_timePeriod)(UINT);
+#define SA_AVRT_PRIORITY_NORMAL 0
+#define SA_AVRT_PRIORITY_CRITICAL 2
+
+static HMODULE avrt(void) {
+    static HMODULE h;
+    static int tried;
+    if (!tried) {
+        tried = 1;
+        h = LoadLibraryW(L"avrt.dll");
+    }
+    return h;
+}
+
+int sa_rt_device_thread(void* mmcss_handle) {
+    int flags = 0;
+    HMODULE a = avrt();
+    if (a) {
+        pf_AvSetMmThreadCharacteristicsW reg = (pf_AvSetMmThreadCharacteristicsW)(void*)GetProcAddress(a, "AvSetMmThreadCharacteristicsW");
+        pf_AvSetMmThreadPriority prio = (pf_AvSetMmThreadPriority)(void*)GetProcAddress(a, "AvSetMmThreadPriority");
+        HANDLE h = (HANDLE)mmcss_handle;
+        if (!h && reg) {
+            /* miniaudio registers the thread itself (wasapi.usage = pro_audio); only when that failed */
+            DWORD idx = 0;
+            h = reg(L"Pro Audio", &idx);
+        }
+        if (h) {
+            flags |= SA_RT_MMCSS;
+            if (prio && prio(h, SA_AVRT_PRIORITY_CRITICAL)) flags |= SA_RT_CRITICAL;
+        }
+    }
+    if (GetThreadPriority(GetCurrentThread()) == THREAD_PRIORITY_TIME_CRITICAL) flags |= SA_RT_TIME_CRITICAL;
+    return flags;
+}
+
+int sa_rt_control_thread(void) {
+    HMODULE a = avrt();
+    if (!a) return 0;
+    pf_AvSetMmThreadCharacteristicsW reg = (pf_AvSetMmThreadCharacteristicsW)(void*)GetProcAddress(a, "AvSetMmThreadCharacteristicsW");
+    pf_AvSetMmThreadPriority prio = (pf_AvSetMmThreadPriority)(void*)GetProcAddress(a, "AvSetMmThreadPriority");
+    if (!reg) return 0;
+    DWORD idx = 0;
+    HANDLE h = reg(L"Pro Audio", &idx);
+    if (!h) return 0;
+    if (prio) prio(h, SA_AVRT_PRIORITY_NORMAL);
+    return SA_RT_MMCSS; /* reverted when the thread ends */
+}
+
+int sa_timer_1ms(int on) {
+    static HMODULE w;
+    static int held;
+    if (!w) w = LoadLibraryW(L"winmm.dll");
+    if (!w) return 0;
+    if (on && !held) {
+        pf_timePeriod begin = (pf_timePeriod)(void*)GetProcAddress(w, "timeBeginPeriod");
+        if (begin && begin(1) == 0) held = 1;
+    } else if (!on && held) {
+        pf_timePeriod end = (pf_timePeriod)(void*)GetProcAddress(w, "timeEndPeriod");
+        if (end) end(1);
+        held = 0;
+    }
+    return held;
+}
+
+int sa_power_throttling_off(void) {
+    /* SetProcessInformation(ProcessPowerThrottling): Windows 10 1709+; looked up so older systems load */
+    typedef struct {
+        ULONG Version, ControlMask, StateMask;
+    } throttle_state;
+    typedef BOOL(WINAPI * pf_spi)(HANDLE, int, LPVOID, DWORD);
+    pf_spi spi = (pf_spi)(void*)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "SetProcessInformation");
+    if (!spi) return 0;
+    throttle_state s;
+    s.Version = 1;              /* PROCESS_POWER_THROTTLING_CURRENT_VERSION */
+    s.ControlMask = 0x1 | 0x4;  /* EXECUTION_SPEED | IGNORE_TIMER_RESOLUTION */
+    s.StateMask = 0;            /* both off: never throttled */
+    if (spi(GetCurrentProcess(), 4 /* ProcessPowerThrottling */, &s, sizeof(s))) return 1;
+    s.ControlMask = 0x1; /* before Windows 11: execution speed only */
+    return spi(GetCurrentProcess(), 4, &s, sizeof(s)) ? 1 : 0;
+}
+
+int sa_ca_latency(uint32_t device_object_id, int input, int32_t* buffer_frames, int32_t* latency_frames) {
+    (void)device_object_id;
+    (void)input;
+    *buffer_frames = 0;
+    *latency_frames = 0;
+    return 0;
+}
+
+void sa_wide_to_utf8(const void* wide, char* out, int size) {
+    if (size <= 0) return;
+    out[0] = 0;
+    if (!wide) return;
+    int n = WideCharToMultiByte(CP_UTF8, 0, (const wchar_t*)wide, -1, out, size, NULL, NULL);
+    if (n <= 0) out[0] = 0;
+    out[size - 1] = 0;
+}
 
 typedef struct {
     void (*fn)(void*);
@@ -108,6 +221,44 @@ int sa_is_striso_endpoint_w(const void* wasapi_id) {
     return 0;
 }
 
+/* Walks up from the endpoint's device node: the first bus it hangs on says how it is connected
+ * (an A2DP or hands-free endpoint sits under BTHENUM, a Bluetooth LE Audio one under BTHLEDevice /
+ * BTHLE, a USB DAC under USB\, onboard codecs under HDAUDIO or INTELAUDIO). */
+int sa_transport_endpoint_w(const void* wasapi_id) {
+    const wchar_t* id = (const wchar_t*)wasapi_id;
+    wchar_t inst[400];
+    DEVINST dn;
+    if (!id || !id[0] || wcslen(id) > 300) return SA_TRANSPORT_UNKNOWN;
+    wcscpy_s(inst, 400, L"SWD\\MMDEVAPI\\");
+    wcscat_s(inst, 400, id);
+    if (CM_Locate_DevNodeW(&dn, inst, CM_LOCATE_DEVNODE_NORMAL) != CR_SUCCESS) return SA_TRANSPORT_UNKNOWN;
+    for (int depth = 0; depth < 8; depth++) {
+        wchar_t did[MAX_DEVICE_ID_LEN];
+        if (depth > 0 && CM_Get_Device_IDW(dn, did, MAX_DEVICE_ID_LEN, 0) == CR_SUCCESS) {
+            _wcsupr_s(did, MAX_DEVICE_ID_LEN);
+            if (wcsstr(did, L"BTHENUM") || wcsstr(did, L"BTHLEDEVICE") || wcsstr(did, L"BTHLE\\") || wcsstr(did, L"BTHHFENUM"))
+                return SA_TRANSPORT_BLUETOOTH;
+            if (wcsncmp(did, L"USB\\", 4) == 0) return SA_TRANSPORT_USB;
+            if (wcsncmp(did, L"HDAUDIO\\", 8) == 0 || wcsncmp(did, L"INTELAUDIO\\", 11) == 0) {
+                /* an onboard codec; its HDMI / DisplayPort function names itself in the endpoint's
+                   friendly name, which the app reads */
+                return SA_TRANSPORT_BUILTIN;
+            }
+            if (wcsncmp(did, L"ROOT\\", 5) == 0 || wcsncmp(did, L"SWD\\DRIVERENUM", 14) == 0) return SA_TRANSPORT_VIRTUAL;
+            if (wcsncmp(did, L"PCI\\", 4) == 0) return SA_TRANSPORT_PCI;
+        }
+        DEVINST parent;
+        if (CM_Get_Parent(&parent, dn, 0) != CR_SUCCESS) break;
+        dn = parent;
+    }
+    return SA_TRANSPORT_UNKNOWN;
+}
+
+int sa_transport_uid(const char* uid) {
+    (void)uid;
+    return SA_TRANSPORT_UNKNOWN;
+}
+
 int sa_is_striso_uid(const char* uid) {
     (void)uid;
     return 0;
@@ -190,6 +341,41 @@ int sa_is_striso_endpoint_w(const void* wasapi_id) {
     return 0;
 }
 
+uint64_t sa_now_us64(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u;
+}
+
+uint32_t sa_thread_id(void) { return (uint32_t)(uintptr_t)pthread_self(); }
+
+int sa_transport_endpoint_w(const void* wasapi_id) {
+    (void)wasapi_id;
+    return SA_TRANSPORT_UNKNOWN;
+}
+
+void sa_wide_to_utf8(const void* wide, char* out, int size) {
+    (void)wide;
+    if (size > 0) out[0] = 0;
+}
+
+/* Core Audio's HAL IO thread is real time already (time-constraint policy): nothing to add, and
+ * nothing that could be wrong there */
+int sa_rt_device_thread(void* mmcss_handle) {
+    (void)mmcss_handle;
+#if defined(__APPLE__)
+    return SA_RT_HAL;
+#else
+    return 0;
+#endif
+}
+int sa_rt_control_thread(void) { return 0; }
+int sa_timer_1ms(int on) {
+    (void)on;
+    return 0;
+}
+int sa_power_throttling_off(void) { return 0; }
+
 #if defined(__APPLE__)
 #include <CoreAudio/CoreAudio.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -234,6 +420,75 @@ int sa_is_striso_uid(const char* uid) {
     return hit;
 }
 
+static AudioObjectID device_for_uid(const char* uid) {
+    AudioObjectID dev = kAudioObjectUnknown;
+    if (!uid || !uid[0]) return dev;
+    CFStringRef cfuid = CFStringCreateWithCString(NULL, uid, kCFStringEncodingUTF8);
+    if (!cfuid) return dev;
+    AudioValueTranslation t;
+    t.mInputData = &cfuid;
+    t.mInputDataSize = sizeof(CFStringRef);
+    t.mOutputData = &dev;
+    t.mOutputDataSize = sizeof(dev);
+    AudioObjectPropertyAddress a = {kAudioHardwarePropertyDeviceForUID, kAudioObjectPropertyScopeGlobal, 0};
+    UInt32 size = sizeof(t);
+    if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &a, 0, NULL, &size, &t) != noErr) dev = kAudioObjectUnknown;
+    CFRelease(cfuid);
+    return dev;
+}
+
+int sa_transport_uid(const char* uid) {
+    AudioObjectID dev = device_for_uid(uid);
+    if (dev == kAudioObjectUnknown) return SA_TRANSPORT_UNKNOWN;
+    UInt32 tt = 0, size = sizeof(tt);
+    AudioObjectPropertyAddress a = {kAudioDevicePropertyTransportType, kAudioObjectPropertyScopeGlobal, 0};
+    if (AudioObjectGetPropertyData(dev, &a, 0, NULL, &size, &tt) != noErr) return SA_TRANSPORT_UNKNOWN;
+    switch (tt) {
+        case kAudioDeviceTransportTypeBluetooth:
+        case kAudioDeviceTransportTypeBluetoothLE: return SA_TRANSPORT_BLUETOOTH;
+        case kAudioDeviceTransportTypeUSB: return SA_TRANSPORT_USB;
+        case kAudioDeviceTransportTypeBuiltIn: return SA_TRANSPORT_BUILTIN;
+        case kAudioDeviceTransportTypeHDMI:
+        case kAudioDeviceTransportTypeDisplayPort: return SA_TRANSPORT_HDMI;
+        case kAudioDeviceTransportTypeThunderbolt: return SA_TRANSPORT_THUNDERBOLT;
+        case kAudioDeviceTransportTypePCI: return SA_TRANSPORT_PCI;
+        case kAudioDeviceTransportTypeAggregate:
+        case kAudioDeviceTransportTypeAutoAggregate:
+        case kAudioDeviceTransportTypeVirtual:
+        case kAudioDeviceTransportTypeAirPlay: return SA_TRANSPORT_VIRTUAL;
+        default: return SA_TRANSPORT_UNKNOWN;
+    }
+}
+
+static UInt32 ca_u32(AudioObjectID obj, AudioObjectPropertySelector sel, AudioObjectPropertyScope scope) {
+    UInt32 v = 0, size = sizeof(v);
+    AudioObjectPropertyAddress a = {sel, scope, 0};
+    if (AudioObjectGetPropertyData(obj, &a, 0, NULL, &size, &v) != noErr) return 0;
+    return v;
+}
+
+int sa_ca_latency(uint32_t device_object_id, int input, int32_t* buffer_frames, int32_t* latency_frames) {
+    *buffer_frames = 0;
+    *latency_frames = 0;
+    if (!device_object_id) return 0;
+    AudioObjectPropertyScope scope = input ? kAudioObjectPropertyScopeInput : kAudioObjectPropertyScopeOutput;
+    AudioObjectID dev = (AudioObjectID)device_object_id;
+    UInt32 buf = ca_u32(dev, kAudioDevicePropertyBufferFrameSize, scope);
+    UInt32 lat = ca_u32(dev, kAudioDevicePropertyLatency, scope) + ca_u32(dev, kAudioDevicePropertySafetyOffset, scope);
+    /* the first stream's own latency */
+    AudioObjectPropertyAddress sa = {kAudioDevicePropertyStreams, scope, 0};
+    UInt32 size = 0;
+    if (AudioObjectGetPropertyDataSize(dev, &sa, 0, NULL, &size) == noErr && size >= sizeof(AudioStreamID)) {
+        AudioStreamID streams[16];
+        if (size > sizeof(streams)) size = sizeof(streams);
+        if (AudioObjectGetPropertyData(dev, &sa, 0, NULL, &size, streams) == noErr && size >= sizeof(AudioStreamID))
+            lat += ca_u32(streams[0], kAudioStreamPropertyLatency, kAudioObjectPropertyScopeGlobal);
+    }
+    *buffer_frames = (int32_t)buf;
+    *latency_frames = (int32_t)lat;
+    return 1;
+}
+
 /* AVCaptureDevice through the Objective-C runtime (this library is C). */
 extern id const AVMediaTypeAudio;
 static volatile uint32_t g_mic_answer = 0; /* 0 none yet, else SA_MIC_* + 10 */
@@ -261,6 +516,17 @@ void sa_mic_request(void) {
 #else /* other POSIX: no IDs, no permission */
 int sa_is_striso_uid(const char* uid) {
     (void)uid;
+    return 0;
+}
+int sa_transport_uid(const char* uid) {
+    (void)uid;
+    return SA_TRANSPORT_UNKNOWN;
+}
+int sa_ca_latency(uint32_t device_object_id, int input, int32_t* buffer_frames, int32_t* latency_frames) {
+    (void)device_object_id;
+    (void)input;
+    *buffer_frames = 0;
+    *latency_frames = 0;
     return 0;
 }
 int sa_mic_status(void) { return SA_MIC_NA; }

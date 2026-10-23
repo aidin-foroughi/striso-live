@@ -10,11 +10,13 @@ import 'package:ffi/ffi.dart';
 
 import 'backend.dart';
 
-const _apiVersion = 1;
+const _apiVersion = 2;
 
 final class SaDevice extends Struct {
   @Array(256)
   external Array<Uint8> name;
+  @Array(256)
+  external Array<Uint8> id;
   @Int32()
   external int is_default;
   @Int32()
@@ -25,6 +27,29 @@ final class SaDevice extends Struct {
   external int native_rate;
   @Int32()
   external int native_channels;
+  @Int32()
+  external int transport;
+  @Array(2)
+  external Array<Int32> reserved;
+}
+
+final class SaEvent extends Struct {
+  @Uint32()
+  external int seq;
+  @Int32()
+  external int type;
+  @Uint32()
+  external int t_lo;
+  @Uint32()
+  external int t_hi;
+  @Int32()
+  external int a;
+  @Int32()
+  external int b;
+  @Int32()
+  external int c;
+  @Int32()
+  external int reserved;
 }
 
 final class SaStatus extends Struct {
@@ -116,6 +141,86 @@ final class SaStatus extends Struct {
   external int playback_exclusive;
   @Array(3)
   external Array<Uint32> reserved;
+
+  // API 2
+  @Int32()
+  external int capture_buffer;
+  @Int32()
+  external int capture_dev_min;
+  @Int32()
+  external int capture_dev_default;
+  @Int32()
+  external int capture_stream_latency;
+  @Int32()
+  external int capture_excl_result;
+  @Int32()
+  external int playback_buffer;
+  @Int32()
+  external int playback_dev_min;
+  @Int32()
+  external int playback_dev_default;
+  @Int32()
+  external int playback_stream_latency;
+  @Int32()
+  external int playback_excl_result;
+  @Int32()
+  external int playback_transport;
+  @Float()
+  external double in_ms;
+  @Float()
+  external double out_ms;
+  @Float()
+  external double margin_ms;
+  @Uint32()
+  external int in_late;
+  @Uint32()
+  external int out_late;
+  @Uint32()
+  external int out_glitches;
+  @Uint32()
+  external int servo_limits;
+  @Uint32()
+  external int retargets;
+  @Uint32()
+  external int events_lost;
+  @Uint32()
+  external int cap_nominal_us;
+  @Uint32()
+  external int cap_max_gap_us;
+  @Uint32()
+  external int cap_recent_gap_us;
+  @Uint32()
+  external int cap_burst;
+  @Uint32()
+  external int cap_burst_max;
+  @Uint32()
+  external int play_nominal_us;
+  @Uint32()
+  external int play_max_gap_us;
+  @Uint32()
+  external int play_recent_gap_us;
+  @Uint32()
+  external int play_burst;
+  @Uint32()
+  external int play_burst_max;
+  @Uint32()
+  external int now_lo;
+  @Uint32()
+  external int now_hi;
+  @Uint32()
+  external int event_seq;
+  @Int32()
+  external int rt_capture;
+  @Int32()
+  external int rt_playback;
+  @Int32()
+  external int rt_control;
+  @Int32()
+  external int timer_1ms;
+  @Int32()
+  external int power_throttling_off;
+  @Array(4)
+  external Array<Uint32> reserved2;
 }
 
 /// Where to look for the library: STRISO_AUDIO_LIB, next to the executable (Windows), the app
@@ -168,8 +273,11 @@ class StrisoAudioLib {
       try {
         final l = StrisoAudioLib._(DynamicLibrary.open(p), p);
         final v = l.apiVersion(), ss = l.sizeofStatus(), sd = l.sizeofDevice();
-        if (v != _apiVersion || ss != sizeOf<SaStatus>() || sd != sizeOf<SaDevice>()) {
-          tried.add('$p (api $v, status $ss bytes, device $sd bytes; this app expects api $_apiVersion, ${sizeOf<SaStatus>()}, ${sizeOf<SaDevice>()})');
+        final se = v >= 2 ? l.sizeofEvent() : 0;
+        if (v != _apiVersion || ss != sizeOf<SaStatus>() || sd != sizeOf<SaDevice>() || se != sizeOf<SaEvent>()) {
+          tried.add(
+            '$p (api $v, status $ss bytes, device $sd bytes, event $se bytes; this app expects api $_apiVersion, ${sizeOf<SaStatus>()}, ${sizeOf<SaDevice>()}, ${sizeOf<SaEvent>()})',
+          );
           continue;
         }
         return l;
@@ -184,6 +292,9 @@ class StrisoAudioLib {
   late final miniaudioVersion = lib.lookupFunction<Pointer<Utf8> Function(), Pointer<Utf8> Function()>('sa_miniaudio_version');
   late final sizeofStatus = lib.lookupFunction<Int32 Function(), int Function()>('sa_sizeof_status');
   late final sizeofDevice = lib.lookupFunction<Int32 Function(), int Function()>('sa_sizeof_device');
+  late final sizeofEvent = lib.lookupFunction<Int32 Function(), int Function()>('sa_sizeof_event');
+  late final getEvents = lib.lookupFunction<Int32 Function(Uint32, Pointer<SaEvent>, Int32), int Function(int, Pointer<SaEvent>, int)>('sa_get_events');
+  late final testJitter = lib.lookupFunction<Void Function(Int32, Int32, Int32), void Function(int, int, int)>('sa_test_jitter');
   late final init = lib.lookupFunction<Int32 Function(Int32), int Function(int)>('sa_init');
   late final shutdown = lib.lookupFunction<Void Function(), void Function()>('sa_shutdown');
   late final enumerate = lib.lookupFunction<Void Function(), void Function()>('sa_enumerate');
@@ -206,7 +317,7 @@ class StrisoAudioLib {
   /// Runs the native self-test (null backend; no real device). Returns (failures, report).
   (int, String) runSelftest(String dir) {
     final d = dir.toNativeUtf8();
-    const size = 32768;
+    const size = 65536;
     final buf = calloc<Uint8>(size);
     try {
       final n = selftest(d, buf, size);
@@ -226,6 +337,8 @@ class NativeAudioBackend implements AudioBackend {
   final int backend;
   final Pointer<SaStatus> _st = calloc<SaStatus>();
   final Pointer<SaDevice> _dev = calloc<SaDevice>();
+  static const _evMax = 128;
+  final Pointer<SaEvent> _ev = calloc<SaEvent>(_evMax);
   bool _inited = false;
 
   NativeAudioBackend(this._l, {this.backend = backendSystem});
@@ -276,6 +389,8 @@ class NativeAudioBackend implements AudioBackend {
       out.add(
         AudioDevice(
           _str(d.name, 256),
+          id: _str(d.id, 256),
+          transport: AudioTransport.of(d.transport),
           isDefault: d.is_default != 0,
           isStriso: d.is_striso != 0,
           nativeBits: d.native_bits,
@@ -358,8 +473,64 @@ class NativeAudioBackend implements AudioBackend {
       recordFrames: s.record_frames,
       recordDropped: s.record_dropped,
       micPermission: s.mic_permission,
+      captureBuffer: s.capture_buffer,
+      captureDevMin: s.capture_dev_min,
+      captureDevDefault: s.capture_dev_default,
+      captureStreamLatency: s.capture_stream_latency,
+      captureExclResult: s.capture_excl_result,
+      playbackBuffer: s.playback_buffer,
+      playbackDevMin: s.playback_dev_min,
+      playbackDevDefault: s.playback_dev_default,
+      playbackStreamLatency: s.playback_stream_latency,
+      playbackExclResult: s.playback_excl_result,
+      playbackTransport: AudioTransport.of(s.playback_transport),
+      inMs: s.in_ms,
+      outMs: s.out_ms,
+      marginMs: s.margin_ms,
+      inLate: s.in_late,
+      outLate: s.out_late,
+      outGlitches: s.out_glitches,
+      servoLimits: s.servo_limits,
+      retargets: s.retargets,
+      eventsLost: s.events_lost,
+      capNominalUs: s.cap_nominal_us,
+      capMaxGapUs: s.cap_max_gap_us,
+      capRecentGapUs: s.cap_recent_gap_us,
+      capBurst: s.cap_burst,
+      capBurstMax: s.cap_burst_max,
+      playNominalUs: s.play_nominal_us,
+      playMaxGapUs: s.play_max_gap_us,
+      playRecentGapUs: s.play_recent_gap_us,
+      playBurst: s.play_burst,
+      playBurstMax: s.play_burst_max,
+      nowUs: s.now_hi * 4294967296 + s.now_lo,
+      eventSeq: s.event_seq,
+      rtCapture: s.rt_capture,
+      rtPlayback: s.rt_playback,
+      rtControl: s.rt_control,
+      timer1ms: s.timer_1ms != 0,
+      powerThrottlingOff: s.power_throttling_off != 0,
     );
   }
+
+  @override
+  List<AudioEvent> events(int afterSeq) {
+    final out = <AudioEvent>[];
+    var after = afterSeq;
+    for (var round = 0; round < 8; round++) {
+      final n = _l.getEvents(after, _ev, _evMax);
+      for (var i = 0; i < n; i++) {
+        final e = (_ev + i).ref;
+        out.add(AudioEvent(e.seq, e.type, e.t_hi * 4294967296 + e.t_lo, e.a, e.b, e.c));
+        after = e.seq;
+      }
+      if (n < _evMax) break;
+    }
+    return out;
+  }
+
+  /// Tests on the null backend: late callbacks (see sa_test_jitter).
+  void testJitter(int maxLateUs, int everyN, {bool output = false}) => _l.testJitter(maxLateUs, everyN, output ? 1 : 0);
 
   @override
   String? documentsDir() {

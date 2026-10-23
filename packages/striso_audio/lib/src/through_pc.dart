@@ -3,11 +3,17 @@
 // input, asks the native side for the wanted state, reads the status (levels, latency,
 // dropouts), and comes back by itself after an unplug or a restart of the board. No audio passes
 // through Dart.
+//
+// The buffer is Auto by default (auto_buffer.dart): safe at first, tighter while it plays cleanly,
+// one step back at a dropout, remembered per output. Every dropout the native side reports comes
+// with its cause and time (the event log) and is counted by side: the board (its own counters,
+// polled over the console by the app), the input (late, or dropped on a full ring), the output.
 
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'auto_buffer.dart';
 import 'backend.dart';
 
 enum ThroughState {
@@ -52,28 +58,40 @@ class AudioPrefs {
 
   /// Exact output name; null: the system default.
   final String? output;
+
+  /// Frames per device period, or [auto] (0).
   final int period;
   final double gainDb;
 
   /// Windows: the input in exclusive mode first (lower latency, the device's own 24 bit).
   final bool exclusive;
 
-  /// Windows: the output in exclusive mode first (lowest latency; other programs cannot play to it
-  /// meanwhile, so off by default).
+  /// Windows: the output in exclusive mode when it is wired (not Bluetooth), falling back to shared
+  /// when another program holds it. Off: always shared.
   final bool exclusiveOutput;
+
+  /// What Auto learned, per output (AutoMemory as JSON, by [ThroughPc.outputKey]).
+  final Map<String, AutoMemory> autoMemory;
 
   const AudioPrefs({
     this.through = false,
     this.input,
     this.output,
-    this.period = 128,
+    this.period = auto,
     this.gainDb = -6,
     this.exclusive = true,
-    this.exclusiveOutput = false,
+    this.exclusiveOutput = true,
+    this.autoMemory = const {},
   });
 
+  static const auto = 0;
   static const periods = [64, 128, 256, 512];
   static const minDb = -40.0, maxDb = 6.0;
+
+  /// The settings' version: 2 made Auto and exclusive output the defaults.
+  static const version = 2;
+
+  bool get isAuto => period == auto;
 
   static const _keep = Object();
 
@@ -85,6 +103,7 @@ class AudioPrefs {
     double? gainDb,
     bool? exclusive,
     bool? exclusiveOutput,
+    Map<String, AutoMemory>? autoMemory,
   }) => AudioPrefs(
     through: through ?? this.through,
     input: identical(input, _keep) ? this.input : input as String?,
@@ -93,9 +112,11 @@ class AudioPrefs {
     gainDb: gainDb ?? this.gainDb,
     exclusive: exclusive ?? this.exclusive,
     exclusiveOutput: exclusiveOutput ?? this.exclusiveOutput,
+    autoMemory: autoMemory ?? this.autoMemory,
   );
 
   Map<String, Object?> toJson() => {
+    'v': version,
     'through': through,
     if (input != null) 'input': input,
     if (output != null) 'output': output,
@@ -103,20 +124,32 @@ class AudioPrefs {
     'gainDb': gainDb,
     'exclusive': exclusive,
     'exclusiveOutput': exclusiveOutput,
+    if (autoMemory.isNotEmpty) 'auto': {for (final e in autoMemory.entries) e.key: e.value.toJson()},
   };
 
   static AudioPrefs fromJson(Object? j) {
     if (j is! Map) return const AudioPrefs();
-    final p = (j['period'] as num?)?.toInt() ?? 128;
+    final v = (j['v'] as num?)?.toInt() ?? 1;
+    final p = (j['period'] as num?)?.toInt() ?? auto;
     final g = (j['gainDb'] as num?)?.toDouble() ?? -6;
+    final mem = <String, AutoMemory>{};
+    final a = j['auto'];
+    if (a is Map) {
+      for (final e in a.entries) {
+        if (e.key is String) mem[e.key as String] = AutoMemory.fromJson(e.value);
+      }
+    }
     return AudioPrefs(
       through: j['through'] == true,
       input: j['input'] is String && (j['input'] as String).isNotEmpty ? j['input'] as String : null,
       output: j['output'] is String && (j['output'] as String).isNotEmpty ? j['output'] as String : null,
-      period: periods.contains(p) ? p : 128,
+      // settings from before Auto: Auto (the old fixed size dropped out; Auto finds the best)
+      period: v < 2 ? auto : (p == auto || periods.contains(p) ? p : auto),
       gainDb: g.isFinite ? g.clamp(minDb, maxDb) : -6,
       exclusive: j['exclusive'] != false,
-      exclusiveOutput: j['exclusiveOutput'] == true,
+      // before 2 the output was shared unless asked: now exclusive on wired outputs unless turned off
+      exclusiveOutput: v < 2 ? true : j['exclusiveOutput'] != false,
+      autoMemory: mem,
     );
   }
 
@@ -129,10 +162,38 @@ class AudioPrefs {
       other.period == period &&
       other.gainDb == gainDb &&
       other.exclusive == exclusive &&
-      other.exclusiveOutput == exclusiveOutput;
+      other.exclusiveOutput == exclusiveOutput &&
+      _sameMem(other.autoMemory, autoMemory);
+
+  static bool _sameMem(Map<String, AutoMemory> a, Map<String, AutoMemory> b) => a.length == b.length && a.entries.every((e) => b[e.key] == e.value);
 
   @override
-  int get hashCode => Object.hash(through, input, output, period, gainDb, exclusive, exclusiveOutput);
+  int get hashCode => Object.hash(through, input, output, period, gainDb, exclusive, exclusiveOutput, autoMemory.length);
+}
+
+/// The board's own counters (console StcU), as the app parsed them; null fields: not reported.
+class BoardAudioStats {
+  final int? sent, missed, underruns, overruns, primes;
+
+  /// The board's ring before each packet (frames): filtered level, and min..max since the last poll.
+  final double? ringFiltered;
+  final int? ringMin, ringMax, ringTarget;
+  final bool? streaming;
+  const BoardAudioStats({
+    this.sent,
+    this.missed,
+    this.underruns,
+    this.overruns,
+    this.primes,
+    this.ringFiltered,
+    this.ringMin,
+    this.ringMax,
+    this.ringTarget,
+    this.streaming,
+  });
+
+  /// Dropouts on the board's side since the last poll (its ring ran dry or overflowed).
+  int get drops => (underruns ?? 0) + (overruns ?? 0);
 }
 
 /// The Striso's input among [inputs]: by USB VID/PID where the system says, else by name.
@@ -156,6 +217,26 @@ String recordingName(DateTime t) {
 /// Tone of the status line, for its colour.
 enum Tone { quiet, ok, busy, problem }
 
+/// Where a dropout happened.
+enum DropSide { board, input, output }
+
+class Dropout {
+  final DateTime at;
+  final DropSide side;
+  final String why;
+  const Dropout(this.at, this.side, this.why);
+}
+
+/// The latency through the computer, by part (ms).
+class Breakdown {
+  final double input, ring, output, usb;
+
+  /// The USB part is the board's ring as it reported it (else its target, an estimate).
+  final bool usbMeasured;
+  const Breakdown(this.input, this.ring, this.output, this.usb, {this.usbMeasured = false});
+  double get total => input + ring + output + usb;
+}
+
 class ThroughPc {
   final AudioBackend? backend;
   final bool Function() boardOnUsb;
@@ -167,6 +248,10 @@ class ThroughPc {
   final String Function()? recordingsDir;
   final Duration tickEvery;
 
+  /// Windows semantics (exclusive mode) apply; false on macOS.
+  final bool windows;
+  final AutoBuffer autoBuffer;
+
   AudioPrefs _prefs;
   ThroughState state = ThroughState.off;
   String message = '';
@@ -174,6 +259,9 @@ class ThroughPc {
 
   /// Output trouble while the input runs (null: none).
   String? outputNote;
+
+  /// A quiet remark about the output (shared because another program holds it; Bluetooth).
+  String? outputHint;
   AudioStatus st = AudioStatus.idle;
   List<AudioDevice> inputs = const [], outputs = const [];
 
@@ -181,6 +269,14 @@ class ThroughPc {
   String? recordingPath, lastRecording, recordNote;
   bool _recWanted = false, _recSeenOn = false, _recStopping = false;
   DateTime _recAskedAt = DateTime(0);
+
+  // dropouts
+  final dropouts = <Dropout>[];
+  int _evSeq = 0;
+  BoardAudioStats? board;
+  int boardDropsTotal = 0;
+  DateTime? _boardAt;
+  DateTime _summaryAt = DateTime(0);
 
   final _changed = <void Function()>[], _levels = <void Function()>[];
   Timer? _timer;
@@ -204,9 +300,13 @@ class ThroughPc {
     this.recordingsDir,
     DateTime Function()? clock,
     this.tickEvery = const Duration(milliseconds: 50),
+    bool? windows,
+    AutoTiming autoTiming = const AutoTiming(),
   }) : _prefs = prefs,
        boardOnUsb = boardOnUsb ?? (() => false),
-       _now = clock ?? DateTime.now {
+       _now = clock ?? DateTime.now,
+       windows = windows ?? Platform.isWindows,
+       autoBuffer = AutoBuffer(timing: autoTiming) {
     state = backend == null ? ThroughState.unavailable : ThroughState.off;
     _describe(false);
   }
@@ -224,6 +324,9 @@ class ThroughPc {
 
   /// Input peak 0..1 (both channels).
   double get level => math.max(st.levelL, st.levelR);
+
+  /// The period in use: Auto's choice, or the manual one.
+  int get period => _prefs.isAuto ? autoBuffer.current : _prefs.period;
 
   void addListener(void Function() f) => _changed.add(f);
   void removeListener(void Function() f) => _changed.remove(f);
@@ -271,6 +374,8 @@ class ThroughPc {
   void setThrough(bool on) => _setPrefs(_prefs.copyWith(through: on));
   void setInput(String? name) => _setPrefs(_prefs.copyWith(input: name));
   void setOutput(String? name) => _setPrefs(_prefs.copyWith(output: name));
+
+  /// Frames per period, or [AudioPrefs.auto].
   void setPeriod(int frames) => _setPrefs(_prefs.copyWith(period: frames));
   void setExclusive(bool on) => _setPrefs(_prefs.copyWith(exclusive: on));
   void setExclusiveOutput(bool on) => _setPrefs(_prefs.copyWith(exclusiveOutput: on));
@@ -303,6 +408,27 @@ class ThroughPc {
     _notify();
   }
 
+  // ---------------------------------------------------------------------------------- outputs
+
+  /// The output that plays: the chosen one when it is connected, else the default.
+  AudioDevice? get outputDevice {
+    final o = _prefs.output;
+    if (o != null) {
+      final d = outputs.where((d) => d.name == o).firstOrNull;
+      if (d != null) return d;
+    }
+    return outputs.where((d) => d.isDefault).firstOrNull;
+  }
+
+  /// Bluetooth: by the open output's transport, else by the device list.
+  bool get outputBluetooth => (playing && st.playbackTransport == AudioTransport.bluetooth) || (outputDevice?.isBluetooth ?? false);
+
+  /// Exclusive output is asked for: Windows, the setting on, and a wired output.
+  bool get wantExclusiveOutput => windows && _prefs.exclusiveOutput && !outputBluetooth;
+
+  /// Auto's memory is per output and share mode.
+  String get outputKey => '${outputDevice?.id ?? (_prefs.output ?? 'default')}|${wantExclusiveOutput ? 'exclusive' : 'shared'}';
+
   // ---------------------------------------------------------------------------------- the tick
 
   void tick() {
@@ -328,6 +454,7 @@ class ThroughPc {
     }
     st = b.status();
     final devicesChanged = _devicesTick(t, want);
+    _eventsTick(t);
 
     final g = gainOf(_prefs.gainDb);
     if (g != _sentGain) {
@@ -346,6 +473,7 @@ class ThroughPc {
     final applied = st.configGen - _gen >= 0 && _sent.run;
     // the input: open it, or keep looking
     final running = applied && st.capture == DevState.running;
+    if (_prefs.isAuto && _haveDevices) _autoTick(t, applied);
     if (!running) {
       _seekInput(t, applied, devicesChanged);
     } else {
@@ -357,8 +485,30 @@ class ThroughPc {
     }
     _recordTick(t);
     _describe(applied);
+    _summaryTick(t);
     if (devicesChanged) _notify();
     _pingLevels();
+  }
+
+  void _autoTick(DateTime t, bool applied) {
+    final key = outputKey;
+    final mem = _prefs.autoMemory[key] ?? AutoMemory.none;
+    final before = autoBuffer.current;
+    final playingNow = applied && _sent.period == autoBuffer.current && playing && st.streaming;
+    final s = autoBuffer.step(
+      now: t,
+      key: key,
+      mem: mem,
+      playing: playingNow,
+      dropouts: st.dropouts,
+      level: level,
+      deviceBuffer: st.playbackBuffer,
+    );
+    if (s.note != null) _log('audio: ${s.note}');
+    if (s.remember != null && s.remember != mem) {
+      _setPrefs(_prefs.copyWith(autoMemory: {..._prefs.autoMemory, key: s.remember!}));
+    }
+    if (autoBuffer.current != before) _notify();
   }
 
   void _pingLevels() {
@@ -393,6 +543,107 @@ class ThroughPc {
     return changed;
   }
 
+  // ---------------------------------------------------------------------------------- events
+
+  /// The event's wall-clock time (the native clock against now).
+  DateTime _evTime(DateTime now, AudioEvent e) => st.nowUs > 0 && e.tUs <= st.nowUs ? now.subtract(Duration(microseconds: st.nowUs - e.tUs)) : now;
+
+  static String clock(DateTime t) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(t.hour)}:${two(t.minute)}:${two(t.second)}.${t.millisecond.toString().padLeft(3, '0')}';
+  }
+
+  void _eventsTick(DateTime t) {
+    if (st.eventSeq == _evSeq) return;
+    final evs = backend!.events(_evSeq);
+    if (evs.isEmpty) return;
+    var logged = 0, more = 0;
+    for (final e in evs) {
+      _evSeq = e.seq;
+      final at = _evTime(t, e);
+      if (e.isDropout) dropouts.add(Dropout(at, e.inputSide ? DropSide.input : DropSide.output, e.text));
+      // late wake-ups within the buffer and target moves are frequent and harmless: the summary
+      // has them; every dropout and everything else is logged with its cause
+      final quiet = (e.type == Ev.outLate && e.c == 0) || e.type == Ev.inLate || e.type == Ev.target;
+      if (quiet && !e.isDropout) continue;
+      if (logged < 20) {
+        _log('audio: ${clock(at)} ${e.text}');
+        logged++;
+      } else {
+        more++;
+      }
+    }
+    if (more > 0) _log('audio: ($more more events)');
+    _pruneDropouts(t);
+  }
+
+  void _pruneDropouts(DateTime t) {
+    final cut = t.subtract(const Duration(minutes: 10));
+    dropouts.removeWhere((d) => d.at.isBefore(cut));
+  }
+
+  /// The board's counters since the last poll (the app polls StcU every 2 s while this plays).
+  void boardStats(BoardAudioStats s) {
+    final t = _now();
+    board = s;
+    _boardAt = t;
+    final n = s.drops;
+    if (n > 0) {
+      boardDropsTotal += n;
+      final why = [
+        if ((s.underruns ?? 0) > 0) '${s.underruns} underrun${s.underruns == 1 ? '' : 's'}',
+        if ((s.overruns ?? 0) > 0) '${s.overruns} overrun${s.overruns == 1 ? '' : 's'}',
+      ].join(', ');
+      for (var i = 0; i < math.min(n, 50); i++) {
+        dropouts.add(Dropout(t, DropSide.board, 'board: $why'));
+      }
+      _log('audio: ${clock(t)} dropout on the board: $why (its ring ${s.ringMin ?? '?'}..${s.ringMax ?? '?'} frames, ${s.missed ?? 0} packets the host missed)');
+      _pruneDropouts(t);
+      _notify();
+    } else if ((s.missed ?? 0) > 0) {
+      _log('audio: board: ${s.missed} packets the host did not fetch in time (resent, no samples lost)');
+    }
+  }
+
+  /// Dropouts in the last minute, by side.
+  Map<DropSide, int> dropoutsLastMinute() {
+    final t = _now().subtract(const Duration(minutes: 1));
+    final out = {for (final s in DropSide.values) s: 0};
+    for (final d in dropouts) {
+      if (!d.at.isBefore(t)) out[d.side] = out[d.side]! + 1;
+    }
+    return out;
+  }
+
+  /// Once a minute while playing: the timing behind the numbers, for the log.
+  void _summaryTick(DateTime t) {
+    if (!playing) return;
+    if (t.difference(_summaryAt) < const Duration(minutes: 1)) return;
+    if (_summaryAt.year > 2000) {
+      final m = dropoutsLastMinute();
+      _log(
+        'audio: last minute: dropouts board ${m[DropSide.board]} · input ${m[DropSide.input]} · output ${m[DropSide.output]}; '
+        'input every ${(st.capNominalUs / 1000).toStringAsFixed(2)} ms (longest ${(st.capRecentGapUs / 1000).toStringAsFixed(2)}, ${st.inLate} late), '
+        'output every ${(st.playNominalUs / 1000).toStringAsFixed(2)} ms (longest ${(st.playRecentGapUs / 1000).toStringAsFixed(2)}, ${st.outLate} late); '
+        'ring ${st.ringMs.toStringAsFixed(1)} ms of target ${st.targetMs.toStringAsFixed(1)}, servo ${st.driftPpm.toStringAsFixed(0)} ppm; '
+        '$period frames${_prefs.isAuto ? ' (auto)' : ''}',
+      );
+    }
+    _summaryAt = t;
+  }
+
+  /// The latency through the computer by part: input (its wake-up interval and what the system
+  /// reports), ring (the passthrough's ring and resampler), output (its buffer and what the system
+  /// reports), USB (the board's ring before each 1 ms packet, plus the packet).
+  Breakdown get breakdown {
+    final b = board;
+    final measured = b?.ringFiltered != null && (_boardAt != null && _now().difference(_boardAt!) < const Duration(seconds: 10));
+    final ringFrames = measured ? b!.ringFiltered! : (b?.ringTarget ?? 144).toDouble();
+    return Breakdown(st.inMs, st.ringMs, st.outMs, ringFrames / 48 + 1, usbMeasured: measured);
+  }
+
+  // ---------------------------------------------------------------------------------- devices
+
   String _outputName() {
     final o = _prefs.output;
     if (o == null) return '';
@@ -404,10 +655,10 @@ class ThroughPc {
     run: true,
     input: input,
     output: _outputName(),
-    period: _prefs.period,
+    period: period,
     monitor: _prefs.through,
     exclusive: _prefs.exclusive,
-    exclusiveOutput: _prefs.exclusiveOutput,
+    exclusiveOutput: wantExclusiveOutput,
   );
 
   void _send(AudioConfig c, DateTime t) {
@@ -590,10 +841,13 @@ class ThroughPc {
     _ => '',
   };
 
+  /// MA_BUSY: another program holds the device.
+  static const _maBusy = -17;
+
   void _describe(bool applied) {
     String m;
     Tone tn;
-    String? out;
+    String? out, hint;
     final custom = _prefs.input;
     switch (state) {
       case ThroughState.unavailable:
@@ -638,6 +892,11 @@ class ThroughPc {
             out = st.playback == DevState.lost ? 'The output went away: trying again.' : 'The output would not open: trying again.';
             tn = Tone.problem;
           }
+          if (st.playback == DevState.running && _sent.exclusiveOutput && !st.playbackExclusive) {
+            hint = st.playbackExclResult == _maBusy
+                ? 'Shared output: another program holds it exclusively.'
+                : 'Shared output: it would not open exclusively.';
+          }
         } else {
           m = 'Listening to the input (Through PC is off) · $fmt';
           tn = Tone.ok;
@@ -647,15 +906,18 @@ class ThroughPc {
           out ??= '“$o” is not connected: playing to the default output.';
         }
     }
+    if (_prefs.through && outputBluetooth) hint = 'Bluetooth adds ~150–250 ms. Use a wired output for playing.';
     outputNote = out;
-    final changed = m != message || tn != tone;
+    final changed = m != message || tn != tone || hint != outputHint;
     message = m;
     tone = tn;
+    outputHint = hint;
     if (changed) {
       if (m != _lastLogged && state != ThroughState.running && state != ThroughState.off) {
         _lastLogged = m;
         _log('audio: $m');
       }
+      if (hint != null && hint.startsWith('Shared')) _log('audio: $hint');
       _notify();
     }
   }
@@ -665,9 +927,8 @@ class ThroughPc {
     if (state != ThroughState.running) return '';
     final parts = <String>[];
     if (_prefs.through && st.playback == DevState.running) {
-      parts.add(st.latencyMs > 0 ? '${st.latencyMs.toStringAsFixed(1)} ms' : 'starting');
-      final d = st.dropouts;
-      parts.add(d == 0 ? 'no dropouts' : '$d dropout${d == 1 ? '' : 's'}');
+      final d = dropoutsLastMinute().values.fold(0, (a, b) => a + b);
+      parts.add(d == 0 ? 'no dropouts in the last minute' : 'dropouts: $d in the last minute');
       if (st.playbackExclusive) parts.add('exclusive output');
     }
     if (st.recordDropped > 0) parts.add('${st.recordDropped} frames lost in the recording');
