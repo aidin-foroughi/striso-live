@@ -139,8 +139,9 @@ void main() {
     await run(20);
     await save('settings_tuning');
     ctl.setTab(AppTab.play);
-    await ctl.endSession();
+    await tester.runAsync(ctl.endSession); // the mock's writes wait on real time
     await run(4);
+    await tester.pump(const Duration(seconds: 8)); // toasts and the load poll run out
     await tester.pumpWidget(const SizedBox());
     ctl.dispose();
   });
