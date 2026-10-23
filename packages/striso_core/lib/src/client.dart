@@ -298,6 +298,17 @@ class StrisoClient {
     return parseTuningReply(r.lines);
   }
 
+  /// Press a settings key on the board (StcK). Null when the firmware does not answer in time.
+  Future<({bool ok, int id})?> pressSettingsKey(int id, {Duration timeout = const Duration(milliseconds: 300)}) async {
+    final r = await request(settingsKeyCommand(id), (l, s) {
+      final k = parseSettingsKeyReply(l);
+      if (k == null) return Take.no;
+      s['k'] = k;
+      return Take.done;
+    }, timeout: timeout);
+    return r.state['k'] as ({bool ok, int id})?;
+  }
+
   /// A console command for the console drawer; replies are collected until quiet.
   Future<List<String>> raw(int byte) async {
     final r = await request(

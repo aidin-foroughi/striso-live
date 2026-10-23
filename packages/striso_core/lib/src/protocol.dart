@@ -73,6 +73,19 @@ Uint8List selectVoiceCommand(int n) {
   return command(0x80 + n);
 }
 
+/// "StcK" + one byte: press a settings key (button id) as if Settings were held on the instrument.
+/// The board answers `K ok <id>` or `K err <id>`; older firmware answers with nothing.
+Uint8List settingsKeyCommand(int id) {
+  if (id < 0 || id > 127) throw RangeError('bad key id $id');
+  return Uint8List.fromList([0x53, 0x74, 0x63, 0x4b, id]);
+}
+
+/// The reply to StcK.
+({bool ok, int id})? parseSettingsKeyReply(String line) {
+  final m = RegExp(r'^K (ok|err) (\d+)').firstMatch(line);
+  return m == null ? null : (ok: m[1] == 'ok', id: int.parse(m[2]!));
+}
+
 /// "StcQ" + target + index + float32 little endian: 10 bytes, always in one transfer.
 const int setParamLength = 10;
 

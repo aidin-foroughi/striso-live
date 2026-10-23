@@ -709,6 +709,7 @@ class AppController extends ChangeNotifier implements MorphHost {
     tuning = null;
     tuningSupported = null;
     _tuningSuggested = false;
+    _tuningHinted = false;
     _scheduleTuningPoll(); // stops it: no client
     harmony.reset();
     notifyListeners();
@@ -1174,7 +1175,7 @@ class AppController extends ChangeNotifier implements MorphHost {
 
   /// null: not asked yet; false: the firmware gave no reply (no N command); true: it answers.
   bool? tuningSupported;
-  bool _tuningSuggested = false, _tuningBusy = false;
+  bool _tuningSuggested = false, _tuningHinted = false, _tuningBusy = false;
   Timer? _tuningPoll;
 
   /// Pitch labels want the tuning: N is asked for on connect, after the Settings button is
@@ -1566,10 +1567,60 @@ class AppController extends ChangeNotifier implements MorphHost {
       } else {
         selectVoice(a.index);
       }
+    } else if (f != null && f.switchable) {
+      if (client == null) {
+        toast('Connect to use the settings keys', 'warn');
+      } else {
+        unawaited(pressSettingsKey(id));
+      }
     }
     notifyListeners();
     return true;
   }
+
+  /// A switch key of the settings overlay, pressed over USB (StcK): the led pulses, the board
+  /// answers, and what it changed is read again (the tuning; the touch settings and voice for a
+  /// settings preset). Firmware without K gets a one-time hint.
+  Future<bool> pressSettingsKey(int id) async {
+    final c = client;
+    final f = settingsKeys[id];
+    if (c == null || f == null || !f.switchable) return false;
+    ledPulseT = clockMs();
+    notifyListeners();
+    final r = await c.pressSettingsKey(id);
+    if (!identical(c, client)) return false;
+    if (r == null) {
+      if (!_tuningHinted) {
+        _tuningHinted = true;
+        toast("This firmware can't switch tunings from the app yet. Use Settings + the key on the instrument.", 'warn');
+      }
+      log('K $id: no reply', LogKind.err);
+      return false;
+    }
+    if (!r.ok) {
+      toast('The board refused: ${f.title}', 'warn');
+      log('K err $id', LogKind.err);
+      return false;
+    }
+    log('K ok $id: ${f.title}');
+    if (f.group == SettingsGroup.tuning) {
+      await refreshTuning();
+    } else if (f.group == SettingsGroup.preset) {
+      await refreshParams([2]);
+      await syncVoice();
+      await refreshTuning();
+      toast('Loaded settings preset ${presetKeyIds.indexOf(id) + 1}');
+    } else if (f.group == SettingsGroup.midi) {
+      toast(f.title);
+    } else if (id == 63) {
+      toast('All notes off');
+    }
+    notifyListeners();
+    return true;
+  }
+
+  /// When the indicator led was last made to pulse by an app action (ms, app clock).
+  double ledPulseT = -1e9;
 
   /// A click on a key on the board (not in demo play).
   bool boardSelect(int id, {bool overlays = true}) {

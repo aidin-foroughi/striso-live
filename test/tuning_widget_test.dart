@@ -1,4 +1,4 @@
-// The tuning-aware labels and the colour modes, against the demo
+// The tuning-aware labels, the colour modes and the settings keys over USB, against the demo
 // board (no USB, no window). Helpers come from widget_test.dart.
 import 'dart:io';
 import 'dart:typed_data';
@@ -11,12 +11,12 @@ import 'package:striso_live/src/ui/accidentals.dart';
 
 import 'widget_test.dart' show boot, finish, pumpUntil, runFor, settle, startDemo;
 
-/// A demo board whose firmware predates N: the command is swallowed.
+/// A demo board whose firmware predates N and K: both commands are swallowed.
 class _OldBoard extends MockBoard {
   _OldBoard() : super(autoplay: false, motionEnabled: false, idleFrames: 0);
   @override
   void receive(List<int> bytes) {
-    if (bytes.length >= 4 && bytes[0] == 0x53 && bytes[1] == 0x74 && bytes[2] == 0x63 && bytes[3] == 0x4e) return;
+    if (bytes.length >= 4 && bytes[0] == 0x53 && bytes[1] == 0x74 && bytes[2] == 0x63 && (bytes[3] == 0x4e || bytes[3] == 0x4b)) return;
     super.receive(bytes);
   }
 }
@@ -89,7 +89,7 @@ void main() {
     await finish(tester, ctl);
   });
 
-  testWidgets('old firmware: no N reply means 12-TET from the layout', (tester) async {
+  testWidgets('old firmware: no N reply means 12-TET from the layout, no K reply a one-time hint', (tester) async {
     final ctl = await boot(tester);
     final board = _OldBoard();
     await pumpUntil(tester, ctl.startSession(MockTransport(board: board), ConnMode.demo));
@@ -104,6 +104,63 @@ void main() {
     await settle(tester, 300);
     expect(ctl.qtLabel(30).qt, 2);
     expect(ctl.qtLabel(30).centsFrom12, 0);
+    // a tuning key in the settings overlay: no reply within 300 ms, one hint, nothing changes
+    ctl.setTab(AppTab.setup);
+    ctl.setSetupMode(SetupMode.settings);
+    await settle(tester, 300);
+    expect(await pumpUntil(tester, ctl.pressSettingsKey(36)), isFalse);
+    await settle(tester, 200);
+    expect(find.textContaining("can't switch tunings from the app yet"), findsOneWidget);
+    expect(await pumpUntil(tester, ctl.pressSettingsKey(38)), isFalse);
+    await settle(tester, 200);
+    expect(find.textContaining("can't switch tunings from the app yet"), findsOneWidget);
+    expect(board.tuning, 0);
+    expect(tester.takeException(), isNull);
+    await finish(tester, ctl);
+  });
+
+  testWidgets('settings overlay: switch keys press the board (K), dials do not; presets re-read settings', (tester) async {
+    final ctl = await boot(tester);
+    await startDemo(tester, ctl);
+    await waitFor(tester, () => ctl.tuningSupported == true);
+    final board = ctl.demoBoard!;
+    ctl.setTab(AppTab.setup);
+    ctl.setSetupMode(SetupMode.settings);
+    await settle(tester, 300);
+    // a tuning key: the board switches, the tuning is read again and named in the overlay
+    expect(ctl.settingsClick(36), isTrue);
+    await waitFor(tester, () => ctl.tuning?.index == 1);
+    expect(board.tuning, 1);
+    expect(ctl.tuningShort, '31TET');
+    expect(ctl.settingsSelected, 36);
+    // the led pulse was asked for
+    expect(clockMs() - ctl.ledPulseT, lessThan(60000));
+    // a dial key only selects
+    final pressure = board.touch[0];
+    expect(ctl.settingsClick(19), isTrue);
+    await settle(tester, 500);
+    expect(board.touch[0], pressure);
+    expect(ctl.settingsSelected, 19);
+    // a settings preset: the touch settings are read back, with a toast
+    final p = ctl.findParam(2, 'pressure')!;
+    ctl.onEdit(2, p, 2.5, 'begin');
+    ctl.onEdit(2, p, 2.5, 'end');
+    await runFor(tester, 100); // the write reaches the board before the preset key
+    expect(board.touch[0], 2.5);
+    expect(ctl.settingsClick(37), isTrue);
+    await waitFor(tester, () => board.settingsPreset == 2);
+    await waitFor(tester, () => ctl.findParam(2, 'pressure')!.value == 1.0);
+    await settle(tester, 300);
+    expect(find.textContaining('Loaded settings preset 2'), findsOneWidget);
+    // MIDI mode and panic answer ok; the refused keys are not switchable at all
+    expect(await pumpUntil(tester, ctl.pressSettingsKey(4)), isTrue);
+    expect(board.midiMode, 'mono');
+    expect(await pumpUntil(tester, ctl.pressSettingsKey(63)), isTrue);
+    expect(await pumpUntil(tester, ctl.pressSettingsKey(67)), isFalse);
+    expect(await pumpUntil(tester, ctl.pressSettingsKey(17)), isFalse);
+    // back to 12-TET
+    expect(ctl.settingsClick(34), isTrue);
+    await waitFor(tester, () => ctl.tuning?.index == 0);
     expect(tester.takeException(), isNull);
     await finish(tester, ctl);
   });

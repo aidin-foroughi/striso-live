@@ -344,7 +344,17 @@ class HoverReadout extends StatelessWidget {
         if (ctl.settingsOn && ctl.tab == AppTab.setup && (id >= 0 || hc >= 0)) {
           final f = id >= 0 ? settingsKeys[id] : null;
           text = f != null
-              ? f.describe(id).join(' · ')
+              ? [
+                  ...f.describe(id),
+                  if (f.engine != null)
+                    'click to select'
+                  else if (f.switchable)
+                    'click to switch'
+                  else if (f.group == SettingsGroup.sens)
+                    'set it under Sensitivity'
+                  else if (!f.danger && f.knob != null)
+                    'a dial: set on the instrument',
+                ].join(' · ')
               : id >= 0
               ? 'No settings function · key $id'
               : hc == 3

@@ -132,6 +132,15 @@ class _BoardViewState extends State<BoardView> with SingleTickerProviderStateMix
 
   bool get _reduced => ctl.options.reducedMotion || (mounted && MediaQuery.maybeDisableAnimationsOf(context) == true);
 
+  /// The pointer is on something a click does: a key in demo play or the key equalizer, a switch
+  /// key in the settings overlay (dial keys only show their information), a control button.
+  bool get _clickable {
+    if (ctl.hoverControl >= 0) return ctl.playable || widget.overlays;
+    if (ctl.hover < 0) return false;
+    if (widget.overlays && ctl.settingsOn) return settingsKeys[ctl.hover]?.switchable == true;
+    return ctl.playable || widget.overlays;
+  }
+
   void _tick(Duration t) {
     final dt = math.min(100.0, (t - _last).inMicroseconds / 1000);
     _last = t;
@@ -139,7 +148,8 @@ class _BoardViewState extends State<BoardView> with SingleTickerProviderStateMix
     _updatePlaying(now);
     final busy =
         anim.step(ctl.live, now, dt, hovering: ctl.hover >= 0 || _pointers.isNotEmpty, direct: _reduced) ||
-        now - ctl.waveT < Timing.sweep.inMilliseconds + 400;
+        now - ctl.waveT < Timing.sweep.inMilliseconds + 400 ||
+        now - ctl.ledPulseT < 800;
     if (busy || anim.force) {
       anim.force = false;
       anim.lastDraw = now;
@@ -220,9 +230,7 @@ class _BoardViewState extends State<BoardView> with SingleTickerProviderStateMix
       builder: (context, c) {
         _size = Size(c.maxWidth, c.maxHeight);
         return MouseRegion(
-          cursor: (ctl.playable || widget.overlays) && (ctl.hover >= 0 || ctl.hoverControl >= 0)
-              ? SystemMouseCursors.click
-              : SystemMouseCursors.basic,
+          cursor: _clickable ? SystemMouseCursors.click : SystemMouseCursors.basic,
           onHover: (e) => _hover(e.localPosition),
           onExit: (_) {
             ctl.hover = -1;
@@ -487,7 +495,11 @@ class BoardPainter extends CustomPainter {
       final currentTuning = tuningIndex >= 0 && ctl.tuning != null && ctl.tuning!.index == tuningIndex;
       c.drawCircle(center, r, Paint()..color = BoardPal.natural);
       if ((v != null && v.current) || currentTuning) c.drawCircle(center, r, Paint()..color = _a(col, 0.15));
-      final rim = _stroke(v != null && v.count == 0 ? _a(col, 0.3) : col, 1.5);
+      // switch keys (clickable) get the full rim; dial keys, set from the app's own controls, a quiet one
+      final rim = _stroke(
+        v != null && v.count == 0 ? _a(col, 0.3) : (f.switchable || f.danger ? col : _a(col, 0.55)),
+        f.switchable || f.danger ? 1.5 : 1,
+      );
       f.uncertain ? dashedCircle(c, center, r - 0.75, rim, s * 1.2, s * 0.8) : c.drawCircle(center, r - 0.75, rim);
       if (k.id == ctl.settingsSelected) c.drawCircle(center, r + 3, _stroke(Pal.accent, 2));
       final label = (currentTuning ? ctl.tuningShort : f.short) + (f.uncertain ? '?' : '');
@@ -611,8 +623,11 @@ class BoardPainter extends CustomPainter {
       if (glow > 0) _control(c, g, b, glow);
       if (b.id == ctl.hoverControl && _hoverable) c.drawCircle(g.at(b.x, b.y), 7.4 * s, _stroke(Pal.text2, 1));
     }
-    // indicator LED
-    c.drawCircle(g.at(ledPosition.x, ledPosition.y), 3, Paint()..color = ctl.ledOn ? Pal.ok : BoardPal.ledOff);
+    // indicator LED; it pulses accent when the app presses a settings key for the board
+    final pulse = (1 - (now - ctl.ledPulseT) / 700).clamp(0.0, 1.0);
+    final ledCol = ctl.ledOn ? Color.lerp(Pal.ok, Pal.accent, pulse)! : BoardPal.ledOff;
+    if (pulse > 0) c.drawCircle(g.at(ledPosition.x, ledPosition.y), 3 + 5 * pulse, Paint()..color = _a(Pal.accent, 0.35 * pulse));
+    c.drawCircle(g.at(ledPosition.x, ledPosition.y), 3, Paint()..color = ledCol);
   }
 
   @override

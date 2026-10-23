@@ -10,6 +10,7 @@ import 'dart:typed_data';
 
 import 'layout.dart';
 import 'protocol.dart';
+import 'settings_map.dart';
 import 'transport.dart';
 import 'tuning.dart';
 
@@ -247,6 +248,7 @@ class MockBoard {
   double notegen0 = 12, notegen1 = 7, noteOffset = 0;
   int tuningColor = 0x00aa00;
   final keyOffset = Float64List(61);
+  MockConfig? _config;
   bool streaming = false;
   bool autoplay, motionEnabled;
   int idleFrames;
@@ -256,7 +258,13 @@ class MockBoard {
   final _text = <int>[];
   final _msgs = <Uint8List>[];
   int _rxNeed = 0, _rxState = 0;
+  String _rxCmd = 'Q';
   final _rxPayload = <int>[];
+
+  /// MIDI mode as the settings keys set it: 'mpe', 'poly' or 'mono'; the loaded settings preset.
+  String midiMode = 'mpe';
+  int settingsPreset = 1;
+  final remembered = <String, int>{};
   int _loadBlocks = 0, _loadPeak = 0;
   double _loadSum = 0;
   final keys = <int, _Key>{};
@@ -289,6 +297,7 @@ class MockBoard {
     }
     voice = _entries.indexWhere((e) => e.engine == 'va'); // DEFAULT_ENGINE = va
     values = _presetValues(_entries[voice].eng.params, _entries[voice].seed);
+    _config = config;
     touch = config != null ? [...config.touch] : [for (final p in _touch) p.$6];
     keyFactors = config != null ? [...config.keys] : List<double>.filled(61, 1);
     final g = lcg(4242);
@@ -325,8 +334,12 @@ class MockBoard {
       _rxPayload.add(c);
       if (--_rxNeed == 0) {
         final p = _rxPayload;
-        final v = ByteData.sublistView(Uint8List.fromList(p.sublist(2, 6))).getFloat32(0, Endian.little);
-        if (!setParam(p[0], p[1], v)) _print('Q err ${p[0]} ${p[1]}\r\n');
+        if (_rxCmd == 'K') {
+          _print(settingsKey(p[0]) ? 'K ok ${p[0]}\r\n' : 'K err ${p[0]}\r\n');
+        } else {
+          final v = ByteData.sublistView(Uint8List.fromList(p.sublist(2, 6))).getFloat32(0, Endian.little);
+          if (!setParam(p[0], p[1], v)) _print('Q err ${p[0]} ${p[1]}\r\n');
+        }
       }
       return;
     }
@@ -385,6 +398,11 @@ class MockBoard {
       }
     } else if (ch == 'Q') {
       _rxNeed = 6;
+      _rxCmd = 'Q';
+      _rxPayload.clear();
+    } else if (ch == 'K') {
+      _rxNeed = 1;
+      _rxCmd = 'K';
       _rxPayload.clear();
     } else if (ch == 'N') {
       _printTuning();
@@ -458,6 +476,44 @@ class MockBoard {
 
   /// The fine tune in cents (the knob on the tuning keys), e.g. -31.77 for A = 432 Hz.
   void fineTune(double cents) => noteOffset = toFloat32(cents / 100);
+
+  /// StcK: a settings key pressed over USB (config_but with type 0). True when the key is one the
+  /// board switches: MIDI modes, tunings, settings presets, voices, Panic; dials and system keys
+  /// are refused.
+  bool settingsKey(int id) {
+    final f = settingsKeys[id];
+    if (f == null || !f.switchable) return false;
+    if (f.group == SettingsGroup.midi) {
+      midiMode = const {0: 'mpe', 2: 'poly', 4: 'mono'}[id]!;
+      return true;
+    }
+    if (f.group == SettingsGroup.tuning) {
+      loadTuning(tuningKeyIds.indexOf(id));
+      return true;
+    }
+    if (f.group == SettingsGroup.preset) {
+      // a stored preset: the touch settings as saved (preset 1), the defaults for the others
+      settingsPreset = presetKeyIds.indexOf(id) + 1;
+      final saved = _config?.touch;
+      for (var i = 0; i < _touch.length; i++) {
+        touch[i] = settingsPreset == 1 && saved != null && i < saved.length ? saved[i] : _touch[i].$6;
+      }
+      return true;
+    }
+    if (f.engine != null) {
+      // config_voice: the engine with the preset it had last
+      final list = [for (var n = 0; n < _entries.length; n++) if (_entries[n].engine == f.engine) n];
+      if (list.isEmpty) return false;
+      if (list.contains(voice)) remembered[f.engine!] = list.indexOf(voice);
+      final n = list[(remembered[f.engine!] ?? 0).clamp(0, list.length - 1)];
+      if (n != voice) {
+        voice = n;
+        values = _presetValues(_entries[n].eng.params, _entries[n].seed);
+      }
+      return true;
+    }
+    return f.group == SettingsGroup.system && !f.danger && id == 63; // Panic
+  }
 
   bool setParam(int target, int index, double v) {
     if (target == Target.touch) {

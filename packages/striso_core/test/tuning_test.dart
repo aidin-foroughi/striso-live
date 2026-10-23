@@ -1,4 +1,5 @@
-// The tuning reply, its names, the quarter-tone notation and the mock's tunings.
+// The tuning reply, its names, the quarter-tone notation and the mock's tunings; the settings-key
+// command (StcK) against the mock.
 import 'dart:async';
 import 'dart:typed_data';
 
@@ -258,9 +259,56 @@ void main() {
     });
   });
 
+  group('settings keys over USB (StcK)', () {
+    test('the mock switches tuning, MIDI mode, preset and voice; refuses dials and Reset', () async {
+      final board = MockBoard(autoplay: false, motionEnabled: false, idleFrames: 0);
+      final c = StrisoClient(MockTransport(board: board));
+      await c.connect();
+      expect(await c.pressSettingsKey(36), (ok: true, id: 36)); // tuning 1
+      expect(board.tuning, 1);
+      expect((await c.getTuning())!.naming.name, '31-TET');
+      expect(await c.pressSettingsKey(34), (ok: true, id: 34)); // back to 12-TET
+      expect(board.tuning, 0);
+      expect(await c.pressSettingsKey(4), (ok: true, id: 4));
+      expect(board.midiMode, 'mono');
+      expect(await c.pressSettingsKey(37), (ok: true, id: 37));
+      expect(board.settingsPreset, 2);
+      expect(await c.pressSettingsKey(24), (ok: true, id: 24)); // bowed
+      expect(board.voiceName(board.voice), startsWith('bowed:'));
+      expect(await c.pressSettingsKey(63), (ok: true, id: 63)); // panic
+      expect(await c.pressSettingsKey(19), (ok: false, id: 19)); // pressure dial
+      expect(await c.pressSettingsKey(67), (ok: false, id: 67)); // reset
+      expect(await c.pressSettingsKey(1), (ok: false, id: 1)); // no function
+      await c.disconnect();
+      // the command bytes
+      expect(settingsKeyCommand(36), [0x53, 0x74, 0x63, 0x4b, 36]);
+      expect(parseSettingsKeyReply('K ok 36'), (ok: true, id: 36));
+      expect(parseSettingsKeyReply('K err 67'), (ok: false, id: 67));
+      expect(parseSettingsKeyReply('Q err 0 1'), isNull);
+    });
+
+    test('a board without K answers nothing within the timeout', () async {
+      final c = StrisoClient(_SilentTransport());
+      await c.connect();
+      final sw = Stopwatch()..start();
+      expect(await c.pressSettingsKey(36), isNull);
+      expect(sw.elapsedMilliseconds, inInclusiveRange(250, 1200));
+      await c.disconnect();
+    });
+
+    test('the whitelist: switch keys and dial keys', () {
+      final sw = settingsKeys.entries.where((e) => e.value.switchable).map((e) => e.key).toSet();
+      expect(sw, containsAll([0, 2, 4, ...tuningKeyIds, ...presetKeyIds, ...voiceKeys.keys, 63]));
+      expect(sw, isNot(contains(67)));
+      expect(sw, isNot(contains(65)));
+      for (final id in [17, 19, 21, 6, 8, 51, 53, 56, 58, 11]) {
+        expect(settingsKeys[id]!.switchable, isFalse, reason: 'key $id is a dial or flip');
+      }
+    });
+  });
 }
 
-/// A transport whose board never answers (old firmware for N).
+/// A transport whose board never answers (old firmware for N and K).
 class _SilentTransport implements Transport {
   final _data = StreamController<Uint8List>.broadcast();
   @override

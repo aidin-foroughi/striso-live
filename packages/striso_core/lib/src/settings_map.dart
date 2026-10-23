@@ -37,7 +37,23 @@ class SettingsKey {
   final String? knob, detail, engine;
   final List<int>? led; // config_voice(engine, r, g, b)
   final bool uncertain, danger;
-  const SettingsKey(this.group, this.short, this.title, {this.knob, this.detail, this.engine, this.led, this.uncertain = false, this.danger = false});
+
+  /// A switch the app may press over USB (StcK): MIDI modes, tunings, settings presets, voices,
+  /// Panic. Dial keys (sensitivities, volume...) are set from the app's own controls instead, and
+  /// the firmware refuses Reset and Send cfg.
+  final bool switchable;
+  const SettingsKey(
+    this.group,
+    this.short,
+    this.title, {
+    this.knob,
+    this.detail,
+    this.engine,
+    this.led,
+    this.uncertain = false,
+    this.danger = false,
+    this.switchable = false,
+  });
 
   /// The full description: title (and '?'), the knob, the detail, the key.
   List<String> describe(int id) => ['$title${uncertain ? ' (?)' : ''}', if (knob != null) 'tilt or circle the key: $knob', ?detail, 'key $id'];
@@ -63,9 +79,9 @@ const Map<int, (String, List<int>)> voiceKeys = {
 };
 
 final Map<int, SettingsKey> settingsKeys = {
-  0: const SettingsKey(SettingsGroup.midi, 'MPE', 'MPE MIDI mode', knob: 'number of MPE voices, 1 to 15'),
-  2: const SettingsKey(SettingsGroup.midi, 'Poly', 'Normal MIDI mode (all notes on one channel)', knob: 'MIDI channel, 1 to 16'),
-  4: const SettingsKey(SettingsGroup.midi, 'Mono', 'Mono (glissando) MIDI mode', knob: 'MIDI channel, 1 to 16'),
+  0: const SettingsKey(SettingsGroup.midi, 'MPE', 'MPE MIDI mode', knob: 'number of MPE voices, 1 to 15', switchable: true),
+  2: const SettingsKey(SettingsGroup.midi, 'Poly', 'Normal MIDI mode (all notes on one channel)', knob: 'MIDI channel, 1 to 16', switchable: true),
+  4: const SettingsKey(SettingsGroup.midi, 'Mono', 'Mono (glissando) MIDI mode', knob: 'MIDI channel, 1 to 16', switchable: true),
   11: const SettingsKey(SettingsGroup.layout, 'Flip', 'Flip the layout 180°', detail: 'With the glissando button also held: debug mode on/off.'),
   17: const SettingsKey(SettingsGroup.sens, 'Thres', 'Note-on threshold', knob: 'how light a touch starts a note (led dial 0 to 15)'),
   19: const SettingsKey(SettingsGroup.sens, 'Press', 'Pressure sensitivity', knob: '0 to 3, steps of 1/8'),
@@ -81,6 +97,7 @@ final Map<int, SettingsKey> settingsKeys = {
       led: e.value.$2,
       knob: 'step through its presets (the up/down leds show which)',
       detail: 'A press selects the engine with the preset it had last (remembered while powered).',
+      switchable: true,
     ),
   for (final (n, id) in tuningKeyIds.indexed)
     id: SettingsKey(
@@ -89,8 +106,9 @@ final Map<int, SettingsKey> settingsKeys = {
       'Tuning $n: ${cardTunings[n]}',
       knob: 'fine tuning offset, 1/32 semitone per step',
       detail: n == 0 ? null : 'Factory tuning; the configuration editor can change it.',
+      switchable: true,
     ),
-  for (final (n, id) in [35, 37, 39, 41, 43, 45, 30, 32].indexed)
+  for (final (n, id) in presetKeyIds.indexed)
     id: SettingsKey(
       SettingsGroup.preset,
       'P${n + 1}',
@@ -98,15 +116,19 @@ final Map<int, SettingsKey> settingsKeys = {
       detail: n == 0
           ? 'Save to Striso stores the touch settings in preset 1, which the board loads at power-on.'
           : 'Loads the stored settings of this preset (sensitivities, MIDI, colour).',
+      switchable: true,
     ),
   51: const SettingsKey(SettingsGroup.midi2, 'Vol', 'Volume (MIDI CC7)', knob: 'volume, 0 to 127'),
   53: const SettingsKey(SettingsGroup.midi2, 'Sust', 'Sustain / decay (pedal)', knob: 'release length, 0 to 1'),
   56: const SettingsKey(SettingsGroup.midi2, 'MPEbd', 'MPE pitch bend range', knob: '12, 24, 48 or 96 semitones'),
   58: const SettingsKey(SettingsGroup.midi2, 'Rate', 'MIDI message interval', knob: '1 to 15 ms'),
-  63: const SettingsKey(SettingsGroup.system, 'Panic', 'Panic: all MIDI notes off'),
+  63: const SettingsKey(SettingsGroup.system, 'Panic', 'Panic: all MIDI notes off', switchable: true),
   65: const SettingsKey(SettingsGroup.system, 'Cfg', 'Send the MPE and pitch bend configuration over MIDI'),
   67: const SettingsKey(SettingsGroup.system, 'Reset', 'System reset: restarts the Striso', danger: true),
 };
+
+/// The settings preset keys (P1..P8) by preset index, as config_but has them.
+const List<int> presetKeyIds = [35, 37, 39, 41, 43, 45, 30, 32];
 
 /// The control buttons with Settings held (synth_control.cpp IDC_OCT_UP/DOWN with altmode).
 const Map<int, String> settingsControls = {
