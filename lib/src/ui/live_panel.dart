@@ -350,10 +350,12 @@ class HoverReadout extends StatelessWidget {
           text = f != null
               ? [
                   ...f.describe(id),
-                  if (f.engine != null)
-                    'click to select'
+                  if ((f.engine != null || f.switchable) && !ctl.canSend)
+                    ctl.sendHint
+                  else if (f.engine != null)
+                    'click to select${ctl.mode == ConnMode.demo ? ' (demo)' : ''}'
                   else if (f.switchable)
-                    'click to switch'
+                    'click to switch${ctl.mode == ConnMode.demo ? ' (on the demo board)' : ''}'
                   else if (f.group == SettingsGroup.sens)
                     'set it under Sensitivity'
                   else if (!f.danger && f.knob != null)
@@ -461,6 +463,16 @@ class _SettingsInfoState extends State<SettingsInfo> {
               ),
               const SizedBox(height: Space.xs),
               for (final line in f.describe(id).skip(1)) Text(line, style: ui(TypeSize.body, color: Pal.text2)),
+              if ((f.engine != null || f.switchable) && !ctl.canSend)
+                Padding(
+                  padding: const EdgeInsets.only(top: Space.xs),
+                  child: Text(ctl.sendHint, key: const Key('settings-send-hint'), style: ui(TypeSize.body, color: Pal.text3)),
+                )
+              else if ((f.engine != null || f.switchable) && ctl.mode == ConnMode.demo)
+                Padding(
+                  padding: const EdgeInsets.only(top: Space.xs),
+                  child: Text('Acts on the demo board.', style: ui(TypeSize.small, color: Pal.demo)),
+                ),
               if (v != null) ...[
                 const SizedBox(height: Space.m),
                 if (v.count == 0) Text('Not in this firmware.', style: ui(TypeSize.body, color: Pal.text3)),
@@ -469,7 +481,7 @@ class _SettingsInfoState extends State<SettingsInfo> {
                     label: p.preset ?? p.engine,
                     current: p.index == ctl.current,
                     color: engineColor(p.engine),
-                    onTap: () => ctl.connected ? ctl.selectVoice(p.index) : ctl.toast('Connect to switch voices', 'warn'),
+                    onTap: () => ctl.canSend ? ctl.selectVoice(p.index) : ctl.toast(ctl.sendHint, 'warn'),
                   ),
               ],
             ],

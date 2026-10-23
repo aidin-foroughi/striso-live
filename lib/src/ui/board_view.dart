@@ -137,7 +137,7 @@ class _BoardViewState extends State<BoardView> with SingleTickerProviderStateMix
   bool get _clickable {
     if (ctl.hoverControl >= 0) return ctl.playable || widget.overlays;
     if (ctl.hover < 0) return false;
-    if (widget.overlays && ctl.settingsOn) return settingsKeys[ctl.hover]?.switchable == true;
+    if (widget.overlays && ctl.settingsOn) return settingsKeys[ctl.hover]?.switchable == true && ctl.canSend;
     return ctl.playable || widget.overlays;
   }
 

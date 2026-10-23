@@ -719,6 +719,14 @@ class AppController extends ChangeNotifier implements MorphHost {
 
   bool get connected => client != null;
 
+  /// The app may send to the board: a session is up (the board over USB, or the demo board) and is
+  /// not still being set up. Every control that acts on the board checks this; without it they do
+  /// nothing (no pulse, no state change) and say "Connect to switch this from the app".
+  bool get canSend => client != null && !connecting;
+
+  /// What a control that sends to the board says while it cannot.
+  String get sendHint => connecting ? 'Connecting…' : 'Connect to switch this from the app';
+
   /// A Striso is on USB (from the presence poll).
   bool get boardPresent => _lastPresent == true;
 
@@ -749,7 +757,7 @@ class AppController extends ChangeNotifier implements MorphHost {
 
   Future<void> _doSelectVoice(int n) async {
     final c = client;
-    if (c == null || n == current) return;
+    if (c == null || !canSend || n == current) return;
     pendingVoice = n;
     notifyListeners();
     final r = await c.selectVoice(n);
@@ -1624,23 +1632,19 @@ class AppController extends ChangeNotifier implements MorphHost {
   /// Striso does. Returns true when the click was taken.
   bool settingsClick(int id) {
     if (!settingsOn) return false;
-    settingsSelected = id;
     final f = settingsKeys[id];
+    // a key that acts on the board does nothing at all without one: no selection, no pulse
+    if (f != null && (f.engine != null || f.switchable) && !canSend) return true;
+    settingsSelected = id;
     if (f?.engine != null) {
       final a = voiceKeyAction(voices, current, f!.engine!, _remembered);
-      if (client == null) {
-        toast('Connect to switch voices', 'warn');
-      } else if (a == null) {
+      if (a == null) {
         toast('This firmware has no ${f.engine} voice', 'warn');
       } else {
         selectVoice(a.index);
       }
     } else if (f != null && f.switchable) {
-      if (client == null) {
-        toast('Connect to use the settings keys', 'warn');
-      } else {
-        unawaited(pressSettingsKey(id));
-      }
+      unawaited(pressSettingsKey(id));
     }
     notifyListeners();
     return true;
@@ -1652,7 +1656,7 @@ class AppController extends ChangeNotifier implements MorphHost {
   Future<bool> pressSettingsKey(int id) async {
     final c = client;
     final f = settingsKeys[id];
-    if (c == null || f == null || !f.switchable) return false;
+    if (c == null || !canSend || f == null || !f.switchable) return false;
     ledPulseT = clockMs();
     notifyListeners();
     final r = await c.pressSettingsKey(id);
@@ -1742,8 +1746,8 @@ class AppController extends ChangeNotifier implements MorphHost {
 
   /// The engine button: like a voice key on the Striso, the engine with the preset it had last.
   void selectEngine(String engine) {
-    if (!connected) {
-      toast('Connect to switch voices', 'warn');
+    if (!canSend) {
+      toast(connecting ? 'Connecting…' : 'Connect to switch voices', 'warn');
       return;
     }
     settingsVoices(); // remembers the current preset per engine

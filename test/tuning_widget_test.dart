@@ -119,6 +119,48 @@ void main() {
     await finish(tester, ctl);
   });
 
+  testWidgets('settings overlay without a board: switch and voice keys do nothing, and say so; the demo acts on the mock', (tester) async {
+    final ctl = await boot(tester);
+    ctl.setTab(AppTab.setup);
+    ctl.setSetupMode(SetupMode.settings);
+    await settle(tester, 300);
+    expect(ctl.canSend, isFalse);
+    final pulse = ctl.ledPulseT;
+    // a tuning key, a MIDI key, a settings preset, a voice key
+    for (final id in [36, 4, 37, settingsKeys.entries.firstWhere((e) => e.value.engine != null).key]) {
+      expect(ctl.settingsClick(id), isTrue, reason: 'the click is taken (and nothing else happens)');
+      expect(ctl.settingsSelected, -1, reason: 'no selection ring on key $id');
+    }
+    expect(ctl.ledPulseT, pulse, reason: 'no pulse');
+    expect(await pumpUntil(tester, ctl.pressSettingsKey(36)), isFalse);
+    await settle(tester, 300);
+    expect(ctl.toasts.value, isEmpty, reason: 'no toast pretending something happened');
+    // hovering says why
+    ctl.hover = 36;
+    ctl.stats.ping();
+    await settle(tester, 200);
+    expect(tester.widget<Text>(find.byKey(const Key('hover-readout'))).data, endsWith('Connect to switch this from the app'));
+    expect(find.byKey(const Key('settings-send-hint')), findsOneWidget);
+    // a dial key still shows its information when clicked
+    expect(ctl.settingsClick(19), isTrue);
+    expect(ctl.settingsSelected, 19);
+
+    // the demo: the same keys act on the mock board, labelled as the demo
+    await startDemo(tester, ctl);
+    await waitFor(tester, () => ctl.tuningSupported == true);
+    expect(ctl.canSend, isTrue);
+    ctl.hover = 36;
+    ctl.stats.ping();
+    await settle(tester, 200);
+    expect(tester.widget<Text>(find.byKey(const Key('hover-readout'))).data, endsWith('click to switch (on the demo board)'));
+    expect(ctl.settingsClick(36), isTrue);
+    await waitFor(tester, () => ctl.demoBoard!.tuning == 1);
+    expect(ctl.settingsSelected, 36);
+    expect(ctl.settingsClick(34), isTrue);
+    await waitFor(tester, () => ctl.tuning?.index == 0);
+    await finish(tester, ctl);
+  });
+
   testWidgets('settings overlay: switch keys press the board (K), dials do not; presets re-read settings', (tester) async {
     final ctl = await boot(tester);
     await startDemo(tester, ctl);
