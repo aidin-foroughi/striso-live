@@ -1,0 +1,6 @@
+# keep LF line endings regardless of core.autocrlf (scripts run in bash; one style everywhere)
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.ttf binary
+*.dll binary

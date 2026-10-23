@@ -1,4 +1,4 @@
-// Design tokens and the small components, from tools/striso_live/DESIGN.md: a quiet instrument
+// Design tokens and the small components, from DESIGN.md: a quiet instrument
 // panel. Near-black neutral ground, warm off-white type, one accent; colour belongs to the music
 // (the engine colours and the pressure heat). Every colour, size, spacing and timing used by the
 // widgets and painters lives here.

@@ -1,5 +1,5 @@
 # Zip the Windows release folder into a portable app: dist/StrisoLive-<version>-windows-x64.zip
-# (unzip anywhere and run StrisoLive.exe). Run from tools/striso_live after
+# (unzip anywhere and run StrisoLive.exe). Run from the repository root after
 #   flutter build windows --release
 $ErrorActionPreference = 'Stop'
 $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*([0-9.]+)').Matches[0].Groups[1].Value

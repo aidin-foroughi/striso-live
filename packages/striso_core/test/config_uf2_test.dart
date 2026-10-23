@@ -1,12 +1,14 @@
 // The config writer against tools/striso.py: the same bytes for the same inputs, round trips and
 // refusals; the save flow against fake drives. No board is involved.
-// Port of tools/app/test/desktop-config.test.mjs.
+// Port of tools/app/test/desktop-config.test.mjs (the old web app in the Striso tooling repo).
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:striso_core/striso_core.dart';
 import 'package:test/test.dart';
+
+import 'support/firmware.dart';
 
 const touchNames = ['pressure', 'velocity', 'tilt', 'bend', 'threshold'];
 const _notes = ['C_', 'Db', 'C#', 'D_', 'Eb', 'D#', 'E_', 'F_', 'Gb', 'F#', 'G_', 'Ab', 'G#', 'A_', 'Bb', 'A#', 'B_'];
@@ -66,14 +68,8 @@ Case randomCase(double Function() r) {
   return Case(configUf2(recs), TouchValues(touch, keys));
 }
 
-String? findPython() {
-  for (var d = Directory.current; d.parent.path != d.path; d = d.parent) {
-    for (final p in ['${d.path}/tools/.venv/Scripts/python.exe', '${d.path}/tools/.venv/bin/python', '${d.path}/.venv/Scripts/python.exe']) {
-      if (File(p).existsSync() && File('${File(p).parent.parent.parent.path}/app/test/fixtures/config_ref.py').existsSync()) return p;
-    }
-  }
-  return null;
-}
+/// test/fixtures/config_ref.py runs the firmware's tools/striso.py (see support/firmware.dart).
+String fixturePath() => '${repoRoot()!.path}/packages/striso_core/test/fixtures/config_ref.py';
 
 void main() {
   test('fmt8 follows Python formatting, including half-to-even ties and signs', () {
@@ -143,10 +139,10 @@ void main() {
     expect(() => touchUpdates(TouchValues(dup, v.keys)), refuses('unexpected touch'));
   });
 
-  final python = findPython();
+  final python = firmwarePython();
   test('byte-identical to tools/striso.py on 150 random saves', () async {
     final py = python!;
-    final fixture = '${File(py).parent.parent.parent.path}/app/test/fixtures/config_ref.py';
+    final fixture = fixturePath();
     final r = rng(77);
     final cases = [for (var k = 0; k < 150; k++) randomCase(r)];
     final fmtCases = [0.03125, 1.03125, 0.15625, 2.00005, -0.00001, 0.99996, 1e-5, 7.99999, 3.14159265, -3.99995, toFloat32(0.3), toFloat32(1.7)];
@@ -163,7 +159,7 @@ void main() {
         },
       for (final v in fmtCases) {'fmt8': v},
     ];
-    final p = await Process.start(py, ['-I', fixture]);
+    final p = await Process.start(py, ['-I', fixture, '${firmwareDir()!.path}/tools']);
     final stdout = p.stdout.transform(utf8.decoder).join(), stderr = p.stderr.transform(utf8.decoder).join();
     p.stdin.write(jsonEncode(input));
     await p.stdin.close();
@@ -175,7 +171,7 @@ void main() {
     for (var k = 0; k < fmtCases.length; k++) {
       expect(fmt8(fmtCases[k]), out[cases.length + k], reason: 'fmt8(${fmtCases[k]})');
     }
-  }, skip: python == null ? 'tools/.venv not found' : false);
+  }, skip: python == null ? pythonMissing : false);
 
   group('save to a drive', () {
     late Directory tmp;

@@ -4,13 +4,7 @@ import 'dart:io';
 import 'package:striso_core/striso_core.dart';
 import 'package:test/test.dart';
 
-Directory? firmwareDir() {
-  for (var d = Directory.current; d.parent.path != d.path; d = d.parent) {
-    final f = Directory('${d.path}/striso-control-firmware');
-    if (File('${f.path}/fx.h').existsSync()) return f;
-  }
-  return null;
-}
+import 'support/firmware.dart';
 
 /// Parameter names declared in a firmware header: {"name", "group", min, max, kind}.
 Set<String> declared(File f) => {for (final m in RegExp(r'\{\s*"([a-z0-9_]+)",\s*"([a-z_]+)",').allMatches(f.readAsStringSync())) m[1]!};
@@ -37,7 +31,7 @@ void main() {
     for (final n in heroFxParams) {
       expect(fx, contains(n));
     }
-  }, skip: fw == null ? 'firmware source not found' : false);
+  }, skip: fw == null ? firmwareMissing : false);
 
   test('picks the preset, then the engine, then the first continuous parameters', () {
     final list = [p('gain'), p('cut_base'), p('res'), p('cut_env'), p('drive'), p('b_sync', Kind.onOff), p('sub'), p('drift'), p('release')];

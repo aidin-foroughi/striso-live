@@ -6,6 +6,8 @@ import 'dart:typed_data';
 import 'package:striso_core/striso_core.dart';
 import 'package:test/test.dart';
 
+import 'support/firmware.dart';
+
 Future<void> sleep(int ms) => Future<void>.delayed(Duration(milliseconds: ms));
 
 List<Param> P() => [
@@ -15,13 +17,10 @@ List<Param> P() => [
 ];
 Snapshot corner(Map<String, double> v) => Snapshot('va:pad', {0: v, 1: {}});
 
-/// The firmware source, when this checkout has it next to the tools.
+/// The firmware source ($STRISO_FW_DIR or ../striso-control-firmware, see support/firmware.dart).
 File? firmwareSource() {
-  for (var d = Directory.current; d.parent.path != d.path; d = d.parent) {
-    final f = File('${d.path}/striso-control-firmware/synth_control.cpp');
-    if (f.existsSync()) return f;
-  }
-  return null;
+  final d = firmwareDir();
+  return d == null ? null : File('${d.path}/synth_control.cpp');
 }
 
 void main() {
@@ -281,7 +280,7 @@ void main() {
       for (final m in presets) {
         expect(settingsKeys[int.parse(m[1]!)]!.short, 'P${m[2]}', reason: 'preset key ${m[1]}');
       }
-    }, skip: fw == null ? 'firmware source not found' : false);
+    }, skip: fw == null ? firmwareMissing : false);
 
     test('voice keys: select with the remembered preset, then step through the presets', () {
       const voices = [

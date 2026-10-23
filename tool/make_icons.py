@@ -1,5 +1,5 @@
 """Draw the Striso Live mark (four keys on the ink plate, as in the web app's favicon) and write
-the Windows .ico and the macOS app icon set. Needs Pillow. Run from tools/striso_live:
+the Windows .ico and the macOS app icon set. Needs Pillow. Run from the repository root:
 
     python tool/make_icons.py
 """

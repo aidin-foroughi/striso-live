@@ -46,3 +46,10 @@ app.*.map.json
 
 # packaged builds
 /dist/
+/.flutter-plugins
+**/.dart_tool/
+**/build/
+/windows/flutter/ephemeral/
+/macos/Flutter/ephemeral/
+/macos/Pods/
+*.dmg
