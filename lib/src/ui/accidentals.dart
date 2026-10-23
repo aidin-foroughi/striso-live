@@ -15,7 +15,8 @@
 //
 // Below qtDrawThreshold (0.1 quarter tone, 5 cents) nothing is added: the readout has the cents.
 // Stems are always full height; only bowls and strokes are partial, so a glyph never looks small,
-// only unfinished.
+// only unfinished. Behind every partial stroke or bowl the complete glyph is drawn as a ghost at
+// 30% so that at key size a small fraction reads as an accidental partly filled, not as a comma.
 
 import 'dart:math' as math;
 import 'dart:ui' as dui;
@@ -29,6 +30,7 @@ import 'paint_util.dart';
 // geometry in units of the glyph height h (y down, 0 at the vertical centre)
 const _strokeW = 0.085, _strokePitch = 0.22, _barT = 0.15, _barRise = 0.10, _barY = 0.17, _barOver = 0.12;
 const _stemW = 0.09, _bowlW = 0.56, _bowlStroke = 0.12, _elementGap = 0.14;
+const _ghostAlpha = 0.3;
 
 /// The width of the accidental for [qt] quarter tones at height [h] (0 when nothing is drawn).
 double qtAccidentalWidth(double h, double qt) => _plan(qt).fold(0.0, (w, e) => w + e.width) * h;
@@ -99,12 +101,17 @@ class _Sharp implements _Element {
 
   @override
   void draw(Canvas c, double x, double cy, double h, Color color) {
+    if (partial > 0) _paint(c, x, cy, h, color.withValues(alpha: color.a * _ghostAlpha), complete: true);
+    _paint(c, x, cy, h, color);
+  }
+
+  void _paint(Canvas c, double x, double cy, double h, Color color, {bool complete = false}) {
     final paint = Paint()..color = color;
     final sw = _strokeW * h, pitch = _strokePitch * h;
     final x0 = x + _barOver * h + sw / 2;
     final tops = <double>[]; // top y of each stroke
     for (var k = 0; k < _strokes; k++) {
-      final full = k < n;
+      final full = complete || k < n;
       final height = full ? 1.0 : partial;
       // engraved sharps lift the right stroke a little above the left
       final lift = _strokes > 1 ? (k / (_strokes - 1) - 0.5) * _barRise : 0.0;
@@ -153,18 +160,23 @@ class _Flat implements _Element {
 
   @override
   void draw(Canvas c, double x, double cy, double h, Color color) {
+    if (bowl < 0.999 || extra > 0 || !stem) _paint(c, x, cy, h, color.withValues(alpha: color.a * _ghostAlpha), complete: true);
+    _paint(c, x, cy, h, color);
+  }
+
+  void _paint(Canvas c, double x, double cy, double h, Color color, {bool complete = false}) {
     final paint = Paint()..color = color;
     final sw = _stemW * h;
     final sx = x + (_elementGap / 2 + _leftW) * h;
-    if (stem) c.drawRRect(RRect.fromLTRBR(sx, cy - 0.58 * h, sx + sw, cy + 0.5 * h, Radius.circular(sw / 3)), paint);
+    if (stem || complete) c.drawRRect(RRect.fromLTRBR(sx, cy - 0.58 * h, sx + sw, cy + 0.5 * h, Radius.circular(sw / 3)), paint);
     final stroke = Paint()
       ..color = color
       ..style = PaintingStyle.stroke
       ..strokeWidth = _bowlStroke * h
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
-    if (bowl > 0) _bowl(c, sx + sw / 2, cy, h, reversed ? -1 : 1, bowl, stroke);
-    if (extra > 0) _bowl(c, sx + sw / 2, cy, h, reversed ? 1 : -1, extra, stroke);
+    if (bowl > 0 || complete) _bowl(c, sx + sw / 2, cy, h, reversed ? -1 : 1, complete ? 1 : bowl, stroke);
+    if (extra > 0) _bowl(c, sx + sw / 2, cy, h, reversed ? 1 : -1, complete ? 1 : extra, stroke);
   }
 
   /// The bowl from the stem's bottom, out to [dir] (1 right, -1 left) and back to the stem at
@@ -189,33 +201,57 @@ class _Flat implements _Element {
 // ---------------------------------------------------------------------------------------------
 // the whole label: letter, accidental, octave digit
 
-/// The total width of a pitch label: letter at [size], the accidental, and the octave digit at
-/// [small] when given.
-double qtLabelWidth(QtLabel l, double size, {double? small}) {
-  final glyphH = size * 0.95;
-  final acc = qtAccidentalWidth(glyphH, l.qt);
-  return textWidth(l.letter, size, weight: FontWeight.w500) +
-      (acc > 0 ? 0.06 * size + acc : 0) +
-      (small != null ? 2 + small * 0.6 : 0);
+/// The parts of a pitch label laid out as one run, relative to the label's centre (0, 0): the
+/// letter, the accidental glyph (empty when nothing is drawn) and the octave digit (empty without
+/// [small]). The drawing and the overlap test share it.
+class QtLabelRun {
+  final Rect letter, glyph, digit;
+  final double glyphH;
+  const QtLabelRun(this.letter, this.glyph, this.digit, this.glyphH);
+  double get width => math.max(letter.right, math.max(glyph.right, digit.right)) - letter.left;
 }
 
-/// Draws the pitch label centred at [center]: the letter, its quarter-tone accidental and, with
-/// [small], the octave digit baseline-aligned 2 px right of the name.
-void drawQtLabel(Canvas c, QtLabel l, Offset center, double size, Color color, {double? small}) {
+QtLabelRun qtLabelLayout(QtLabel l, double size, {double? small}) {
   final glyphH = size * 0.95;
   final acc = qtAccidentalWidth(glyphH, l.qt);
   final lw = textWidth(l.letter, size, weight: FontWeight.w500);
-  final total = qtLabelWidth(l, size, small: small);
-  var x = center.dx - total / 2;
-  drawText(c, l.letter, Offset(x, center.dy), size, color, weight: FontWeight.w500, align: -1);
-  x += lw;
-  if (acc > 0) {
-    x += 0.06 * size;
+  final dw = small == null ? 0.0 : textWidth('${l.octave}', small, weight: FontWeight.w500);
+  // gaps: letter to glyph 0.06 em; glyph (or letter) to digit 0.12 em, so a sharp's bars and a
+  // flat's bowl never touch the digit
+  final gapA = acc > 0 ? 0.06 * size : 0.0, gapD = small == null ? 0.0 : (acc > 0 ? 0.12 : 0.08) * size;
+  final total = lw + gapA + acc + gapD + dw;
+  final x0 = -total / 2;
+  final letter = Rect.fromLTWH(x0, -size / 2, lw, size);
+  final glyph = Rect.fromLTWH(x0 + lw + gapA, -0.04 * size - glyphH / 2, acc, acc > 0 ? glyphH : 0);
+  final dx = x0 + lw + gapA + acc + gapD;
+  final digit = small == null ? Rect.fromLTWH(dx, 0, 0, 0) : Rect.fromLTWH(dx, 0.36 * size - small, dw, small);
+  return QtLabelRun(letter, glyph, digit, glyphH);
+}
+
+/// The total width of a pitch label: letter at [size], the accidental, and the octave digit at
+/// [small] when given.
+double qtLabelWidth(QtLabel l, double size, {double? small}) => qtLabelLayout(l, size, small: small).width;
+
+/// The run that fits [maxWidth]: with the octave digit when there is room, else without it (a
+/// double flat with a digit is 3.2 em wide, more than a key disc at label size).
+QtLabelRun qtLabelFit(QtLabel l, double size, {double? small, double? maxWidth}) {
+  final run = qtLabelLayout(l, size, small: small);
+  if (small == null || maxWidth == null || run.width <= maxWidth) return run;
+  return qtLabelLayout(l, size);
+}
+
+/// Draws the pitch label centred at [center]: the letter, its quarter-tone accidental and, with
+/// [small], the octave digit baseline-aligned after the run (dropped when the run would pass
+/// [maxWidth]).
+void drawQtLabel(Canvas c, QtLabel l, Offset center, double size, Color color, {double? small, double? maxWidth}) {
+  final run = qtLabelFit(l, size, small: small, maxWidth: maxWidth);
+  drawText(c, l.letter, Offset(center.dx + run.letter.left, center.dy), size, color, weight: FontWeight.w500, align: -1);
+  if (run.glyph.width > 0) {
     // the glyph sits a little high, like a font's accidental against a capital
-    x += drawQtAccidental(c, x, center.dy - 0.04 * size, glyphH, l.qt, color);
+    drawQtAccidental(c, center.dx + run.glyph.left, center.dy + run.glyph.center.dy, run.glyphH, l.qt, color);
   }
-  if (small != null) {
-    drawText(c, '${l.octave}', Offset(x + 2, center.dy + size * 0.36), small, color, weight: FontWeight.w500, align: -1, vAlign: 1);
+  if (small != null && run.digit.width > 0) {
+    drawText(c, '${l.octave}', Offset(center.dx + run.digit.left, center.dy + run.digit.bottom), small, color, weight: FontWeight.w500, align: -1, vAlign: 1);
   }
 }
 

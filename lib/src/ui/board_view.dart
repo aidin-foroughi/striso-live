@@ -423,7 +423,7 @@ class BoardPainter extends CustomPainter {
     final small = math.max(9.0, r * 0.4 * labelScale).roundToDouble();
     if (mode == Names.pitch) {
       // the pitch the board plays, named by its nearest quarter tone, the rest in the accidental
-      drawQtLabel(c, ctl.qtLabel(k.id), Offset(cx, cy), big, col, small: boardWidth < 700 ? null : small);
+      drawQtLabel(c, ctl.qtLabel(k.id), Offset(cx, cy), big, col, small: boardWidth < 700 ? null : small, maxWidth: 2 * r - 3);
       return;
     }
     if (mode == Names.cents) {

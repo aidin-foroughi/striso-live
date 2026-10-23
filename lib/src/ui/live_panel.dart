@@ -269,7 +269,11 @@ class Progression extends StatelessWidget {
     return ListenableBuilder(
       listenable: ctl.harmony,
       builder: (context, _) {
-        final prog = ctl.harmony.prog;
+        final h = ctl.harmony;
+        // the chord still held is the big numeral: its chip joins the row once it is released
+        final shown = h.shown;
+        final held = !h.released && shown != null && h.prog.isNotEmpty && h.prog.last.a.name == shown.name;
+        final prog = held ? h.prog.sublist(0, h.prog.length - 1) : h.prog;
         return Row(
           children: [
             Expanded(
@@ -279,14 +283,14 @@ class Progression extends StatelessWidget {
                   reverse: true,
                   child: Row(
                     children: [
-                      if (prog.isEmpty) Text('Chords you play line up here.', style: ui(TypeSize.small, color: Pal.text3)),
+                      if (h.prog.isEmpty) Text('Chords you play line up here.', style: ui(TypeSize.small, color: Pal.text3)),
                       for (final e in prog) _Chip(e),
                     ],
                   ),
                 ),
               ),
             ),
-            if (prog.isNotEmpty) Btn('Clear', kind: BtnKind.ghost, onPressed: ctl.harmony.clearProgression),
+            if (h.prog.isNotEmpty) Btn('Clear', kind: BtnKind.ghost, onPressed: ctl.harmony.clearProgression),
           ],
         );
       },

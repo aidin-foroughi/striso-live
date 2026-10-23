@@ -207,6 +207,40 @@ void main() {
     await finish(tester, ctl);
   });
 
+  testWidgets('pitch labels: letter, accidental and octave never overlap, at every key and size', (tester) async {
+    final ctl = await boot(tester);
+    await startDemo(tester, ctl);
+    await waitFor(tester, () => ctl.tuningSupported == true);
+    for (final n in [1, 8, 5, 4]) {
+      ctl.demoTuning(n);
+      await waitFor(tester, () => ctl.tuning?.index == n);
+      for (final size in [11.0, 16.0, 24.0, 31.0]) {
+        final small = (size * 0.55).roundToDouble();
+        for (final id in keyIds) {
+          final l = ctl.qtLabel(id);
+          final run = qtLabelLayout(l, size, small: small);
+          final why = 'tuning $n key $id ${l.letter} qt ${l.qt.toStringAsFixed(2)} at $size px';
+          if (run.glyph.width > 0) {
+            expect(run.letter.right, lessThanOrEqualTo(run.glyph.left + 1e-6), reason: why);
+            expect(run.glyph.right + 0.1 * size, lessThanOrEqualTo(run.digit.left + 1e-6), reason: why);
+            expect(run.glyph.overlaps(run.digit), isFalse, reason: why);
+          } else {
+            expect(run.letter.right, lessThanOrEqualTo(run.digit.left + 1e-6), reason: why);
+          }
+          expect(run.letter.overlaps(run.digit), isFalse, reason: why);
+          expect(run.width, lessThanOrEqualTo(3.3 * size), reason: why);
+          expect(qtLabelWidth(l, size, small: small), run.width);
+          // on the board the run must fit the key disc (2.78 em at label size): the digit goes first
+          final disc = 2 * size / 0.72 - 3;
+          final fit = qtLabelFit(l, size, small: small, maxWidth: disc);
+          expect(fit.width <= disc || fit.digit.width == 0, isTrue, reason: why);
+          if (fit.digit.width == 0) expect(run.width, greaterThan(disc), reason: why);
+        }
+      }
+    }
+    await finish(tester, ctl);
+  });
+
   testWidgets('the proof sheet of accidentals renders at label sizes', (tester) async {
     for (final h in [48.0, 24.0, 11.0]) {
       final img = await tester.runAsync(() => accidentalSheet(h: h));
