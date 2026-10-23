@@ -43,6 +43,9 @@ enum InviteState { idle, connecting, reconnect }
 /// board plays it in quarter-tone notation, its cents from 12-TET, or none.
 enum Names { octave, letters, degrees, solfege, pitch, cents, off }
 
+/// Key colouring by tonal function (rims only; the pressure fill stays the hero).
+enum KeyColour { off, degree, function, chord }
+
 /// What pitch labels are measured against: A = 440 Hz (the board's D is exact), or the key's root.
 enum PitchRef { absolute, root }
 
@@ -222,6 +225,7 @@ class AppController extends ChangeNotifier implements MorphHost {
 
   // view state
   Names names = Names.octave;
+  KeyColour colour = KeyColour.off;
   PitchRef pitchRef = PitchRef.absolute;
   int keyRoot = 0;
   String keyScale = 'off';
@@ -285,6 +289,7 @@ class AppController extends ChangeNotifier implements MorphHost {
   void _loadPrefs() {
     final n = store.get<String>('names');
     names = Names.values.firstWhere((x) => x.name == n, orElse: () => Names.octave);
+    colour = KeyColour.values.firstWhere((x) => x.name == store.get<String>('colour'), orElse: () => KeyColour.off);
     pitchRef = PitchRef.values.firstWhere((x) => x.name == store.get<String>('pitchRef'), orElse: () => PitchRef.absolute);
     final k = store.raw('key');
     if (k is Map) {
@@ -1147,6 +1152,12 @@ class AppController extends ChangeNotifier implements MorphHost {
     store.set('names', n.name);
     notifyListeners();
     _scheduleTuningPoll();
+  }
+
+  void setColour(KeyColour c) {
+    colour = c;
+    store.set('colour', c.name);
+    notifyListeners();
   }
 
   void setPitchRef(PitchRef r) {

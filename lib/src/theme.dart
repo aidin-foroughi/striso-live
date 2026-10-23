@@ -4,6 +4,7 @@
 // widgets and painters lives here.
 
 import 'package:flutter/material.dart';
+import 'package:striso_core/striso_core.dart' show ChordRole, TonalFunction;
 
 // ---------------------------------------------------------------------------------------------
 // colour
@@ -65,6 +66,41 @@ class BoardPal {
   ];
   static const heatMid = Color(0xFFFF8A4C); // warm in the key equalizer
 }
+
+// Tonal colouring (rims only, DESIGN.md 5: scale information never fills). Three families on the
+// axes dichromats keep, lightness and blue–yellow: tonic honey (the accent), subdominant blue,
+// dominant rose. Checked with Machado's protanopia and deuteranopia matrices: the three functions
+// stay 36+ CIELAB ΔE apart, the seven degrees at least 11 (the degree numbers are the second cue),
+// the five chord roles at least 22.
+const Map<TonalFunction, Color> functionColors = {
+  TonalFunction.tonic: Pal.accent,
+  TonalFunction.subdominant: Color(0xFF6FA0E6),
+  TonalFunction.dominant: Color(0xFFE0708C),
+};
+
+/// Degrees 1..7: tonic family (1, 3, 6) in honey, sand and olive; subdominant (2, 4) in blue and
+/// aqua; dominant (5, 7) in rose and mauve.
+const List<Color> degreeColors = [
+  Pal.accent,
+  Color(0xFF6FA0E6),
+  Color(0xFFE8D9B4),
+  Color(0xFF8ED6E3),
+  Color(0xFFE0708C),
+  Color(0xFFA3955A),
+  Color(0xFFC58AC9),
+];
+
+/// Chord tones: root honey, third rose, fifth blue, seventh aqua, extensions olive.
+const Map<ChordRole, Color> chordColors = {
+  ChordRole.root: Pal.accent,
+  ChordRole.third: Color(0xFFE0708C),
+  ChordRole.fifth: Color(0xFF6FA0E6),
+  ChordRole.seventh: Color(0xFF8ED6E3),
+  ChordRole.extension: Color(0xFFA3955A),
+};
+
+const functionLetters = {TonalFunction.tonic: 'T', TonalFunction.subdominant: 'S', TonalFunction.dominant: 'D'};
+const chordRoleLetters = {ChordRole.root: 'R', ChordRole.third: '3', ChordRole.fifth: '5', ChordRole.seventh: '7', ChordRole.extension: '+'};
 
 // ---------------------------------------------------------------------------------------------
 // type

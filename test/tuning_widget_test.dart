@@ -108,6 +108,48 @@ void main() {
     await finish(tester, ctl);
   });
 
+  testWidgets('colour modes: the legend follows the mode, chord tones while a chord is held', (tester) async {
+    final ctl = await boot(tester);
+    await startDemo(tester, ctl);
+    ctl.setKey(root: 0, scale: 'major');
+    expect(find.byKey(const Key('colour-legend')), findsNothing);
+    ctl.setColour(KeyColour.degree);
+    await settle(tester, 300);
+    expect(find.byKey(const Key('colour-legend')), findsOneWidget);
+    for (final d in ['1', '2', '3', '4', '5', '6', '7']) {
+      expect(find.descendant(of: find.byKey(const Key('colour-legend')), matching: find.text(d)), findsOneWidget);
+    }
+    ctl.setColour(KeyColour.function);
+    await settle(tester, 300);
+    for (final f in ['T', 'S', 'D']) {
+      expect(find.descendant(of: find.byKey(const Key('colour-legend')), matching: find.text(f)), findsOneWidget);
+    }
+    ctl.setColour(KeyColour.chord);
+    await settle(tester, 300);
+    // nothing held: the degree legend
+    expect(find.descendant(of: find.byKey(const Key('colour-legend')), matching: find.text('7')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('colour-legend')), matching: find.text('R')), findsNothing);
+    // G7 held: root, third, fifth, seventh
+    final b = ctl.demoBoard!..autoplay = false;
+    await runFor(tester, 100);
+    for (final id in [41, 45, 25, 22]) {
+      b.press(id, pres: 0.5, strike: 0.3);
+    }
+    await waitFor(tester, () => ctl.harmony.shown?.name == 'G7');
+    await settle(tester, 300);
+    for (final r in ['R', '3', '5', '7', '+']) {
+      expect(find.descendant(of: find.byKey(const Key('colour-legend')), matching: find.text(r)), findsOneWidget);
+    }
+    expect(chordRole(ctl.harmony.shown!, 11), ChordRole.third); // B
+    expect(chordRole(ctl.harmony.shown!, 5), ChordRole.seventh); // F
+    for (final id in [41, 45, 25, 22]) {
+      b.release(id);
+    }
+    await runFor(tester, 200);
+    expect(tester.takeException(), isNull);
+    await finish(tester, ctl);
+  });
+
   testWidgets('the proof sheet of accidentals renders at label sizes', (tester) async {
     for (final h in [48.0, 24.0, 11.0]) {
       final img = await tester.runAsync(() => accidentalSheet(h: h));

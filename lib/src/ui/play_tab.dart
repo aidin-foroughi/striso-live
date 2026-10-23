@@ -462,6 +462,13 @@ class PlayToolbar extends StatelessWidget {
     (Names.off, '—  no labels'),
   ];
 
+  static const colours = [
+    (KeyColour.off, 'Colour off'),
+    (KeyColour.degree, 'Degree'),
+    (KeyColour.function, 'Function'),
+    (KeyColour.chord, 'Chord tones'),
+  ];
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -470,7 +477,9 @@ class PlayToolbar extends StatelessWidget {
         final t = ctl.live.transpose;
         return LayoutBuilder(
           builder: (context, c) {
-            // the controls scroll inside their share when the toolbar is narrow (never overflow)
+            // the controls scroll inside their share when the toolbar is narrow (never overflow);
+            // the legend goes first, under 900 px (DESIGN.md: narrower widths fold the extras)
+            final wide = c.maxWidth >= 900;
             final controls = Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -488,6 +497,20 @@ class PlayToolbar extends StatelessWidget {
                     onChanged: ctl.setNames,
                   ),
                 ),
+                const SizedBox(width: Space.s),
+                Tooltip(
+                  message:
+                      'Colour the keys by tonal function (rims only): each scale degree its own hue; tonic, '
+                      'subdominant and dominant families; or the tones of the chord you hold',
+                  waitDuration: const Duration(milliseconds: 900),
+                  child: SmallSelect<KeyColour>(
+                    key: const Key('colour'),
+                    value: ctl.colour,
+                    items: colours,
+                    onChanged: ctl.setColour,
+                  ),
+                ),
+                if (ctl.colour != KeyColour.off && wide) ...[const SizedBox(width: Space.s), ColourLegend(ctl)],
                 const SizedBox(width: Space.s),
                 TuningChip(ctl),
                 if (t != 0) ...[
@@ -526,6 +549,57 @@ class PlayToolbar extends StatelessWidget {
           },
         );
       },
+    );
+  }
+}
+
+/// The legend of the colour mode: a dot per hue with its letter or number, in micro type.
+class ColourLegend extends StatelessWidget {
+  final AppController ctl;
+  const ColourLegend(this.ctl, {super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final chord = ctl.colour == KeyColour.chord && ctl.harmony.shown?.kind == HarmonyKind.chord && !ctl.harmony.released;
+    final items = switch (ctl.colour) {
+      KeyColour.function => [for (final e in functionColors.entries) (functionLetters[e.key]!, e.value)],
+      KeyColour.chord when chord => [for (final e in chordColors.entries) (chordRoleLetters[e.key]!, e.value)],
+      _ => [for (var d = 0; d < 7; d++) ('${d + 1}', degreeColors[d])],
+    };
+    final tip = switch (ctl.colour) {
+      KeyColour.function =>
+        'Tonic family: 1 3 6 · Subdominant: 2 4 and a lowered 7 · Dominant: 5 and the leading tone 7.\n'
+            'Non-scale keys stay neutral. In other tunings the colouring follows the spelled degrees.',
+      KeyColour.chord => chord
+          ? 'Root, third, fifth, seventh and extensions of the chord you hold, on every key that carries them'
+          : 'Hold a chord to colour its tones across the board; until then the scale degrees',
+      _ => 'One hue per scale degree (by letter step: ♭3 and 3 share one); the root is the accent',
+    };
+    return Tooltip(
+      message: tip,
+      waitDuration: const Duration(milliseconds: 700),
+      child: Row(
+        key: const Key('colour-legend'),
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final (label, col) in items)
+            Padding(
+              padding: const EdgeInsets.only(right: Space.s - 2),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: col, width: 1.5)),
+                  ),
+                  const SizedBox(width: 3),
+                  Text(label, style: microStyle(color: Pal.text2)),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

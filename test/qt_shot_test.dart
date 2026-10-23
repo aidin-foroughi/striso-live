@@ -2,7 +2,8 @@
 // demo board (no window).
 //   flutter test test/qt_shot_test.dart --dart-define=SHOT=path/to/prefix
 // writes prefix_accidentals.png (the glyph proof sheet), prefix_pitch_31tet.png, prefix_pitch_just.png,
-// prefix_pitch_432.png, prefix_cents_31tet.png, prefix_settings_tuning.png.
+// prefix_pitch_432.png, prefix_cents_31tet.png, prefix_colour_degree.png, prefix_colour_function.png,
+// prefix_colour_chord.png.
 import 'dart:io';
 import 'dart:ui' as dui;
 
@@ -105,7 +106,31 @@ void main() {
     for (final id in [25, 29, 32]) {
       b.release(id);
     }
+    // colouring
+    ctl.demoTuning(0, fineCents: 0);
+    ctl.setNames(Names.degrees);
+    ctl.setColour(KeyColour.degree);
+    await run(20);
+    await save('colour_degree');
+    ctl.setKey(root: 9, scale: 'harmonic');
+    ctl.setNames(Names.letters);
+    ctl.setColour(KeyColour.function);
+    await run(20);
+    await save('colour_function');
+    ctl.setKey(root: 0, scale: 'major');
+    ctl.setColour(KeyColour.chord);
+    // G7: G3 B3 D4 F4
+    for (final id in [41, 45, 25, 22]) {
+      b.press(id, pres: 0.55, strike: 0.4);
+    }
+    await run(30);
+    await save('colour_chord');
+    for (final id in [41, 45, 25, 22]) {
+      b.release(id);
+    }
+    await run(10);
     // the settings overlay with the current tuning named on its key
+    ctl.setColour(KeyColour.off);
     ctl.demoTuning(1);
     await run(10);
     ctl.setTab(AppTab.setup);

@@ -447,6 +447,56 @@ String degreeLabel(MusicKey key, int tpc) {
 
 String solfege(MusicKey key, int tpc) => _solfege[tpc - key.tonic] ?? degreeLabel(key, tpc);
 
+/// The scale degree (1..7) and its accidental of a spelled note in a key, by letter step above the
+/// tonic: ♭3 and 3 are both degree 3.
+({int deg, int acc}) scaleDegree(MusicKey key, int tpc) {
+  final d = tpc - key.tonic;
+  final deg = mod(d * 4, 7) + 1;
+  return (deg: deg, acc: (d - _major[deg - 1]) ~/ 7);
+}
+
+/// Tonal function families: tonic, subdominant, dominant.
+enum TonalFunction { tonic, subdominant, dominant }
+
+/// The function of a scale degree: 1 3 6 tonic, 2 4 subdominant, 5 7 dominant. The seventh is the
+/// one degree whose accidental matters: a lowered seventh (mixolydian, dorian, natural minor) has no
+/// leading-tone pull and ♭VII is a subdominant chord, so it joins the subdominant family; the
+/// natural or raised seventh (major, harmonic minor) is the leading tone, dominant.
+TonalFunction functionOfDegree(int deg, [int acc = 0]) {
+  if (deg == 7) return acc < 0 ? TonalFunction.subdominant : TonalFunction.dominant;
+  if (deg == 1 || deg == 3 || deg == 6) return TonalFunction.tonic;
+  if (deg == 2 || deg == 4) return TonalFunction.subdominant;
+  return TonalFunction.dominant;
+}
+
+/// The function of a spelled scale note, null for notes outside the scale.
+TonalFunction? tonalFunction(MusicKey? key, int tpc) {
+  if (key == null || !key.tpcs.contains(tpc)) return null;
+  final d = scaleDegree(key, tpc);
+  return functionOfDegree(d.deg, d.acc);
+}
+
+/// A tone's place in a recognised chord.
+enum ChordRole { root, third, fifth, seventh, extension }
+
+/// The role of a pitch class in a chord: root, third (a sus chord's 2 or 4 stands in for it),
+/// fifth (perfect, diminished or augmented), seventh (major, minor or diminished), or an extension
+/// (9, 11, 13, ♯11, ♭13, an added sixth). Null when the pitch class is not in the chord.
+ChordRole? chordRole(Harmony chord, int pc) {
+  if (chord.kind != HarmonyKind.chord || chord.root == null) return null;
+  final type = chordTypes.where((t) => t.id == chord.type).firstOrNull;
+  if (type == null) return null;
+  final semi = mod(pc - pcOf(chord.root!), 12);
+  final tone = [...type.req, ...type.opt].where((t) => t.$1 == semi).firstOrNull;
+  if (tone == null) return null;
+  if (semi == 0) return ChordRole.root;
+  if (tone == _M3 || tone == _m3) return ChordRole.third;
+  if (type.cls == ChordClass.sus && (tone == _P4 || tone == _M2)) return ChordRole.third;
+  if (tone == _P5 || tone == _d5 || tone == _A5) return ChordRole.fifth;
+  if (tone == _m7 || tone == _M7 || tone == _d7) return ChordRole.seventh;
+  return ChordRole.extension;
+}
+
 // ---------------------------------------------------------------------------------------------
 // chord types: tones as (semitones, fifths: the usual spelling) above the root
 

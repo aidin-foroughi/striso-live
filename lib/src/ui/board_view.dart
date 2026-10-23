@@ -257,7 +257,7 @@ class BoardPainter extends CustomPainter {
   final bool overlays, reduced;
   final double labelScale;
   BoardPainter(this.ctl, this.anim, Listenable repaint, {this.overlays = false, this.labelScale = 1, this.reduced = false})
-    : super(repaint: Listenable.merge([repaint, ctl, ctl.values]));
+    : super(repaint: Listenable.merge([repaint, ctl, ctl.values, ctl.harmony]));
 
   LiveState get live => ctl.live;
   bool get _eq => overlays && ctl.eqOn && ctl.params[3]!.params.isNotEmpty && !ctl.settingsOn;
@@ -277,8 +277,9 @@ class BoardPainter extends CustomPainter {
     final tuneSig = ctl.names == Names.pitch || ctl.names == Names.cents
         ? '${t?.index}|${t?.fifth}|${t?.octave}|${t?.offset}|${t == null ? 0 : Object.hashAll(t.notes.values)}|${ctl.pitchRef.name}'
         : '';
+    final chordSig = ctl.colour == KeyColour.chord ? '${_heldChord?.name}|${_heldChord?.root}|${_heldChord?.type}' : '';
     return '${size.width.toStringAsFixed(1)}x${size.height.toStringAsFixed(1)}|${live.transpose}|${live.transposeFifths}|'
-        '${ctl.currentKey?.name}|${ctl.names.name}|$labelScale|$eqSig|$setSig|$tuneSig';
+        '${ctl.currentKey?.name}|${ctl.names.name}|${ctl.colour.name}|$labelScale|$eqSig|$setSig|$tuneSig|$chordSig';
   }
 
   @override
@@ -302,11 +303,53 @@ class BoardPainter extends CustomPainter {
     ..strokeWidth = w
     ..color = c;
 
+  /// The chord held right now, when it is one (the chord colouring follows it).
+  Harmony? get _heldChord {
+    final h = ctl.harmony;
+    final a = h.shown;
+    return a != null && !h.released && a.kind == HarmonyKind.chord ? a : null;
+  }
+
+  /// The rim colour of a key under the colour mode (null: the plain look). Colour goes in rims
+  /// only; the pressure fill stays the hero (DESIGN.md 5). Non-scale keys stay neutral, and the
+  /// colouring follows the spelled degrees, not the pitch.
+  Color? _colourOf(KeyInfo k, int tpc) {
+    final key = ctl.currentKey;
+    switch (ctl.colour) {
+      case KeyColour.off:
+        return null;
+      case KeyColour.chord:
+        final chord = _heldChord;
+        if (chord != null) {
+          final role = chordRole(chord, pcOf(tpc));
+          return role == null ? null : chordColors[role];
+        }
+        continue degree;
+      degree:
+      case KeyColour.degree:
+        if (key == null || !key.tpcs.contains(tpc)) return null;
+        return degreeColors[scaleDegree(key, tpc).deg - 1];
+      case KeyColour.function:
+        final f = tonalFunction(key, tpc);
+        return f == null ? null : functionColors[f];
+    }
+  }
+
   /// The look of a key at rest: rim colour and width (null: none), label colour, dashed rim.
   ({Color? rim, double rimW, Color label, bool dash}) _look(KeyInfo k) {
+    final tpc = keyTpc(k.id, live.transposeFifths);
+    final base = _baseLook(k, tpc);
+    final col = _colourOf(k, tpc);
+    if (col == null) return base;
+    // a coloured rim replaces the grey one; the root keeps its accent; Barry Harris keeps its dashes
+    final root = ctl.currentKey != null && tpc == ctl.currentKey!.tonic && ctl.colour != KeyColour.chord;
+    final chord = ctl.colour == KeyColour.chord && _heldChord != null;
+    return (rim: root ? Pal.accent : _a(col, chord ? 0.95 : 0.8), rimW: 1.5, label: base.label, dash: base.dash);
+  }
+
+  ({Color? rim, double rimW, Color label, bool dash}) _baseLook(KeyInfo k, int tpc) {
     final key = ctl.currentKey;
     if (key == null) return (rim: null, rimW: 0, label: Pal.t(k.natural ? 0.70 : 0.42), dash: false);
-    final tpc = keyTpc(k.id, live.transposeFifths);
     final rel = keyRelation(key, tpc);
     final bh = barryHarrisRole(key, tpc);
     return switch (rel) {
