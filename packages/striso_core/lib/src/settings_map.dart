@@ -42,9 +42,10 @@ class SettingsKey {
   List<String> describe(int id) => ['$title${uncertain ? ' (?)' : ''}', if (knob != null) 'tilt or circle the key: $knob', ?detail, 'key $id'];
 }
 
-// the factory settings card (doc/strisoboard-settings.svg, v2.2.1) names tunings 1-8 like this; the
-// board reads them from its settings (fT<n>fifth/oct/off), so they may differ: marked '?'
+// the factory tunings 1-8 (config.h fT<n>..., as on the settings card); the configuration editor can
+// change them, which the board doesn't report, so the details say so
 const _cardTunings = ['12-TET', '31-TET', '19-TET', 'Pythagoras', '5-TET', '7-TET', 'Bohlen-Pierce 1', 'Bohlen-Pierce 2', 'Just 7-limit'];
+const _cardTuningsShort = ['12TET', '31TET', '19TET', 'Pyth', '5TET', '7TET', 'BP1', 'BP2', 'Just'];
 
 /// Engine and indicator led colour per voice key, as config_voice(engine, r, g, b).
 const Map<int, (String, List<int>)> voiceKeys = {
@@ -80,10 +81,10 @@ final Map<int, SettingsKey> settingsKeys = {
   for (final (n, id) in [34, 36, 38, 23, 25, 27, 29, 31, 33].indexed)
     id: SettingsKey(
       SettingsGroup.tuning,
-      n == 0 ? '12TET' : 'T$n',
-      n == 0 ? 'Tuning 0: 12-TET' : "Tuning $n from the board's settings (factory card: ${_cardTunings[n]}?)",
+      _cardTuningsShort[n],
+      'Tuning $n: ${_cardTunings[n]}',
       knob: 'fine tuning offset, 1/32 semitone per step',
-      uncertain: n != 0,
+      detail: n == 0 ? null : 'Factory tuning; the configuration editor can change it.',
     ),
   for (final (n, id) in [35, 37, 39, 41, 43, 45, 30, 32].indexed)
     id: SettingsKey(

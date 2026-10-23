@@ -273,7 +273,7 @@ void main() {
       expect(tunings.length, 9);
       for (final m in tunings) {
         final n = m[2] != null ? int.parse(m[2]!) : 0;
-        expect(settingsKeys[int.parse(m[1]!)]!.short, n > 0 ? 'T$n' : '12TET', reason: 'tuning key ${m[1]}');
+        expect(settingsKeys[int.parse(m[1]!)]!.title, startsWith('Tuning $n: '), reason: 'tuning key ${m[1]}');
       }
       final presets = RegExp(r'case \((\d+)\):\s*\n\s*if \(type == 0\) \{\s*\n\s*load_preset\((\d)\)').allMatches(live).toList();
       expect(presets.length, 8);
