@@ -1,5 +1,6 @@
 ; Inno Setup script for a per-user Striso Live installer (no admin rights needed).
-; Built in CI: iscc /DAppVersion=1.0.0 tool\installer.iss  (from tools/striso_live)
+; Built in CI (release.yml) from the repository root, after flutter build windows --release:
+;   iscc /DAppVersion=1.1.0 tool\installer.iss   ->  dist\StrisoLive-1.1.0-windows-setup.exe
 #ifndef AppVersion
   #define AppVersion "1.0.0"
 #endif
@@ -12,7 +13,7 @@ DefaultDirName={localappdata}\Programs\Striso Live
 DefaultGroupName=Striso Live
 PrivilegesRequired=lowest
 OutputDir=..\dist
-OutputBaseFilename=StrisoLive-{#AppVersion}-setup
+OutputBaseFilename=StrisoLive-{#AppVersion}-windows-setup
 SetupIconFile=..\windows\runner\resources\app_icon.ico
 UninstallDisplayIcon={app}\StrisoLive.exe
 Compression=lzma2

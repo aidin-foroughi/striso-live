@@ -1,8 +1,39 @@
 # Striso Live (desktop)
 
-The live companion for the Striso board as a Flutter desktop app for Windows and macOS. It
-replaces the Electron build of `tools/app`; the web app and Electron stay in the repo until this
-app has been played with for a while.
+The live companion for the Striso board as a Flutter desktop app for Windows and macOS.
+
+## Install
+
+**macOS** (Apple silicon and Intel), in Terminal:
+
+```
+curl -fsSL https://raw.githubusercontent.com/aidin-foroughi/striso-live/main/install-mac.sh | bash
+```
+
+**Windows** (x64), in PowerShell:
+
+```
+irm https://raw.githubusercontent.com/aidin-foroughi/striso-live/main/install-windows.ps1 | iex
+```
+
+Both download the latest release, check its SHA-256, close a running copy, install (macOS:
+`/Applications`, or `~/Applications` when that needs sudo; Windows:
+`%LOCALAPPDATA%\Programs\Striso Live` with a Start menu shortcut, no admin) and start the app. Run
+them again to update.
+
+Or download by hand from the [Releases page](https://github.com/aidin-foroughi/striso-live/releases/latest):
+`StrisoLive-<version>-macos.dmg` (open it, drag Striso Live to Applications),
+`StrisoLive-<version>-macos.zip`, `StrisoLive-<version>-windows-setup.exe` (per-user installer) or
+`StrisoLive-<version>-windows-x64.zip` (portable). `SHA256SUMS.txt` has the checksums.
+
+**The builds are not signed.** On macOS the app is signed ad hoc only, so a downloaded copy is
+refused on the first double-click: right-click it, choose **Open**, then **Open** again, or run
+`xattr -dr com.apple.quarantine "/Applications/Striso Live.app"` (the install script does this).
+On Windows SmartScreen may say *Windows protected your PC*: click **More info**, then **Run
+anyway**.
+
+The firmware, its build and flash tools are in
+[striso-control-firmware](https://github.com/aidin-foroughi/striso-control-firmware) (`tools/`).
 
 It shows the playing on the real key layout (pressure, tilt, strikes, motion), browses voices and
 presets, edits the live parameters (voice and effects) with undo, mutate and a morph pad, keeps
@@ -17,20 +48,21 @@ is live about 0.3 s after it starts talking to the board.
 
 ### Windows
 
-1. Unzip `StrisoLive-1.1.0-windows-x64.zip` anywhere and run `Striso Live\StrisoLive.exe`.
+1. Unzip `StrisoLive-<version>-windows-x64.zip` anywhere and run `Striso Live\StrisoLive.exe`.
 2. The build is not signed, so SmartScreen may say *Windows protected your PC*: click
    **More info**, then **Run anyway**. Windows remembers it for this file.
 3. Plug in the Striso and click **Connect** (or **Try the demo** without a board).
 
-The installer (`StrisoLive-1.0.0-setup.exe`, from CI) installs per user without admin rights and
-gets the same SmartScreen warning.
+The installer (`StrisoLive-<version>-windows-setup.exe`) installs per user without admin rights
+and gets the same SmartScreen warning.
 
 The Striso's USB interface 2 must use the WinUSB driver (the board asks for it itself; if
 Connect says there is no usable driver, the Zadig tool can set WinUSB for *Striso, interface 2*).
 
 ### macOS
 
-1. Unzip `StrisoLive-1.0.0-macos.zip` and move **Striso Live.app** to Applications.
+1. Open `StrisoLive-<version>-macos.dmg` and drag **Striso Live** to Applications (or unzip
+   `StrisoLive-<version>-macos.zip` and move **Striso Live.app** there).
 2. The app is signed ad hoc only, so Gatekeeper refuses a double-click the first time:
    right-click the app, choose **Open**, then **Open** again. Or in Terminal:
    `xattr -dr com.apple.quarantine "/Applications/Striso Live.app"`.
@@ -40,7 +72,8 @@ Connect says there is no usable driver, the Zadig tool can set WinUSB for *Stris
 ### Good to know
 
 - **One program at a time.** Only one program can hold the Striso's interface. If Connect says
-  the board is busy, close the web app tab, the Electron app or a `tools/striso.py` session.
+  the board is busy, close the web app tab, the Electron app or a `tools/striso.py` session
+  (the firmware repository's board tool).
 - **Reconnects by itself** after an unplug or a reboot, 4 s after the board is back (so a flash
   tool gets it first), retrying a busy board for 30 s; never after you clicked Disconnect.
   At start it connects right away when you left it connected.
@@ -94,23 +127,44 @@ resets; Alt+click locks against Mutate.
 
 ## Build
 
-Flutter 3.41 (Dart 3.11), Visual Studio 2022 with the C++ desktop workload on Windows, Xcode on
-macOS.
+Flutter 3.41.2 (Dart 3.11), Visual Studio 2022 with the C++ desktop workload on Windows, Xcode on
+macOS. From the repository root:
 
 ```
-cd tools/striso_live
+flutter pub get
 flutter test                                 # widget and controller tests (headless)
 (cd packages/striso_core && dart test)       # protocol, parser, client, harmony, params, touch, config
+flutter analyze
 flutter build windows --release              # build\windows\x64\runner\Release\StrisoLive.exe
-powershell -File tool\package_windows.ps1    # dist\StrisoLive-1.1.0-windows-x64.zip
+powershell -File tool\package_windows.ps1    # dist\StrisoLive-<version>-windows-x64.zip
+iscc /DAppVersion=<version> tool\installer.iss   # dist\StrisoLive-<version>-windows-setup.exe (Inno Setup 6)
 
-flutter build macos --release
-tool/bundle_libusb_macos.sh "build/macos/Build/Products/Release/Striso Live.app"   # needs brew's libusb
+flutter build macos --release                # universal (arm64 + x86_64)
+sh tool/package_macos.sh [libusb-1.0.0.dylib]   # libusb into the app, dist/*.zip and *.dmg; default: brew's libusb
 ```
 
-`.github/workflows/striso-live-flutter.yml` runs the tests and builds both platforms on
-windows-latest and macos-latest (a universal libusb for macOS, the Windows zip and installer) and
-uploads them as artifacts.
+Run it from the build: `build\windows\x64\runner\Release\StrisoLive.exe` (Windows) or
+`open "build/macos/Build/Products/Release/Striso Live.app"`; `--demo --no-usb` without a board.
+
+**Firmware cross-checks.** Some `striso_core` tests compare with the firmware source: the hero
+knob names with `voice_*.h` and `fx.h`, the settings map with `synth_control.cpp`, and the config
+writer byte for byte with the firmware's `tools/striso.py` (through its `tools/.venv`, see
+`tools/requirements.txt` there). They look for a
+[striso-control-firmware](https://github.com/aidin-foroughi/striso-control-firmware) checkout in
+`$STRISO_FW_DIR`, else in `../striso-control-firmware` next to this repository, and skip with a
+message when there is none. `STRISO_PYTHON` overrides the Python for the config test.
+
+**CI.** `.github/workflows/striso-live-flutter.yml` runs the tests and builds both platforms on
+windows-latest and macos-latest (with a universal libusb for macOS) for every push to main and
+every pull request, and uploads the zips and the dmg as workflow artifacts. It clones the firmware
+next to the app so the cross-checks run.
+
+**Releases.** Set the version in `pubspec.yaml`, commit, then push a matching tag:
+`git tag v1.1.0 && git push origin v1.1.0`. `.github/workflows/release.yml` tests, builds the
+Windows zip and installer and the universal macOS dmg and zip, and publishes a GitHub Release with
+them, fixed-name copies for the install scripts (`StrisoLive-macos.zip`,
+`StrisoLive-windows-x64.zip`, each with a `.sha256`), `SHA256SUMS.txt` and generated notes. Run by
+hand (Actions, Release, Run workflow) it only builds, as workflow artifacts.
 
 Headless USB check (no window; read-only: V, v, p, f, S, s):
 
@@ -126,12 +180,16 @@ dart run bin/striso_probe.dart --lib path\to\libusb-1.0.dll connect 1
   queue, coalesced parameter writes, stream watchdog), demo board, key layout, live key state,
   harmony analysis, parameters/presets/undo/morph/C export, key equalizer math, settings-mode
   map, config UF2 writer and the save flow. `dart test`: ports of the web app's tests, the config
-  writer compared byte for byte with `tools/striso.py`, the settings map against the firmware
-  source when it is checked out.
+  writer compared byte for byte with the firmware's `tools/striso.py`, the settings map against
+  the firmware source when it is checked out (see Firmware cross-checks).
 - `packages/striso_usb`: libusb-1.0 through `dart:ffi` (own thin bindings: no maintained package
   fits), the I/O in a background isolate with 16 bulk IN transfers in flight; the UI never waits
   on USB.
-- `lib/`: the app (controller, panels, painters).
+- `lib/`: the app (controller, panels, painters). Several files are ports of the earlier web app
+  (`tools/app` in the Striso tooling repository), which their header comments name.
+- `tool/`: packaging (`package_windows.ps1`, `installer.iss`, `package_macos.sh`,
+  `bundle_libusb_macos.sh`) and the icon generator; `install-mac.sh`, `install-windows.ps1`: the
+  one-line installers.
 - `assets/fonts/Inter.ttf`: Inter (variable), SIL Open Font License 1.1 (`assets/fonts/OFL.txt`),
   bundled so the type is the same on Windows and macOS. Design tokens and components:
   `lib/src/theme.dart`, from `DESIGN.md`.

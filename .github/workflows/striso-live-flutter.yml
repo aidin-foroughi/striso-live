@@ -1,16 +1,16 @@
-# Striso Live, Flutter desktop app (tools/striso_live): tests, then the Windows and macOS builds.
-# Unsigned builds; tools/striso_live/README.md says how to open them past SmartScreen/Gatekeeper.
+# Striso Live, Flutter desktop app: tests, then the Windows and macOS builds, uploaded as workflow
+# artifacts. Tagged releases: release.yml. Unsigned builds; README.md says how to open them past
+# SmartScreen/Gatekeeper.
 name: Striso Live (Flutter)
 
 on:
   workflow_dispatch:
   push:
-    paths:
-      - "tools/striso_live/**"
-      - ".github/workflows/striso-live-flutter.yml"
+    branches: [main]
   pull_request:
-    paths:
-      - "tools/striso_live/**"
+
+permissions:
+  contents: read
 
 env:
   FLUTTER_VERSION: "3.41.2"
@@ -25,34 +25,39 @@ jobs:
     runs-on: ${{ matrix.os }}
     defaults:
       run:
-        working-directory: tools/striso_live
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: subosito/flutter-action@v2
+      - name: Firmware source next to the app, for the cross-checks (optional)
+        # parameter names, settings map, config writer vs tools/striso.py; the tests look in
+        # ../striso-control-firmware (or $STRISO_FW_DIR) and skip with a message without it
+        continue-on-error: true
+        run: git clone --quiet --depth 1 --branch main https://github.com/aidin-foroughi/striso-control-firmware.git ../striso-control-firmware
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
 
-      - name: Python for the config reference test
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
-      - name: tools/.venv for the config reference test (tools/striso.py imports pyusb)
-        working-directory: tools
+      - name: Firmware tools venv for the config reference test (tools/striso.py imports pyusb)
         run: |
-          python -m venv .venv
-          if [ -f .venv/Scripts/python.exe ]; then PY=.venv/Scripts/python.exe; else PY=.venv/bin/python; fi
-          "$PY" -m pip install --quiet pyusb libusb_package
+          t=../striso-control-firmware/tools
+          if [ ! -f "$t/requirements.txt" ]; then echo "no $t/requirements.txt: the config reference test will skip"; exit 0; fi
+          python -m venv "$t/.venv"
+          if [ -f "$t/.venv/Scripts/python.exe" ]; then PY="$t/.venv/Scripts/python.exe"; else PY="$t/.venv/bin/python"; fi
+          "$PY" -m pip install --quiet -r "$t/requirements.txt"
 
       - name: Get packages
         run: flutter pub get
 
       - name: Core tests (dart test)
-        working-directory: tools/striso_live/packages/striso_core
+        working-directory: packages/striso_core
         run: dart test -r expanded
 
       - name: Analyze
@@ -84,19 +89,6 @@ jobs:
         shell: pwsh
         run: ./tool/package_windows.ps1
 
-      - name: Installer (Windows, Inno Setup)
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
-            $inno = 'C:\Program Files (x86)\Inno Setup 6'
-            if (-not (Test-Path "$inno\iscc.exe")) { choco install innosetup -y --no-progress }
-            $env:PATH = "$inno;$env:PATH"
-          }
-          $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*([0-9.]+)').Matches[0].Groups[1].Value
-          iscc "/DAppVersion=$version" tool\installer.iss
-
       # ---------------------------------------------------------------- macOS
       - name: libusb, universal (macOS)
         if: runner.os == 'macOS'
@@ -112,19 +104,16 @@ jobs:
           make install
           lipo -archs "$RUNNER_TEMP/libusb/lib/libusb-1.0.0.dylib"
 
-      - name: Build (macOS)
+      - name: Build and package (macOS)
         if: runner.os == 'macOS'
         run: |
           flutter build macos --release
-          sh tool/bundle_libusb_macos.sh "build/macos/Build/Products/Release/Striso Live.app" "$RUNNER_TEMP/libusb/lib/libusb-1.0.0.dylib"
-          version=$(sed -n 's/^version: *\([0-9.]*\).*/\1/p' pubspec.yaml)
-          mkdir -p dist
-          ditto -c -k --keepParent "build/macos/Build/Products/Release/Striso Live.app" "dist/StrisoLive-${version}-macos.zip"
+          sh tool/package_macos.sh "$RUNNER_TEMP/libusb/lib/libusb-1.0.0.dylib"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: striso-live-flutter-${{ runner.os }}
           path: |
-            tools/striso_live/dist/*.zip
-            tools/striso_live/dist/*.exe
+            dist/*.zip
+            dist/*.dmg
           if-no-files-found: error

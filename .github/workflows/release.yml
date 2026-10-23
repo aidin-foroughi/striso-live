@@ -1,0 +1,250 @@
+# Release Striso Live for Windows and macOS: push a tag v<version> matching pubspec.yaml's version
+# (git tag v1.1.0 && git push origin v1.1.0). Tests first, then the builds, then a GitHub Release
+# with every asset, SHA-256 sums and generated notes. Run by hand (workflow_dispatch) it builds and
+# uploads the assets as workflow artifacts only, without a release.
+#
+# Assets (<v> = the version):
+#   StrisoLive-<v>-windows-x64.zip      portable app (unzip, run StrisoLive.exe)
+#   StrisoLive-<v>-windows-setup.exe    per-user installer (Inno Setup, no admin)
+#   StrisoLive-<v>-macos.dmg            universal app (Apple silicon + Intel), drag to Applications
+#   StrisoLive-<v>-macos.zip            the same app zipped
+#   StrisoLive-windows-x64.zip, StrisoLive-macos.zip   the same zips under fixed names, so that
+#       releases/latest/download/<name> is a stable link (install-windows.ps1, install-mac.sh)
+#   <fixed name>.sha256, SHA256SUMS.txt
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: "3.41.2"
+  LIBUSB_VERSION: "1.0.30"
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Version (a tag must match pubspec.yaml)
+        id: version
+        run: |
+          v=$(sed -n 's/^version: *\([0-9][0-9.]*\).*/\1/p' pubspec.yaml)
+          [ -n "$v" ] || { echo "::error::no version in pubspec.yaml"; exit 1; }
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$v" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match pubspec.yaml version $v (expected v$v)"; exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Firmware source next to the app, for the cross-checks (optional)
+        continue-on-error: true
+        run: git clone --quiet --depth 1 --branch main https://github.com/aidin-foroughi/striso-control-firmware.git ../striso-control-firmware
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Firmware tools venv (config reference test)
+        run: |
+          t=../striso-control-firmware/tools
+          if [ ! -f "$t/requirements.txt" ]; then echo "no $t/requirements.txt: the config reference test will skip"; exit 0; fi
+          python -m venv "$t/.venv"
+          "$t/.venv/Scripts/python.exe" -m pip install --quiet -r "$t/requirements.txt"
+
+      - name: Test
+        run: |
+          flutter pub get
+          (cd packages/striso_core && dart test)
+          flutter analyze
+          (cd packages/striso_usb && dart analyze)
+          flutter test
+
+      - name: Build
+        run: flutter build windows --release
+
+      - name: Smoke run (demo board, no USB, hidden window)
+        shell: pwsh
+        run: |
+          $env:STRISO_LIVE_HOME = "$env:RUNNER_TEMP\striso-live-smoke"
+          $p = Start-Process -FilePath build\windows\x64\runner\Release\StrisoLive.exe -ArgumentList '--smoke=5','--no-usb','--demo' -PassThru
+          if (-not $p.WaitForExit(60000)) { $p.Kill(); throw 'smoke run did not quit' }
+          if ($p.ExitCode -ne 0) { throw "smoke run exit code $($p.ExitCode)" }
+          if (-not (Select-String -Path "$env:STRISO_LIVE_HOME\logs\striso-live.log" -Pattern 'smoke: ok')) { throw 'no smoke line' }
+
+      - name: Portable zip
+        shell: pwsh
+        run: ./tool/package_windows.ps1
+
+      - name: Installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $inno = 'C:\Program Files (x86)\Inno Setup 6'
+          if (-not (Test-Path "$inno\ISCC.exe")) { choco install innosetup -y --no-progress }
+          & "$inno\ISCC.exe" "/DAppVersion=${{ steps.version.outputs.version }}" tool\installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "iscc failed: $LASTEXITCODE" }
+
+      - name: Fixed-name copy and check
+        run: |
+          v='${{ steps.version.outputs.version }}'
+          cp "dist/StrisoLive-$v-windows-x64.zip" dist/StrisoLive-windows-x64.zip
+          ls -l dist
+          for f in "StrisoLive-$v-windows-x64.zip" "StrisoLive-$v-windows-setup.exe" StrisoLive-windows-x64.zip; do
+            [ -s "dist/$f" ] || { echo "::error::missing dist/$f"; exit 1; }
+          done
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-windows
+          path: |
+            dist/*.zip
+            dist/*.exe
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Version (a tag must match pubspec.yaml)
+        id: version
+        run: |
+          v=$(sed -n 's/^version: *\([0-9][0-9.]*\).*/\1/p' pubspec.yaml)
+          [ -n "$v" ] || { echo "::error::no version in pubspec.yaml"; exit 1; }
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$v" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match pubspec.yaml version $v (expected v$v)"; exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Firmware source next to the app, for the cross-checks (optional)
+        continue-on-error: true
+        run: git clone --quiet --depth 1 --branch main https://github.com/aidin-foroughi/striso-control-firmware.git ../striso-control-firmware
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Firmware tools venv (config reference test)
+        run: |
+          t=../striso-control-firmware/tools
+          if [ ! -f "$t/requirements.txt" ]; then echo "no $t/requirements.txt: the config reference test will skip"; exit 0; fi
+          python -m venv "$t/.venv"
+          "$t/.venv/bin/python" -m pip install --quiet -r "$t/requirements.txt"
+
+      - name: Test
+        run: |
+          flutter pub get
+          (cd packages/striso_core && dart test)
+          flutter analyze
+          (cd packages/striso_usb && dart analyze)
+          flutter test
+
+      - name: libusb, universal (arm64 + x86_64)
+        run: |
+          set -e
+          cd "$RUNNER_TEMP"
+          curl -fsSL -o libusb.tar.bz2 "https://github.com/libusb/libusb/releases/download/v${LIBUSB_VERSION}/libusb-${LIBUSB_VERSION}.tar.bz2"
+          tar xjf libusb.tar.bz2
+          cd "libusb-${LIBUSB_VERSION}"
+          ./configure --disable-dependency-tracking --disable-static --prefix="$RUNNER_TEMP/libusb" \
+            CFLAGS="-arch arm64 -arch x86_64 -mmacosx-version-min=10.15 -O2" LDFLAGS="-arch arm64 -arch x86_64 -mmacosx-version-min=10.15"
+          make -j4
+          make install
+          lipo -archs "$RUNNER_TEMP/libusb/lib/libusb-1.0.0.dylib"
+
+      - name: Build (universal)
+        run: flutter build macos --release
+
+      - name: Package (libusb in the bundle, ad hoc signature, zip and dmg)
+        run: sh tool/package_macos.sh "$RUNNER_TEMP/libusb/lib/libusb-1.0.0.dylib"
+
+      - name: Smoke run (demo board, no USB)
+        # not yet run on a macOS runner: does not block the release until it has proven itself
+        continue-on-error: true
+        run: |
+          export STRISO_LIVE_HOME="$RUNNER_TEMP/striso-live-smoke"
+          "build/macos/Build/Products/Release/Striso Live.app/Contents/MacOS/Striso Live" --smoke=5 --no-usb --demo &
+          pid=$!
+          for _ in $(seq 60); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+          if kill -0 "$pid" 2>/dev/null; then kill "$pid"; echo "::error::smoke run did not quit"; exit 1; fi
+          wait "$pid"
+          grep 'smoke: ok' "$STRISO_LIVE_HOME/logs/striso-live.log"
+
+      - name: Fixed-name copy and check
+        run: |
+          v='${{ steps.version.outputs.version }}'
+          cp "dist/StrisoLive-$v-macos.zip" dist/StrisoLive-macos.zip
+          ls -l dist
+          for f in "StrisoLive-$v-macos.zip" "StrisoLive-$v-macos.dmg" StrisoLive-macos.zip; do
+            [ -s "dist/$f" ] || { echo "::error::missing dist/$f"; exit 1; }
+          done
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-macos
+          path: |
+            dist/*.zip
+            dist/*.dmg
+          if-no-files-found: error
+
+  release:
+    needs: [windows, macos]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          for f in StrisoLive-windows-x64.zip StrisoLive-macos.zip; do sha256sum "$f" > "$f.sha256"; done
+          sha256sum StrisoLive-* | grep -v '\.sha256$' > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          ls -l
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.windows.outputs.version }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "release $TAG exists: replacing its assets"
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --verify-tag --title "Striso Live $VERSION" --generate-notes
+          fi
