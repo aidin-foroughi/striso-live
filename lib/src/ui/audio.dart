@@ -298,6 +298,27 @@ class _AudioSectionState extends State<AudioSection> {
             _AutoLine(widget.ctl),
             _rowTall('Latency', _Latency(widget.ctl)),
             _rowTall('Dropouts', _Dropouts(widget.ctl)),
+            if (a.boardTargetSupported == true) ...[
+              _row(
+                'Striso buffer',
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Seg<int>(
+                    value: p.boardBuffer,
+                    onChanged: a.setBoardBuffer,
+                    keys: {for (final f in [AudioPrefs.auto, ...AudioPrefs.boardBuffers]) f: Key('audio-board-$f')},
+                    items: [
+                      (AudioPrefs.auto, 'Auto', 'The smallest that keeps the Striso at no underruns (its own counters, every 2 s)'),
+                      for (final f in AudioPrefs.boardBuffers)
+                        (f, '$f', '$f frames (${(f / 48).toStringAsFixed(2)} ms) in the Striso before each USB packet: smaller is quicker'),
+                    ],
+                  ),
+                ),
+                tip: 'The Striso’s own buffer before USB. Set from the app on every connection (the Striso does not keep it).',
+              ),
+              _BoardLine(widget.ctl),
+            ],
             if (Platform.isWindows)
               _row(
                 '',
@@ -383,6 +404,31 @@ class _AutoLine extends StatelessWidget {
         child: Text(
           'Recommended · now ${a.period} frames$dev${phase.isNotEmpty ? ' · $phase' : ''}',
           key: const Key('audio-auto-line'),
+          style: ui(TypeSize.small, color: Pal.text3),
+        ),
+      );
+    },
+  );
+}
+
+/// Under the Striso buffer: the board's ring as it reports it (small text3).
+class _BoardLine extends StatelessWidget {
+  final AppController ctl;
+  const _BoardLine(this.ctl);
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: ctl.audioLevels,
+    builder: (context, _) {
+      final a = ctl.audio;
+      final b = a.board;
+      final t = b?.ringTarget ?? a.boardTargetWanted;
+      final low = b?.ringMin;
+      return Padding(
+        padding: const EdgeInsets.only(left: 84, bottom: Space.xs),
+        child: Text(
+          '${a.prefs.boardBuffer == AudioPrefs.auto ? 'Recommended · ' : ''}now $t frames (${(t / 48).toStringAsFixed(2)} ms)'
+          '${low != null ? ' · lowest before a packet $low' : ''}',
+          key: const Key('audio-board-line'),
           style: ui(TypeSize.small, color: Pal.text3),
         ),
       );

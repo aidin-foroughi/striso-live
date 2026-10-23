@@ -91,7 +91,7 @@ void main() {
       final mem = AudioPrefs.fromJson({
         'v': 2,
         'auto': {
-          'dock|exclusive': {'stable': 128, 'failed': 64, 'failedAt': 1000, 'floor': 999},
+          'dock|exclusive': {'stable': 128, 'failed': 64, 'failedAt': 1000, 'floor': 9999},
           7: 'nonsense',
         },
       });

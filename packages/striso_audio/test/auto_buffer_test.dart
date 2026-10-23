@@ -184,6 +184,53 @@ void main() {
       again.dispose();
     });
 
+    test('input-side dropouts do not move Auto (a bigger output buffer cannot help them)', () {
+      r = Rig(prefs: const AudioPrefs(through: true));
+      r.play(23);
+      expect(r.fake.last.period, 128);
+      for (var i = 0; i < 5; i++) {
+        r.fake.dropout(input: true);
+        r.play(1);
+      }
+      expect(r.fake.last.period, lessThanOrEqualTo(128));
+      expect(r.logs.where((l) => l.contains('backing off')), isEmpty);
+      expect(r.pc.dropoutsLastMinute()[DropSide.input], 5);
+    });
+
+    test('the board buffer: Auto sets the smallest target that keeps the board at 0 underruns', () {
+      r = Rig(prefs: const AudioPrefs(through: true, period: 128));
+      r.play(1);
+      expect(r.pc.boardTargetWanted, 96, reason: 'the firmware default');
+      r.pc.boardTargetSupported = true;
+      var t = 96;
+      void poll({int underruns = 0}) {
+        r.play(2);
+        r.pc.boardStats(BoardAudioStats(underruns: underruns, ringTarget: t, ringFiltered: t.toDouble(), streaming: true));
+        t = r.pc.boardTargetWanted; // the app sets it
+      }
+
+      for (var i = 0; i < 17; i++) {
+        poll();
+      }
+      expect(t, 88, reason: '30 s clean: one step smaller');
+      for (var i = 0; i < 16; i++) {
+        poll();
+      }
+      expect(t, 80);
+      poll(underruns: 1);
+      expect(t, 88, reason: 'an underrun: one step back at once');
+      for (var i = 0; i < 70; i++) {
+        poll();
+      }
+      expect(t, 88, reason: '80 underran: never again');
+      final mem = r.saved.last.autoMemory[BoardBuffer.memoryKey]!;
+      expect([mem.failed, mem.stable], [80, 88]);
+      expect(r.logs.where((l) => l.contains('board buffer:')), isNotEmpty);
+      r.pc.setBoardBuffer(120);
+      expect(r.pc.boardTargetWanted, 120);
+      expect(AudioPrefs.fromJson(r.pc.prefs.toJson()).boardBuffer, 120);
+    });
+
     test('a manual size is used as it is', () {
       r = Rig(prefs: const AudioPrefs(through: true, period: 64), setup: (f) => f.stableFrom = {'': 128});
       r.play(60);
@@ -224,12 +271,12 @@ void main() {
       r.fake.dropout(input: true);
       r.fake.dropout();
       r.play(0.1);
-      r.pc.boardStats(const BoardAudioStats(sent: 2000, underruns: 2, overruns: 0, ringMin: 0, ringMax: 160, ringFiltered: 140));
-      expect(r.pc.dropoutsLastMinute(), {DropSide.board: 2, DropSide.input: 1, DropSide.output: 1});
+      r.pc.boardStats(const BoardAudioStats(sent: 2000, underruns: 1, hostSkipped: 1, overruns: 3, ringMin: 0, ringMax: 160, ringFiltered: 120));
+      expect(r.pc.dropoutsLastMinute(), {DropSide.board: 2, DropSide.input: 1, DropSide.output: 1}, reason: 'board: underruns + host skipped (overruns are not)');
       expect(r.pc.liveLine, startsWith('dropouts: 4 in the last minute'));
       expect(r.pc.breakdown.usbMeasured, isTrue);
-      expect(r.pc.breakdown.usb, closeTo(140 / 48 + 1, 1e-9));
-      expect(r.logs.where((l) => l.contains('dropout on the board: 2 underruns')), hasLength(1));
+      expect(r.pc.breakdown.usb, closeTo((120 - 24) / 48 + 1.23, 1e-9));
+      expect(r.logs.where((l) => l.contains('dropout on the board: 1 underrun (its ring ran dry), 1 frame the host skipped (1 ms gaps)')), hasLength(1));
       expect(r.logs.where((l) => l.contains('input late')), isNotEmpty);
       r.play(61);
       expect(r.pc.dropoutsLastMinute().values.every((n) => n == 0), isTrue);
@@ -242,7 +289,7 @@ void main() {
       final b = r.pc.breakdown;
       expect(b.total, closeTo(b.input + b.ring + b.output + b.usb, 1e-9));
       expect(b.output, closeTo(128 / 48, 1e-6));
-      expect(b.usb, closeTo(144 / 48 + 1, 1e-9), reason: 'no board numbers yet: its 3 ms target + the packet');
+      expect(b.usb, closeTo((96 - 24) / 48 + 1.23, 1e-9), reason: 'no board numbers yet: its 2 ms default target, the fetch and the bus');
     });
   });
 }

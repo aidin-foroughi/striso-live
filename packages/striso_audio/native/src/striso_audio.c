@@ -41,6 +41,7 @@
 #define MA_ENABLE_WASAPI
 #define MA_ENABLE_COREAUDIO
 #define MA_ENABLE_NULL
+#define MA_WASAPI_EXCLUSIVE_CAPTURE_PREFER_S24 /* the local patch in third_party/miniaudio (README there) */
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
 

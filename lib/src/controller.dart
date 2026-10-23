@@ -1130,6 +1130,23 @@ class AppController extends ChangeNotifier implements MorphHost {
   Future<void> _pollUsbAudio(StrisoClient c) async {
     var misses = 0;
     var baseline = true;
+    int? targetSet; // the board's ring target as last set (it forgets it at a restart: a new session)
+    Future<void> setTarget() async {
+      final want = audio.boardTargetWanted;
+      if (audio.boardTargetSupported == false || want == targetSet) return;
+      final v = await c.setUsbAudioTarget(want);
+      if (!identical(client, c)) return;
+      if (v == null) {
+        audio.boardTargetSupported = false;
+        log('the board does not take a USB audio ring target (Stct): its own stays');
+      } else {
+        audio.boardTargetSupported = true;
+        targetSet = v;
+        log('board USB audio ring target: $v frames (${(v / 48).toStringAsFixed(2)} ms)');
+        audioState.ping();
+      }
+    }
+
     while (identical(client, c) && !_disposed && misses < 3) {
       await Future<void>.delayed(const Duration(seconds: 2));
       if (!identical(client, c) || connecting || saving) continue;
@@ -1147,7 +1164,9 @@ class AppController extends ChangeNotifier implements MorphHost {
       misses = 0;
       if (baseline) {
         baseline = false;
-        if (s.drops > 0) log('board USB audio before this: ${s.underruns ?? 0} underruns, ${s.overruns ?? 0} overruns (not counted)');
+        if (s.uac != null) log('board USB audio: UAC${s.uac}, ring target ${s.ringTarget ?? '?'} frames');
+        if (s.drops > 0) log('board USB audio before this: ${s.underruns ?? 0} underruns, ${s.hostSkipped ?? 0} host-skipped frames (not counted)');
+        await setTarget();
         continue;
       }
       audio.boardStats(
@@ -1162,8 +1181,12 @@ class AppController extends ChangeNotifier implements MorphHost {
           ringMax: s.ringMax,
           ringTarget: s.ringTarget,
           streaming: s.streaming,
+          hostSkipped: s.hostSkipped,
+          notReady: s.notReady,
+          uac: s.uac,
         ),
       );
+      await setTarget();
     }
   }
 

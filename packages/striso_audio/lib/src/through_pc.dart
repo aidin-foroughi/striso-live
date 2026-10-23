@@ -70,8 +70,12 @@ class AudioPrefs {
   /// when another program holds it. Off: always shared.
   final bool exclusiveOutput;
 
-  /// What Auto learned, per output (AutoMemory as JSON, by [ThroughPc.outputKey]).
+  /// What Auto learned, per output (AutoMemory as JSON, by [ThroughPc.outputKey]), and for the
+  /// board's own buffer ([BoardBuffer.memoryKey]).
   final Map<String, AutoMemory> autoMemory;
+
+  /// The board's USB audio ring target (Stct, frames), or [auto].
+  final int boardBuffer;
 
   const AudioPrefs({
     this.through = false,
@@ -82,7 +86,10 @@ class AudioPrefs {
     this.exclusive = true,
     this.exclusiveOutput = true,
     this.autoMemory = const {},
+    this.boardBuffer = auto,
   });
+
+  static const boardBuffers = [72, 96, 120, 144];
 
   static const auto = 0;
   static const periods = [64, 128, 256, 512];
@@ -104,6 +111,7 @@ class AudioPrefs {
     bool? exclusive,
     bool? exclusiveOutput,
     Map<String, AutoMemory>? autoMemory,
+    int? boardBuffer,
   }) => AudioPrefs(
     through: through ?? this.through,
     input: identical(input, _keep) ? this.input : input as String?,
@@ -113,6 +121,7 @@ class AudioPrefs {
     exclusive: exclusive ?? this.exclusive,
     exclusiveOutput: exclusiveOutput ?? this.exclusiveOutput,
     autoMemory: autoMemory ?? this.autoMemory,
+    boardBuffer: boardBuffer ?? this.boardBuffer,
   );
 
   Map<String, Object?> toJson() => {
@@ -125,6 +134,7 @@ class AudioPrefs {
     'exclusive': exclusive,
     'exclusiveOutput': exclusiveOutput,
     if (autoMemory.isNotEmpty) 'auto': {for (final e in autoMemory.entries) e.key: e.value.toJson()},
+    'boardBuffer': boardBuffer,
   };
 
   static AudioPrefs fromJson(Object? j) {
@@ -150,6 +160,10 @@ class AudioPrefs {
       // before 2 the output was shared unless asked: now exclusive on wired outputs unless turned off
       exclusiveOutput: v < 2 ? true : j['exclusiveOutput'] != false,
       autoMemory: mem,
+      boardBuffer: switch ((j['boardBuffer'] as num?)?.toInt()) {
+        final int b when b >= 49 && b <= 256 => b,
+        _ => auto,
+      },
     );
   }
 
@@ -163,6 +177,7 @@ class AudioPrefs {
       other.gainDb == gainDb &&
       other.exclusive == exclusive &&
       other.exclusiveOutput == exclusiveOutput &&
+      other.boardBuffer == boardBuffer &&
       _sameMem(other.autoMemory, autoMemory);
 
   static bool _sameMem(Map<String, AutoMemory> a, Map<String, AutoMemory> b) => a.length == b.length && a.entries.every((e) => b[e.key] == e.value);
@@ -174,6 +189,12 @@ class AudioPrefs {
 /// The board's own counters (console StcU), as the app parsed them; null fields: not reported.
 class BoardAudioStats {
   final int? sent, missed, underruns, overruns, primes;
+
+  /// UAC2 firmware: the host skipped a frame (a 1 ms gap); a packet was not ready at its frame.
+  final int? hostSkipped, notReady;
+
+  /// 1 or 2: the board's USB audio class, as it says.
+  final int? uac;
 
   /// The board's ring before each packet (frames): filtered level, and min..max since the last poll.
   final double? ringFiltered;
@@ -190,10 +211,14 @@ class BoardAudioStats {
     this.ringMax,
     this.ringTarget,
     this.streaming,
+    this.hostSkipped,
+    this.notReady,
+    this.uac,
   });
 
-  /// Dropouts on the board's side since the last poll (its ring ran dry or overflowed).
-  int get drops => (underruns ?? 0) + (overruns ?? 0);
+  /// Dropouts on the board's side since the last poll: its ring ran dry, the host skipped a frame,
+  /// a packet was not ready at its frame.
+  int get drops => (underruns ?? 0) + (hostSkipped ?? 0) + (notReady ?? 0);
 }
 
 /// The Striso's input among [inputs]: by USB VID/PID where the system says, else by name.
@@ -251,6 +276,10 @@ class ThroughPc {
   /// Windows semantics (exclusive mode) apply; false on macOS.
   final bool windows;
   final AutoBuffer autoBuffer;
+  final BoardBuffer boardBuffer = BoardBuffer();
+
+  /// The board takes Stct (set by the app once it asked); null: not known yet.
+  bool? boardTargetSupported;
 
   AudioPrefs _prefs;
   ThroughState state = ThroughState.off;
@@ -273,6 +302,9 @@ class ThroughPc {
   // dropouts
   final dropouts = <Dropout>[];
   int _evSeq = 0;
+
+  /// Output-side dropouts so far: the only ones a larger output buffer can help (Auto's counter).
+  int _outDrops = 0;
   BoardAudioStats? board;
   int boardDropsTotal = 0;
   DateTime? _boardAt;
@@ -500,7 +532,7 @@ class ThroughPc {
       key: key,
       mem: mem,
       playing: playingNow,
-      dropouts: st.dropouts,
+      dropouts: _outDrops,
       level: level,
       deviceBuffer: st.playbackBuffer,
       // exclusive mode never goes below the device's minimum period
@@ -563,7 +595,10 @@ class ThroughPc {
     for (final e in evs) {
       _evSeq = e.seq;
       final at = _evTime(t, e);
-      if (e.isDropout) dropouts.add(Dropout(at, e.inputSide ? DropSide.input : DropSide.output, e.text));
+      if (e.isDropout) {
+        dropouts.add(Dropout(at, e.inputSide ? DropSide.input : DropSide.output, e.text));
+        if (!e.inputSide) _outDrops++;
+      }
       // late wake-ups within the buffer and target moves are frequent and harmless: the summary
       // has them; every dropout and everything else is logged with its cause
       final quiet = (e.type == Ev.outLate && e.c == 0) || e.type == Ev.inLate || e.type == Ev.target;
@@ -589,23 +624,37 @@ class ThroughPc {
     final t = _now();
     board = s;
     _boardAt = t;
+    if (_prefs.boardBuffer == AudioPrefs.auto && boardTargetSupported == true) {
+      final mem = _prefs.autoMemory[BoardBuffer.memoryKey] ?? AutoMemory.none;
+      final step = boardBuffer.step(now: t, mem: mem, playing: playing && (s.streaming ?? true), underruns: s.underruns ?? 0);
+      if (step.note != null) _log('audio: ${step.note}');
+      if (step.remember != null && step.remember != mem) {
+        _setPrefs(_prefs.copyWith(autoMemory: {..._prefs.autoMemory, BoardBuffer.memoryKey: step.remember!}));
+      }
+    }
     final n = s.drops;
     if (n > 0) {
       boardDropsTotal += n;
       final why = [
-        if ((s.underruns ?? 0) > 0) '${s.underruns} underrun${s.underruns == 1 ? '' : 's'}',
-        if ((s.overruns ?? 0) > 0) '${s.overruns} overrun${s.overruns == 1 ? '' : 's'}',
+        if ((s.underruns ?? 0) > 0) '${s.underruns} underrun${s.underruns == 1 ? '' : 's'} (its ring ran dry)',
+        if ((s.hostSkipped ?? 0) > 0) '${s.hostSkipped} frame${s.hostSkipped == 1 ? '' : 's'} the host skipped (1 ms gaps)',
+        if ((s.notReady ?? 0) > 0) '${s.notReady} packet${s.notReady == 1 ? '' : 's'} not ready at its frame',
       ].join(', ');
       for (var i = 0; i < math.min(n, 50); i++) {
         dropouts.add(Dropout(t, DropSide.board, 'board: $why'));
       }
-      _log('audio: ${clock(t)} dropout on the board: $why (its ring ${s.ringMin ?? '?'}..${s.ringMax ?? '?'} frames, ${s.missed ?? 0} packets the host missed)');
+      _log('audio: ${clock(t)} dropout on the board: $why (its ring ${s.ringMin ?? '?'}..${s.ringMax ?? '?'} frames before packets, target ${s.ringTarget ?? '?'})');
       _pruneDropouts(t);
       _notify();
     } else if ((s.missed ?? 0) > 0) {
-      _log('audio: board: ${s.missed} packets the host did not fetch in time (resent, no samples lost)');
+      _log('audio: board: ${s.missed} packets the host did not fetch in time (sent again, no samples lost)');
     }
   }
+
+  /// The board's ring target the app should set (Stct): Auto's, or the chosen one.
+  int get boardTargetWanted => _prefs.boardBuffer == AudioPrefs.auto ? boardBuffer.current : _prefs.boardBuffer;
+
+  void setBoardBuffer(int frames) => _setPrefs(_prefs.copyWith(boardBuffer: frames));
 
   /// Dropouts in the last minute, by side.
   Map<DropSide, int> dropoutsLastMinute() {
@@ -640,8 +689,11 @@ class ThroughPc {
   Breakdown get breakdown {
     final b = board;
     final measured = b?.ringFiltered != null && (_boardAt != null && _now().difference(_boardAt!) < const Duration(seconds: 10));
-    final ringFrames = measured ? b!.ringFiltered! : (b?.ringTarget ?? 144).toDouble();
-    return Breakdown(st.inMs, st.ringMs, st.outMs, ringFrames / 48 + 1, usbMeasured: measured);
+    // a sample waits in the board's ring about its level before a packet less half a packet, then
+    // the packet waits for the next fetch (1 ms) and crosses the bus (0.23 ms): doc/usb_audio.md
+    final level = measured ? b!.ringFiltered! : (b?.ringTarget ?? BoardBuffer.start).toDouble();
+    final ring = math.max(0.0, level - 24) / 48;
+    return Breakdown(st.inMs, st.ringMs, st.outMs, ring + 1.23, usbMeasured: measured);
   }
 
   // ---------------------------------------------------------------------------------- devices

@@ -317,12 +317,24 @@ class StrisoClient {
       Cmd.usbAudio(),
       (l, s) {
         if (!usbAudioLine.hasMatch(l.trim())) return Take.no;
-        return RegExp(r'\bprimes\b', caseSensitive: false).hasMatch(l) ? Take.done : Take.more;
+        return isLastUsbAudioLine(l) ? Take.done : Take.more;
       },
       timeout: const Duration(milliseconds: 500),
       idle: const Duration(milliseconds: 120),
     );
     return parseUsbAudioStats(r.lines);
+  }
+
+  /// Sets the board's USB audio ring target (frames, 49..256; 0 only asks). Returns the target the
+  /// board reports, or null when the firmware does not answer (no Stct).
+  Future<int?> setUsbAudioTarget(int frames) async {
+    final r = await request(Cmd.usbAudioTarget(frames), (l, s) {
+      final v = parseUsbAudioTarget(l);
+      if (v == null) return Take.no;
+      s['t'] = v;
+      return Take.done;
+    }, timeout: const Duration(milliseconds: 400));
+    return r.state['t'] as int?;
   }
 
   /// A console command for the console drawer; replies are collected until quiet.

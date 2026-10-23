@@ -43,7 +43,7 @@ class AutoMemory {
 
   static AutoMemory fromJson(Object? j) {
     if (j is! Map) return none;
-    int? size(Object? v) => v is num && AutoBuffer.ladder.contains(v.toInt()) ? v.toInt() : null;
+    int? size(Object? v) => v is num && v > 0 && v <= 4096 ? v.toInt() : null;
     final fa = j['failedAt'];
     return AutoMemory(
       stable: size(j['stable']),
@@ -101,6 +101,68 @@ class AutoStep {
   /// For the log.
   final String? note;
   const AutoStep(this.period, {this.remember, this.note});
+}
+
+/// Auto for the board's own USB audio ring (console Stct, UAC2 firmware): the smallest target that
+/// keeps the board at 0 underruns. A change is live on the board (no reopen, nothing to hear), so
+/// it needs no quiet moment; it is not saved on the board, so the app sets it on every connection.
+class BoardBuffer {
+  static const ladder = [64, 72, 80, 88, 96, 112, 128, 144];
+
+  /// The firmware's own default.
+  static const start = 96;
+  static const memoryKey = 'striso board';
+
+  final Duration tighten, remember, retryFailed;
+  BoardBuffer({this.tighten = const Duration(seconds: 30), this.remember = const Duration(minutes: 2), this.retryFailed = const Duration(days: 7)});
+
+  int current = start;
+  bool _started = false;
+  DateTime? _since;
+
+  bool _allowed(int size, AutoMemory m, DateTime now) {
+    final f = m.failed;
+    if (f == null || size > f) return true;
+    return m.failedAt != null && now.difference(m.failedAt!) >= retryFailed;
+  }
+
+  /// Every board poll. [underruns]: the board's underruns since the last poll (only these depend on
+  /// its target: host-skipped frames and late packets do not).
+  AutoStep step({required DateTime now, required AutoMemory mem, required bool playing, required int underruns}) {
+    if (!_started) {
+      _started = true;
+      var p = mem.stable != null && ladder.contains(mem.stable) ? mem.stable! : start;
+      while (!_allowed(p, mem, now) && p < ladder.last) {
+        p = ladder[ladder.indexOf(p) + 1];
+      }
+      current = p;
+    }
+    if (!playing) {
+      _since = null;
+      return AutoStep(current);
+    }
+    _since ??= now;
+    if (underruns > 0) {
+      var m = mem.copyWith(failed: math.max(mem.failed ?? 0, current), failedAt: now);
+      if (mem.stable != null && mem.stable! <= current) m = m.copyWith(stable: null);
+      final from = current;
+      final i = ladder.indexOf(current);
+      if (i >= 0 && i < ladder.length - 1) current = ladder[i + 1];
+      _since = now;
+      return AutoStep(current, remember: m, note: 'board buffer: $underruns underrun${underruns == 1 ? '' : 's'} at $from frames${current != from ? ': $current' : ''}');
+    }
+    final clean = now.difference(_since!);
+    AutoMemory? remember;
+    if (clean >= this.remember && mem.stable != current) remember = mem.copyWith(stable: current);
+    final i = ladder.indexOf(current);
+    if (clean >= tighten && i > 0 && _allowed(ladder[i - 1], remember ?? mem, now)) {
+      final from = current;
+      current = ladder[i - 1];
+      _since = now;
+      return AutoStep(current, remember: remember, note: 'board buffer: ${clean.inSeconds} s without an underrun at $from frames: $current');
+    }
+    return AutoStep(current, remember: remember);
+  }
 }
 
 class AutoBuffer {

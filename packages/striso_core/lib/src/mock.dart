@@ -334,7 +334,11 @@ class MockBoard {
       _rxPayload.add(c);
       if (--_rxNeed == 0) {
         final p = _rxPayload;
-        if (_rxCmd == 'K') {
+        if (_rxCmd == 't') {
+          final n = int.tryParse(String.fromCharCodes(p)) ?? -1;
+          if (n >= 49 && n <= 256) usbAudioTarget = n;
+          if (n == 0 || (n >= 49 && n <= 256)) _print('usb audio target $usbAudioTarget frames (${usbAudioTarget * 1000000 ~/ 48000} us)\r\n');
+        } else if (_rxCmd == 'K') {
           _print(settingsKey(p[0]) ? 'K ok ${p[0]}\r\n' : 'K err ${p[0]}\r\n');
         } else {
           final v = ByteData.sublistView(Uint8List.fromList(p.sublist(2, 6))).getFloat32(0, Endian.little);
@@ -408,6 +412,10 @@ class MockBoard {
       _printTuning();
     } else if (ch == 'U') {
       _printUsbAudio();
+    } else if (ch == 't') {
+      _rxNeed = 3;
+      _rxCmd = 't';
+      _rxPayload.clear();
     } else if (ch == 'I') {
       _print('stklimit    stack     addr   unused refs prio     state         name\r\n(mock device)\r\n');
     } else if (ch == 'P') {
@@ -449,7 +457,10 @@ class MockBoard {
 
   // the N reply: the tuning and what every key plays (see tuning.dart for the format)
   /// Board-side USB audio drops the demo reports at the next StcU (tests).
-  int usbAudioUnderruns = 0;
+  int usbAudioUnderruns = 0, usbAudioHostSkipped = 0;
+
+  /// The USB audio ring target (Stct), frames.
+  int usbAudioTarget = 96;
   DateTime _usbAudioAt = DateTime.now();
 
   /// StcU as the firmware prints it (usb_audio.c), counters since the last call.
@@ -457,13 +468,18 @@ class MockBoard {
     final now = DateTime.now();
     final ms = now.difference(_usbAudioAt).inMilliseconds.clamp(1, 600000);
     _usbAudioAt = now;
-    final und = usbAudioUnderruns;
-    usbAudioUnderruns = 0;
-    _print('usb audio: streaming 48000 Hz 24 bit (alt 1), source synth\r\n');
-    _print('since last U: packets sent $ms missed 0 built $ms (47:${ms ~/ 400} 48:${ms - 2 * (ms ~/ 400)} 49:${ms ~/ 400})\r\n');
+    final und = usbAudioUnderruns, skip = usbAudioHostSkipped;
+    usbAudioUnderruns = usbAudioHostSkipped = 0;
+    final t = usbAudioTarget;
+    _print('usb audio (UAC2): streaming 48000 Hz 24 bit (alt 1), source synth\r\n');
+    _print('since last U: packets sent $ms missed $skip (host skipped $skip, flushed early 0); built $ms (47:${ms ~/ 400} 48:${ms - 2 * (ms ~/ 400)} 49:${ms ~/ 400})\r\n');
     _print('rate: ${ms * 48} frames in $ms ms of host clock = 48000.000 Hz\r\n');
-    _print('ring: level 150 now, 146 filtered, 98..190 before packets (target 144 of 512)\r\n');
-    _print('underruns $und overruns 0 primes 0; packet build avg 900 max 1400 cycles\r\n');
+    _print('ring: level ${t + 8} now, $t filtered, ${t - 31}..${t + 32} before packets (target $t = ${t * 1000000 ~/ 48000} us, of 512)\r\n');
+    _print('faults: underruns $und overruns 0 primes $und (silent packets 0), fast starts 1\r\n');
+    _print('frames: not ready at SOF 0; SOF late (>1.1 ms) 0 lost 0, max interval 1012 us\r\n');
+    _print('builds: after fetch $ms, after miss 0, at SOF 1; fetch at 95..140 us (avg 110) after SOF; build avg 1900 max 2600 cycles\r\n');
+    _print('synth: commit 210 us avg, 420 max after its DMA interrupt (block 667 us); off cadence 0; since boot: blocks lost 0, repeated 0\r\n');
+    _print('cpu: usb audio ISR hooks 9000000 cycles = 0.22% over $ms ms; longest lock: thread 12 us, ISR 4 us\r\n');
   }
 
   void _printTuning() {

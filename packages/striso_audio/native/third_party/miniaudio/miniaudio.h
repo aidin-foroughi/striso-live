@@ -23712,6 +23712,25 @@ static ma_result ma_device_init_internal__wasapi(ma_context* pContext, ma_device
 
             ma_IPropertyStore_Release(pStore);
         }
+        /* striso_audio local patch (see README.md here): an exclusive capture stream takes 24-bit
+           samples in 3 bytes at the device's rate and channels when the device takes them, whatever
+           Windows' default format for it says (the Striso's UAC2 function has 24 and 16 bit). */
+        #if defined(MA_WASAPI_EXCLUSIVE_CAPTURE_PREFER_S24)
+        if (deviceType == ma_device_type_capture && wf.nChannels > 0 && wf.nSamplesPerSec > 0) {
+            MA_WAVEFORMATEXTENSIBLE w24 = wf;
+            w24.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+            w24.cbSize = 22;
+            w24.wBitsPerSample = 24;
+            w24.Samples.wValidBitsPerSample = 24;
+            w24.nBlockAlign = (WORD)(w24.nChannels * 3);
+            w24.nAvgBytesPerSec = w24.nSamplesPerSec * w24.nBlockAlign;
+            w24.SubFormat = MA_GUID_KSDATAFORMAT_SUBTYPE_PCM;
+            if (SUCCEEDED(ma_IAudioClient_IsFormatSupported((ma_IAudioClient*)pData->pAudioClient, MA_AUDCLNT_SHAREMODE_EXCLUSIVE, (MA_WAVEFORMATEX*)&w24, NULL))) {
+                wf = w24;
+                hr = S_OK;
+            }
+        }
+        #endif
     #else
         /*
         I do not know how to query the device's native format on UWP so for now I'm just disabling support for

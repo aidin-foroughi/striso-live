@@ -119,10 +119,10 @@ void main() {
     await tester.tap(find.byKey(const Key('audio-through')));
     await ticks(tester, ctl);
     expect(find.textContaining('Playing through the computer · 48 kHz · 24-bit'), findsOneWidget);
-    // Auto starts safe; the latency with its parts (in, ring, out, USB: the board's 3 ms target + the packet)
+    // Auto starts safe; the latency with its parts (in, ring, out, USB: the board's 2 ms default ring, the fetch, the bus)
     expect(find.text('Recommended · now 256 frames · the output wakes every 5.3 ms'), findsOneWidget);
-    expect(find.text('11.8 ms'), findsOneWidget);
-    expect(find.text('IN 0.5 · RING 2.0 · OUT 5.3 · USB ~4.0'), findsOneWidget);
+    expect(find.text('10.6 ms'), findsOneWidget);
+    expect(find.text('IN 0.5 · RING 2.0 · OUT 5.3 · USB ~2.7'), findsOneWidget);
     expect(find.text('0 in the last minute'), findsOneWidget);
     expect(find.text('BOARD 0 · INPUT 0 · OUTPUT 0'), findsOneWidget);
     expect(find.textContaining('no dropouts in the last minute'), findsOneWidget);

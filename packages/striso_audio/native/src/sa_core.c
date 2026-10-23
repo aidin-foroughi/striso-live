@@ -495,6 +495,9 @@ static void pull_block(sa_pass* p, float* out, uint32_t n, uint32_t now_us, floa
         /* more room next time: what was missing, and then some */
         double grow = 1.5 * deficit + 16;
         if (grow < 0.25e-3 * fs_in) grow = 0.25e-3 * fs_in;
+        /* one discontinuity (a frame the host skipped is a 1 ms gap in the input now) adds at most
+           1 ms: what keeps happening is in the measured waits anyway */
+        if (grow > 1e-3 * fs_in) grow = 1e-3 * fs_in;
         double cap = 0.05 * fs_in; /* 50 ms */
         p->margin = p->margin + grow > cap ? cap : p->margin + grow;
         sa_inc(&p->underruns);

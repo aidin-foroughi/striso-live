@@ -68,6 +68,12 @@ class Cmd {
 
   /// USB audio status and counters since the last call (firmware with USB audio).
   static Uint8List usbAudio() => commandChar('U');
+
+  /// The board's USB audio ring target in frames (49..256), live, not saved; 0 asks for it.
+  static Uint8List usbAudioTarget(int frames) {
+    if (frames != 0 && (frames < 49 || frames > 256)) throw RangeError('bad USB audio target $frames');
+    return Uint8List.fromList([...commandChar('t'), ...frames.toString().padLeft(3, '0').codeUnits]);
+  }
   static Uint8List bootloader() => commandChar('B');
 }
 
