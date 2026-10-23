@@ -92,7 +92,7 @@ typedef struct sa_device {
     int32_t native_rate;    /* Hz or 0 */
     int32_t native_channels;
     int32_t transport;      /* SA_TRANSPORT_* */
-    int32_t reserved[2];
+    int32_t dev_min, dev_default; /* Windows: the minimum and default device period in frames (0: unknown; not asked of Bluetooth) */
 } sa_device;
 
 /* events (sa_event.type), each with its cause */

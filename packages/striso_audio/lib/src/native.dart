@@ -29,8 +29,10 @@ final class SaDevice extends Struct {
   external int native_channels;
   @Int32()
   external int transport;
-  @Array(2)
-  external Array<Int32> reserved;
+  @Int32()
+  external int dev_min;
+  @Int32()
+  external int dev_default;
 }
 
 final class SaEvent extends Struct {
@@ -391,6 +393,8 @@ class NativeAudioBackend implements AudioBackend {
           _str(d.name, 256),
           id: _str(d.id, 256),
           transport: AudioTransport.of(d.transport),
+          devMin: d.dev_min,
+          devDefault: d.dev_default,
           isDefault: d.is_default != 0,
           isStriso: d.is_striso != 0,
           nativeBits: d.native_bits,

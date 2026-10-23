@@ -137,8 +137,19 @@ class AutoBuffer {
 
   static int _up(int p) => ladder[math.min(ladder.length - 1, ladder.indexOf(p) + 1)];
 
+  /// The device's minimum period (frames, 0 unknown): every size below it gives that minimum, so
+  /// only the largest of them is worth trying.
+  int deviceMin = 0;
+
+  static int floorOf(int deviceMin) {
+    if (deviceMin <= ladder.first) return 0;
+    return ladder.lastWhere((p) => p <= deviceMin, orElse: () => 0);
+  }
+
   bool _allowed(int size, AutoMemory m, DateTime now) {
     if (m.floor != null && size < m.floor!) return false;
+    final df = floorOf(deviceMin);
+    if (df > 0 && size < df) return false;
     final f = m.failed;
     if (f == null || size > f) return true;
     return m.failedAt != null && now.difference(m.failedAt!) >= timing.retryFailed;
@@ -174,7 +185,9 @@ class AutoBuffer {
     required int dropouts,
     required double level,
     required int deviceBuffer,
+    int deviceMin = 0,
   }) {
+    this.deviceMin = deviceMin;
     if (key != this.key) {
       this.key = key;
       _reset();

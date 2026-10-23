@@ -120,6 +120,21 @@ void main() {
       expect(a.current, 256);
     });
 
+    test('the device minimum from the system: sizes below it are not tried (they give the minimum)', () {
+      expect(AutoBuffer.floorOf(144), 128, reason: '64 and 128 both give 144 frames');
+      expect(AutoBuffer.floorOf(48), 0);
+      expect(AutoBuffer.floorOf(0), 0);
+      go(0.05);
+      for (var t = 0; t < 120 * 20; t++) {
+        now = now.add(const Duration(milliseconds: 50));
+        final s = a.step(now: now, key: 'dock|exclusive', mem: mem, playing: true, dropouts: 0, level: 0, deviceBuffer: a.current < 144 ? 144 : a.current, deviceMin: 144);
+        if (s.remember != null) mem = s.remember!;
+      }
+      expect(a.current, 128);
+      expect(mem.stable, 128);
+      expect(mem.floor, isNull, reason: 'known from the system, not learned by a wasted reopen');
+    });
+
     test('a failure at the largest size stays there and says so', () {
       mem = const AutoMemory(stable: 512);
       go(0.05);

@@ -368,6 +368,8 @@ static ma_bool32 find_device(ma_device_type type, const char* name, ma_device_id
     return MA_TRUE;
 }
 
+static void device_periods(ma_device_type type, const ma_device_id* id, int32_t* dmin, int32_t* ddef);
+
 static void do_enumerate(void) {
     static sa_device caps[SA_MAXDEV], plays[SA_MAXDEV];
     int nc = 0, np = 0;
@@ -382,6 +384,7 @@ static void do_enumerate(void) {
             d->is_default = pc[i].isDefault ? 1 : 0;
             d->is_striso = is_striso(&pc[i]);
             d->transport = transport_of(&pc[i].id);
+            if (d->transport != SA_TRANSPORT_BLUETOOTH) device_periods(ma_device_type_capture, &pc[i].id, &d->dev_min, &d->dev_default);
             ma_device_info full;
             if (ma_context_get_device_info(&G.ctx, ma_device_type_capture, &pc[i].id, &full) == MA_SUCCESS)
                 native_format(&full, &d->native_bits, &d->native_rate, &d->native_channels);
@@ -393,6 +396,7 @@ static void do_enumerate(void) {
             id_text(&pp[i].id, pp[i].name, d->id);
             d->is_default = pp[i].isDefault ? 1 : 0;
             d->transport = transport_of(&pp[i].id);
+            if (d->transport != SA_TRANSPORT_BLUETOOTH) device_periods(ma_device_type_playback, &pp[i].id, &d->dev_min, &d->dev_default);
         }
     }
     ma_mutex_lock(&G.lock);
@@ -761,10 +765,10 @@ static void open_playback(void) {
     }
     /* how late a playback wake-up may come before the device runs dry: exclusive, one buffer (the
        other one is playing); shared, what the buffer holds beyond one engine period */
-    double rate = G.play.sampleRate;
     double slack_us = 0;
 #if defined(_WIN32)
     if (G.backend == SA_BACKEND_SYSTEM) {
+        double rate = G.play.sampleRate;
         ma_uint32 actual = G.play.wasapi.actualBufferSizeInFramesPlayback, per = G.play.wasapi.periodSizeInFramesPlayback;
         slack_us = excl ? actual * 1e6 / rate : (actual > per ? (actual - per) * 1e6 / rate : 0);
     }

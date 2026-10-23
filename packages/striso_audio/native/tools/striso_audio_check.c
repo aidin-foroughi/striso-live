@@ -48,7 +48,10 @@ static int list_devices(void) {
             if (sa_device_get(cap, i, &d) != SA_OK) continue;
             printf("  %s%s%s", d.name, d.is_default ? "  [default]" : "", d.is_striso ? "  [Striso by USB VID/PID]" : "");
             if (cap && d.native_bits) printf("  native %s %d Hz %d ch", bits_name(d.native_bits), d.native_rate, d.native_channels);
-            printf("\n");
+            static const char* tr[] = {"?", "USB", "Bluetooth", "built-in", "HDMI/DP", "virtual", "Thunderbolt", "PCI"};
+            printf("  [%s]", d.transport >= 0 && d.transport < 8 ? tr[d.transport] : "?");
+            if (d.dev_min > 0) printf("  period min %d default %d frames", d.dev_min, d.dev_default);
+            printf("\n      id %s\n", d.id);
         }
     }
     sa_shutdown();

@@ -25,6 +25,9 @@ class AudioDevice {
   /// the name where the system has none.
   final String id;
   final AudioTransport transport;
+
+  /// Windows: the device's minimum and default period in frames (0: unknown).
+  final int devMin, devDefault;
   final bool isDefault;
 
   /// Identified as the Striso by its USB VID/PID (where the system tells).
@@ -38,6 +41,8 @@ class AudioDevice {
     this.name, {
     String? id,
     this.transport = AudioTransport.unknown,
+    this.devMin = 0,
+    this.devDefault = 0,
     this.isDefault = false,
     this.isStriso = false,
     this.nativeBits = 0,

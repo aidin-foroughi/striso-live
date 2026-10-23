@@ -503,6 +503,8 @@ class ThroughPc {
       dropouts: st.dropouts,
       level: level,
       deviceBuffer: st.playbackBuffer,
+      // exclusive mode never goes below the device's minimum period
+      deviceMin: wantExclusiveOutput ? (st.playbackDevMin > 0 ? st.playbackDevMin : (outputDevice?.devMin ?? 0)) : 0,
     );
     if (s.note != null) _log('audio: ${s.note}');
     if (s.remember != null && s.remember != mem) {

@@ -435,6 +435,31 @@ static void test_late(void) {
 /* The buffer sweep Auto walks: input in 1 ms packets (exclusive) or 10 ms batches (shared), the
  * output at 64..512 frames, both sides with late wake-ups. The smallest setting without a dropout
  * is what Auto settles on; its latency is the best this system allows. */
+/* This PC's USB devices (the Striso, the TBT200 dock's DAC) report a 144-frame (3 ms) minimum
+ * exclusive period: the input comes as 3 ms buffers, the output wakes every 3 ms (Auto's 64 and
+ * 128 both open at 144). The latency through the computer at that minimum, quiet and busy. */
+static void test_device_min(void) {
+    struct {
+        const char* name;
+        double late_p, late_max;
+        uint32_t pp;
+        int must_be_clean;
+    } c[] = {
+        {"3 ms periods both sides, quiet system", 0.005, 1000, 144, 1},
+        {"3 ms periods both sides, 0.5% wake-ups 1-3 ms late", 0.005, 3000, 144, 0},
+        {"3 ms in, 256-frame out, 0.5% wake-ups 1-3 ms late", 0.005, 3000, 256, 1},
+    };
+    for (size_t i = 0; i < sizeof(c) / sizeof(c[0]); i++) {
+        rt_cfg k = {"min", 50, 3, 1, c[i].pp, 1, c[i].late_p, c[i].late_p, 1000, c[i].late_max, 150, 60, 2, 1};
+        rt_res r;
+        simulate_rt(&k, &r);
+        char what[400];
+        snprintf(what, sizeof(what), "device minimum, %s: %u dropouts after settling (%u ring-empty, %u output late beyond a period), %.2f ms through the computer (ring %.2f, target %.2f)",
+                 c[i].name, r.ring_empty_after + r.glitches_after, r.ring_empty_after, r.glitches_after, r.latency_ms, r.ring_ms, r.target_ms);
+        check(!c[i].must_be_clean || r.ring_empty_after + r.glitches_after == 0, what);
+    }
+}
+
 static void test_sweep(void) {
     struct {
         const char* name;
@@ -748,7 +773,7 @@ static void test_session_jitter(void) {
         uint64_t a = ((uint64_t)ev[i - 1].t_hi << 32) | ev[i - 1].t_lo, b = ((uint64_t)ev[i].t_hi << 32) | ev[i].t_lo;
         if (ev[i].seq != ev[i - 1].seq + 1 || b < a) ordered = 0;
     }
-    char what[300];
+    char what[600];
     snprintf(what, sizeof(what), "events: %d logged (input and output opened, streaming started), numbered and in time order, ids \"%s\"", n, cap.id);
     check(ok && n >= 3 && has_event(ev, n, SA_EV_OPEN, 1) && has_event(ev, n, SA_EV_OPEN, 0) && has_event(ev, n, SA_EV_STREAM, -1) && ordered && cap.id[0], what);
     uint32_t seq = s.event_seq;
@@ -801,6 +826,7 @@ SA_API int32_t sa_selftest(const char* dir, char* report, int32_t report_size) {
     test_bursts();
     test_late();
     test_sweep();
+    test_device_min();
     test_session(d);
     test_session_jitter();
     say("%d failure%s, %.1f s\n", g_fail, g_fail == 1 ? "" : "s", (sa_now_us() - t0) / 1e6);
