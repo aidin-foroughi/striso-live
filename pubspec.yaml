@@ -1,7 +1,7 @@
 name: striso_live
 description: "Striso Live: live companion for the Striso board"
 publish_to: 'none'
-version: 1.1.0+2
+version: 1.2.0+3
 
 environment:
   sdk: ^3.11.0
