@@ -177,19 +177,30 @@ class EnginePanel extends StatelessWidget {
               child: Row(
                 children: [
                   Expanded(
-                    child: Wrap(
-                      spacing: buttonSize < 24 ? Space.xs : Space.s - 2,
-                      runSpacing: Space.xs,
-                      children: [
-                        for (final (i, e) in engines.indexed)
-                          EngineDot(
-                            e: e,
-                            on: e.engine == cur && ctl.connected,
-                            size: buttonSize,
-                            number: i < 7 ? i + 1 : null,
-                            onTap: () => ctl.selectEngine(e.engine),
-                          ),
-                      ],
+                    // the eight voice keys in one row: the gap gives way first (down to 4 px),
+                    // then the buttons (down to 18 px)
+                    child: LayoutBuilder(
+                      builder: (context, box) {
+                        final n = engines.length.clamp(1, 99);
+                        final want = buttonSize < 24 ? Space.xs : Space.s - 2;
+                        var size = buttonSize;
+                        if (n * size + (n - 1) * Space.xs > box.maxWidth) size = ((box.maxWidth - (n - 1) * Space.xs) / n).floorToDouble().clamp(18.0, buttonSize);
+                        final gap = n > 1 ? ((box.maxWidth - n * size) / (n - 1)).clamp(Space.xs, want) : want;
+                        return Wrap(
+                          spacing: gap.floorToDouble(),
+                          runSpacing: Space.xs,
+                          children: [
+                            for (final (i, e) in engines.indexed)
+                              EngineDot(
+                                e: e,
+                                on: e.engine == cur && ctl.connected,
+                                size: size,
+                                number: i < 8 ? i + 1 : null,
+                                onTap: () => ctl.selectEngine(e.engine),
+                              ),
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ],

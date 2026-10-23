@@ -976,15 +976,18 @@ class ThroughPc {
     }
   }
 
-  /// The live numbers for the meters' 20 Hz rebuild (not in [message]): latency, dropouts.
+  /// The dropouts in the last minute, all sides: "dropouts: N in the last minute".
+  String get dropoutLine {
+    final d = dropoutsLastMinute().values.fold(0, (a, b) => a + b);
+    return d == 0 ? 'no dropouts in the last minute' : 'dropouts: $d in the last minute';
+  }
+
+  /// The live remarks under the status (the 20 Hz rebuild): the output's mode, frames a recording
+  /// lost. (Latency and dropouts have their own rows.)
   String get liveLine {
     if (state != ThroughState.running) return '';
     final parts = <String>[];
-    if (_prefs.through && st.playback == DevState.running) {
-      final d = dropoutsLastMinute().values.fold(0, (a, b) => a + b);
-      parts.add(d == 0 ? 'no dropouts in the last minute' : 'dropouts: $d in the last minute');
-      if (st.playbackExclusive) parts.add('exclusive output');
-    }
+    if (_prefs.through && st.playback == DevState.running && st.playbackExclusive) parts.add('exclusive output');
     if (st.recordDropped > 0) parts.add('${st.recordDropped} frames lost in the recording');
     return parts.join(' · ');
   }

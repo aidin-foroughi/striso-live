@@ -125,7 +125,6 @@ void main() {
     expect(find.text('IN 0.5 · RING 2.0 · OUT 5.3 · USB ~2.7'), findsOneWidget);
     expect(find.text('0 in the last minute'), findsOneWidget);
     expect(find.text('BOARD 0 · INPUT 0 · OUTPUT 0'), findsOneWidget);
-    expect(find.textContaining('no dropouts in the last minute'), findsOneWidget);
 
     // a dropout, by side
     fake.dropout(input: true);

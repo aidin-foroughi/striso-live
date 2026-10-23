@@ -630,7 +630,7 @@ class _StatusLine extends StatelessWidget {
             if (live.isEmpty) return const SizedBox.shrink();
             return Padding(
               padding: const EdgeInsets.only(left: 14),
-              child: Text(live, style: ui(TypeSize.small, color: a.st.dropouts > 0 ? Pal.accent : Pal.text3)),
+              child: Text(live, style: ui(TypeSize.small, color: Pal.text3)),
             );
           },
         ),

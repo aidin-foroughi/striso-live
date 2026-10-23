@@ -157,7 +157,8 @@ void main() {
       expect(r.pc.message, contains('Playing through the computer'));
       expect(r.pc.message, contains('48 kHz'));
       expect(r.pc.message, contains('24-bit'));
-      expect(r.pc.liveLine, 'no dropouts in the last minute · exclusive output');
+      expect(r.pc.liveLine, 'exclusive output');
+      expect(r.pc.dropoutLine, 'no dropouts in the last minute');
       expect(r.pc.tone, Tone.ok);
       expect(r.saved.last.through, isTrue);
       expect(r.fake.gain, closeTo(gainOf(-6), 1e-9));

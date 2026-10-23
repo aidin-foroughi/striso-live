@@ -273,7 +273,7 @@ void main() {
       r.play(0.1);
       r.pc.boardStats(const BoardAudioStats(sent: 2000, underruns: 1, hostSkipped: 1, overruns: 3, ringMin: 0, ringMax: 160, ringFiltered: 120));
       expect(r.pc.dropoutsLastMinute(), {DropSide.board: 2, DropSide.input: 1, DropSide.output: 1}, reason: 'board: underruns + host skipped (overruns are not)');
-      expect(r.pc.liveLine, startsWith('dropouts: 4 in the last minute'));
+      expect(r.pc.dropoutLine, 'dropouts: 4 in the last minute');
       expect(r.pc.breakdown.usbMeasured, isTrue);
       expect(r.pc.breakdown.usb, closeTo((120 - 24) / 48 + 1.23, 1e-9));
       expect(r.logs.where((l) => l.contains('dropout on the board: 1 underrun (its ring ran dry), 1 frame the host skipped (1 ms gaps)')), hasLength(1));
