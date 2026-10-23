@@ -1,7 +1,7 @@
 name: striso_live
 description: "Striso Live: live companion for the Striso board"
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: ^3.11.0
@@ -22,3 +22,11 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/fonts/OFL.txt
+  # Inter (variable, SIL Open Font License 1.1: assets/fonts/OFL.txt), the same metrics on
+  # Windows and macOS
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter.ttf

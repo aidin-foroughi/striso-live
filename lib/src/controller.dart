@@ -69,40 +69,6 @@ class HSLColorInt {
   }
 }
 
-/// The main knobs per engine, by parameter name: the current firmware's names first, then the
-/// demo board's. Missing names are skipped; a short pick is filled from the voice's own list.
-const Map<String, List<String>> mainKnobNames = {
-  'va': ['gain', 'cut_base', 'cut_env', 'res', 'drive', 'release', 'saw2_detune', 'vibrato'],
-  'modal': ['level', 'hard', 'decay', 'upper', 'keytrack', 'damper', 'tremdepth', 'rub'],
-  'bowed': ['gain', 'force_hi', 'rosin', 'pos', 'bright', 'body_amt', 'vibrato', 'ensemble', 'bow_pos', 'body', 'damping'],
-  'wind': ['level', 'reed_open', 'attack', 'bright', 'breath', 'growl', 'vib', 'body', 'stiffness', 'aperture', 'bell', 'vibrato'],
-  'brass': ['gain', 'brassiness', 'lip_loud', 'tone_hz', 'release', 'mute', 'vibrato', 'pair', 'breath', 'stiffness', 'bell', 'growl'],
-  'ep': ['gain', 'hard', 'decay', 'bell', 'drive', 'grit', 'tone', 'wobble', 'level', 'hammer', 'hardness', 'tine', 'bark', 'trem_depth'],
-  'reed': ['level', 'breath', 'stiffness', 'aperture', 'bell', 'growl', 'vibrato'],
-};
-
-/// The effect amounts on the Play tab: reverb, delay, chorus (firmware names, then the demo's).
-const List<String> mainFxNames = ['rvmix', 'dlmix', 'chmix', 'rvdecay', 'rv_mix', 'dl_mix', 'ch_mix', 'rv_size'];
-
-List<Param> pickByName(List<Param> params, List<String> names, int max) {
-  final out = <Param>[];
-  for (final n in names) {
-    final p = params.where((q) => q.name == n).firstOrNull;
-    if (p != null && !out.contains(p)) out.add(p);
-    if (out.length >= max) break;
-  }
-  return out;
-}
-
-List<Param> pickMainKnobs(String engine, List<Param> params, {int max = 8, int min = 6}) {
-  final out = pickByName(params, mainKnobNames[engine] ?? const [], max);
-  for (final p in params) {
-    if (out.length >= min) break;
-    if (!out.contains(p) && p.kind != Kind.onOff) out.add(p);
-  }
-  return out;
-}
-
 class EngineInfo {
   final String label, blurb;
   final double hue;
@@ -136,8 +102,12 @@ class ParamSet {
 class ToastMsg {
   final int id;
   final String text, kind; // '' | 'warn' | 'error'
-  const ToastMsg(this.id, this.text, this.kind);
+  final String? action;
+  final VoidCallback? onAction;
+  const ToastMsg(this.id, this.text, this.kind, {this.action, this.onAction});
 }
+
+enum SetupMode { sensitivity, equalizer, settings }
 
 class Banner {
   final String text;
@@ -352,6 +322,7 @@ class AppController extends ChangeNotifier implements MorphHost {
       final p = await _probe();
       final was = _lastPresent;
       _lastPresent = p;
+      if (was != p) notifyListeners();
       if (p && was == false) {
         if (intent != 'connected') {
           log('Striso plugged in; not connecting (disconnected by the user: click Connect)');
@@ -373,6 +344,7 @@ class AppController extends ChangeNotifier implements MorphHost {
     _reconnectTimer?.cancel();
     _presenceTimer?.cancel();
     _syncTimer?.cancel();
+    _editsTimer?.cancel();
     final c = client;
     client = null;
     if (c != null) unawaited(c.disconnect().catchError((_) {}));
@@ -415,15 +387,21 @@ class AppController extends ChangeNotifier implements MorphHost {
     notifyListeners();
   }
 
-  void toast(String text, [String kind = '']) {
-    final t = ToastMsg(++_toastId, text, kind);
+  void toast(String text, [String kind = '']) => _toast(text, kind);
+
+  void toastAction(String text, String action, VoidCallback onAction) => _toast(text, '', action: action, onAction: onAction);
+
+  void _toast(String text, String kind, {String? action, VoidCallback? onAction}) {
+    final t = ToastMsg(++_toastId, text, kind, action: action, onAction: onAction);
     var l = [...toasts.value, t];
     if (l.length > 4) l = l.sublist(l.length - 4);
     toasts.value = l;
-    Timer(Duration(milliseconds: kind == 'error' ? 6000 : 2600), () {
-      if (_disposed) return;
-      toasts.value = toasts.value.where((x) => x.id != t.id).toList();
-    });
+    Timer(Duration(milliseconds: kind == 'error' || action != null ? 6000 : 2600), () => dismissToast(t.id));
+  }
+
+  void dismissToast(int id) {
+    if (_disposed) return;
+    toasts.value = toasts.value.where((x) => x.id != id).toList();
   }
 
   void _trace(String label, {bool start = false}) {
@@ -618,14 +596,17 @@ class AppController extends ChangeNotifier implements MorphHost {
     _setInvite(InviteState.idle);
     // the parameter lists load behind the live view (the load poll waits its turn)
     listsLoading = true;
+    if (m == ConnMode.usb) status = 'Connected \u00b7 reading parameters';
     notifyListeners();
     listsReady = refreshParams(allTargets, voiceChanged: true)
         .then((_) {
           if (m == ConnMode.usb && identical(client, c)) _trace('all lists');
+          if (identical(client, c)) _offerRestore();
         })
         .whenComplete(() {
           if (identical(client, c)) {
             listsLoading = false;
+            if (m == ConnMode.usb) status = 'Connected';
             notifyListeners();
           }
         });
@@ -688,6 +669,12 @@ class AppController extends ChangeNotifier implements MorphHost {
   }
 
   bool get connected => client != null;
+
+  /// A Striso is on USB (from the presence poll).
+  bool get boardPresent => _lastPresent == true;
+
+  /// The connection was lost (unplugged or a USB error), not ended by the user.
+  bool get lost => !connected && (status == 'Unplugged' || status == 'Connection lost');
   bool get ledOn => client != null;
 
   // ---------------------------------------------------------------------------------------------
@@ -782,6 +769,10 @@ class AppController extends ChangeNotifier implements MorphHost {
         if (!r.complete) toast('Only ${r.params.length} of ${r.count} ${targetNames[t]} parameters arrived', 'warn');
       }
     }
+    if (abOn) {
+      abOn = false;
+      _abEdits = [];
+    }
     if (targets.contains(0)) {
       voiceName = params[0]!.name.isNotEmpty ? params[0]!.name : (voices.where((v) => v.index == current).firstOrNull?.name ?? '');
       if (voiceChanged) {
@@ -820,6 +811,11 @@ class AppController extends ChangeNotifier implements MorphHost {
 
   /// phase: 'begin' | 'change' | 'end'
   void onEdit(int t, Param p, double v, String phase, [String? label, String? key]) {
+    if (abOn) {
+      abOn = false;
+      _abEdits = [];
+      notifyListeners();
+    }
     if (phase == 'begin') history.begin(label ?? 'Edit', key);
     setValue(t, p, v);
     if (phase == 'end') history.commit();
@@ -832,6 +828,7 @@ class AppController extends ChangeNotifier implements MorphHost {
     if (!_valuesDirty) return;
     _valuesDirty = false;
     values.ping();
+    _rememberEditsSoon();
     final u = (history.canUndo, history.canRedo);
     if (u != _undoState) {
       _undoState = u;
@@ -1031,6 +1028,20 @@ class AppController extends ChangeNotifier implements MorphHost {
       missing.isNotEmpty ? 'warn' : '',
     );
   }
+
+  void renamePreset(Preset p, String name) {
+    name = name.trim();
+    if (name.isEmpty || name == p.name) return;
+    final k = presets.indexOf(p);
+    if (k < 0) return;
+    presets.removeWhere((q) => q.name == name && !identical(q, p));
+    presets[presets.indexOf(p)] = Preset(name: name, voice: p.voice, engine: p.engine, created: p.created, params: p.params, fx: p.fx);
+    if (lastSound == p.name) lastSound = name;
+    _savePresets();
+    toast('Renamed to "$name"');
+  }
+
+  String exportPreset(Preset p) => collectionJson([p]);
 
   void deletePreset(Preset p) {
     presets.remove(p);
@@ -1447,8 +1458,134 @@ class AppController extends ChangeNotifier implements MorphHost {
   }
 
   /// About eight knobs that matter most for the current voice, then the effect amounts.
-  List<Param> mainKnobs() => pickMainKnobs(currentEngine, params[0]!.params);
-  List<Param> mainFx() => pickByName(params[1]!.params, mainFxNames, 4);
+  List<Param> mainKnobs() => heroKnobs(voiceName, params[0]!.params);
+  List<Param> mainFx() => heroFx(params[1]!.params);
+
+  // ---------------------------------------------------------------------------------------------
+  // stage mode, the console drawer, the Setup mode, the shortcut overlay
+
+  bool stage = false, consoleOpen = false, shortcutsOpen = false;
+
+  void setStage(bool on) {
+    if (stage == on) return;
+    stage = on;
+    notifyListeners();
+  }
+
+  void setConsole(bool open) {
+    consoleOpen = open;
+    notifyListeners();
+  }
+
+  void setShortcuts(bool open) {
+    shortcutsOpen = open;
+    notifyListeners();
+  }
+
+  SetupMode get setupMode => settingsOn ? SetupMode.settings : (eqOn ? SetupMode.equalizer : SetupMode.sensitivity);
+
+  void setSetupMode(SetupMode m) {
+    settingsOn = m == SetupMode.settings;
+    eqOn = m == SetupMode.equalizer;
+    store.set('settingsOverlay', settingsOn);
+    store.set('eq', {'on': eqOn, 'follow': eqFollow});
+    notifyListeners();
+    values.ping();
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // A/B: the preset's values (A) against the edits (B), without touching the history
+
+  bool abOn = false;
+  List<(int, Param, double)> _abEdits = [];
+
+  bool get edited => soundTargets.any((t) => params[t]!.params.any((p) => p.value != p.loadValue));
+
+  void setAB(bool on) {
+    if (on == abOn || client == null) return;
+    if (on) {
+      _abEdits = [
+        for (final t in soundTargets)
+          for (final p in params[t]!.params)
+            if (p.value != p.loadValue) (t, p, p.value),
+      ];
+      if (_abEdits.isEmpty) {
+        toast('Nothing edited yet: A and B are the same');
+        return;
+      }
+      abOn = true;
+      for (final (t, p, _) in _abEdits) {
+        setValue(t, p, p.loadValue, record: false);
+      }
+    } else {
+      abOn = false;
+      for (final (t, p, v) in _abEdits) {
+        setValue(t, p, v, record: false);
+      }
+      _abEdits = [];
+    }
+    _flushValues();
+    notifyListeners();
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // the edited sound per voice, kept on this computer: the board forgets edits on a restart
+
+  Timer? _editsTimer;
+
+  void _rememberEditsSoon() {
+    if (abOn || voiceName.isEmpty) return;
+    _editsTimer?.cancel();
+    final voice = voiceName;
+    _editsTimer = Timer(const Duration(milliseconds: 800), () => _rememberEdits(voice));
+  }
+
+  void _rememberEdits(String voice) {
+    if (_disposed || voice != voiceName || abOn) return;
+    final all = (store.raw('edits') as Map?)?.cast<String, Object?>() ?? <String, Object?>{};
+    final mine = <String, Object?>{
+      for (final t in soundTargets)
+        '$t': {
+          for (final p in params[t]!.params)
+            if (p.value != p.loadValue) p.name: p.value,
+        },
+    };
+    if ((mine['0'] as Map).isEmpty && (mine['1'] as Map).isEmpty) {
+      all.remove(voice);
+    } else {
+      all[voice] = mine;
+    }
+    store.set('edits', all);
+  }
+
+  /// After a reconnect: the edits this computer kept for the board's voice, if the board lost them.
+  void _offerRestore() {
+    final all = store.raw('edits');
+    if (all is! Map) return;
+    final mine = all[voiceName];
+    if (mine is! Map) return;
+    final changes = <(int, Param, double)>[];
+    for (final t in soundTargets) {
+      final m = mine['$t'];
+      if (m is! Map) continue;
+      for (final e in m.entries) {
+        final p = findParam(t, e.key as String);
+        final v = (e.value as num?)?.toDouble();
+        if (p != null && v != null && conformValue(p, v) != p.value) changes.add((t, p, v));
+      }
+    }
+    if (changes.isEmpty) return;
+    final preset = voiceName.split(':').last;
+    toastAction('Your edited $preset is back', 'Restore', () {
+      history.begin('Restore edited $preset');
+      for (final (t, p, v) in changes) {
+        setValue(t, p, v);
+      }
+      history.commit();
+      _flushValues();
+      notifyListeners();
+    });
+  }
 
   // ---------------------------------------------------------------------------------------------
   // animation frame and readouts

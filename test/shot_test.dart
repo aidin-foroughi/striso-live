@@ -16,6 +16,13 @@ const shot = String.fromEnvironment('SHOT');
 final width = const int.fromEnvironment('SHOT_W', defaultValue: 1600).toDouble();
 final height = const int.fromEnvironment('SHOT_H', defaultValue: 1000).toDouble();
 
+/// Material icons from the Flutter SDK (tests have no icon font otherwise).
+String _materialIcons() {
+  // flutter_tester runs from <flutter>/bin/cache/artifacts/engine/<platform>/
+  final cache = File(Platform.resolvedExecutable).parent.parent.parent.parent.path;
+  return '$cache/artifacts/material_fonts/MaterialIcons-Regular.otf';
+}
+
 Future<void> loadFont(String family, List<String> files) async {
   final l = FontLoader(family);
   for (final f in files) {
@@ -28,8 +35,9 @@ void main() {
   testWidgets('screenshots', (tester) async {
     if (shot.isEmpty) return;
     await tester.runAsync(() async {
-      await loadFont('Bahnschrift', [r'C:\Windows\Fonts\bahnschrift.ttf']);
-      await loadFont('Cambria', [r'C:\Windows\Fonts\cambria.ttc']);
+      await loadFont('Inter', ['${Directory.current.path}/assets/fonts/Inter.ttf']);
+      await loadFont('Georgia', ['C:/Windows/Fonts/georgia.ttf']);
+      await loadFont('MaterialIcons', [_materialIcons()]);
       await loadFont('Segoe UI Symbol', [r'C:\Windows\Fonts\seguisym.ttf']);
       await loadFont('Cascadia Mono', [r'C:\Windows\Fonts\CascadiaMono.ttf', r'C:\Windows\Fonts\consola.ttf']);
     });
@@ -76,9 +84,26 @@ void main() {
     ctl.setMorphOpen(true);
     await save('sound');
     ctl.setTab(AppTab.setup);
-    ctl.setEqOn(true);
     await save('setup');
-    ctl.toggleSettings(true);
+    ctl.setSetupMode(SetupMode.equalizer);
+    ctl.eqSelect(27);
+    await save('equalizer');
+    ctl.setSetupMode(SetupMode.settings);
+    ctl.settingsClick(24);
+    await run(10);
     await save('settings');
+    ctl.setTab(AppTab.play);
+    ctl.setKey(root: 0, scale: 'bh6dim');
+    for (final id in [25, 29, 32]) {
+      b.press(id, pres: 0.7, strike: 0.3);
+    }
+    await run(10);
+    ctl.setStage(true);
+    await run(12);
+    await save('stage');
+    ctl.setStage(false);
+    await run(12);
+    ctl.setConsole(true);
+    await save('console');
   });
 }

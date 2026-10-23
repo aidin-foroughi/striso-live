@@ -2,13 +2,14 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:striso_core/striso_core.dart';
 import 'package:striso_live/main.dart';
 import 'package:striso_live/src/app_log.dart';
 import 'package:striso_live/src/controller.dart';
 import 'package:striso_live/src/store.dart';
-import 'package:striso_live/src/ui/sound_panel.dart';
+import 'package:striso_live/src/ui/knobs.dart';
 
 Future<AppController> boot(WidgetTester tester, {AppOptions options = const AppOptions(noUsb: true), Size size = const Size(1600, 1500)}) async {
   tester.view.physicalSize = size;
@@ -74,7 +75,7 @@ void main() {
     await startDemo(tester, ctl);
     await settle(tester);
     expect(find.text('Plug in your Striso'), findsNothing);
-    expect(find.text('Demo (simulated Striso)'), findsOneWidget);
+    expect(find.byKey(const Key('demo-chip')), findsOneWidget);
     expect(find.byKey(const Key('now-preset')), findsOneWidget);
     expect(tester.widget<Text>(find.byKey(const Key('now-preset'))).data, 'classic');
     // the voice browser: the engine row and the current engine's presets
@@ -135,15 +136,16 @@ void main() {
     await tester.tap(find.byKey(const Key('btn-settings-overlay')));
     await settle(tester, 200);
     expect(find.byKey(const Key('settings-panel')), findsOneWidget);
-    expect(find.text('Settings mode on the Striso'), findsOneWidget);
-    expect(find.textContaining('Voice: modal'), findsOneWidget);
+    expect(find.text('SETTINGS MODE'), findsOneWidget);
     // the modal voice key (button 22) picks the modal engine, like the Striso
     expect(ctl.settingsClick(22), isTrue);
+    await settle(tester, 100);
+    expect(find.textContaining('Voice: modal'), findsOneWidget);
     for (var i = 0; i < 20 && !ctl.voiceName.startsWith('modal'); i++) {
       await runFor(tester, 50);
     }
     expect(ctl.voiceName, startsWith('modal'));
-    await tester.tap(find.byKey(const Key('btn-settings-overlay')));
+    await tester.tap(find.byKey(const Key('mode-sensitivity')));
     await settle(tester, 200);
     expect(find.byKey(const Key('settings-panel')), findsNothing);
     await finish(tester, ctl);
@@ -243,6 +245,60 @@ void main() {
     await settle(tester, 300);
     expect(tester.takeException(), isNull);
     expect(find.byKey(const Key('engine-va')), findsOneWidget);
+    await finish(tester, ctl);
+  });
+  testWidgets('stage mode (F, Esc), the shortcut overlay (?) and A/B', (tester) async {
+    final ctl = await boot(tester);
+    await startDemo(tester, ctl);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await settle(tester, 500);
+    expect(find.byKey(const Key('stage')), findsOneWidget);
+    expect(find.byKey(const Key('stage-chord')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester, 500);
+    expect(find.byKey(const Key('stage')), findsNothing);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.slash, character: '?');
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await settle(tester, 200);
+    expect(find.byKey(const Key('shortcuts')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester, 200);
+    expect(find.byKey(const Key('shortcuts')), findsNothing);
+    // A/B: hold B for the preset as loaded, release for the edits
+    final p = ctl.params[0]!.params.firstWhere((q) => q.kind == Kind.continuous);
+    ctl.onEdit(0, p, p.min + (p.max - p.min) * 0.9, 'begin', 'x');
+    ctl.onEdit(0, p, p.value, 'end');
+    final edited = p.value;
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyB);
+    await settle(tester, 100);
+    expect(ctl.abOn, isTrue);
+    expect(p.value, p.loadValue);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyB);
+    await settle(tester, 100);
+    expect(ctl.abOn, isFalse);
+    expect(p.value, edited);
+    expect(ctl.history.canRedo, isFalse, reason: 'A/B is not an edit');
+    await finish(tester, ctl);
+  });
+
+  testWidgets('scale picker: grouped, search, formula; Barry Harris shows its two chords', (tester) async {
+    final ctl = await boot(tester);
+    await startDemo(tester, ctl);
+    await tester.tap(find.byKey(const Key('key-scale')));
+    await settle(tester, 200);
+    expect(find.text('COMMON'), findsOneWidget);
+    expect(find.text('MODES OF MAJOR'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).last, 'phrygian dom');
+    await settle(tester, 200);
+    expect(find.text('1 ♭2 3 4 5 ♭6 ♭7'), findsWidgets); // Phrygian dominant and Flamenco
+    await tester.tap(find.byKey(const Key('scale-phrygdom')));
+    await settle(tester, 200);
+    expect(ctl.keyScale, 'phrygdom');
+    ctl.setKey(root: 0, scale: 'bh6dim');
+    await settle(tester, 200);
+    expect(find.byKey(const Key('bh-text')), findsOneWidget);
+    expect(find.textContaining('C6 (C E G A) + B°7'), findsOneWidget);
     await finish(tester, ctl);
   });
 }

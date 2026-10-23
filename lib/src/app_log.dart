@@ -58,6 +58,12 @@ class AppLog extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Empties the drawer (the file keeps everything).
+  void clear() {
+    lines.clear();
+    notifyListeners();
+  }
+
   void info(String t) => add(t);
   void err(String t) => add(t, LogKind.err);
 

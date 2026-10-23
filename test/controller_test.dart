@@ -96,7 +96,7 @@ void main() {
     final usb = FakeUsb();
     final ctl = make(usb, intent: 'connected');
     await pumpUntil(tester, ctl.start());
-    await waitFor(tester, () => ctl.dot == Dot.on);
+    await waitFor(tester, () => ctl.dot == Dot.on && !ctl.listsLoading);
     expect(ctl.mode, ConnMode.usb);
     expect(ctl.status, 'Connected');
     expect(ctl.trace!.keys, containsAll(['connect', 'version', 'live']));
@@ -218,6 +218,32 @@ void main() {
     await pumpUntil(tester, ctl.recallPreset(ctl.presets.single));
     expect(ctl.voiceName.split(':').first, 'va');
     expect(ctl.findParam(0, p.name)!.value, want);
+    await finish(tester, ctl);
+  });
+  testWidgets('the edited sound comes back after a reconnect, with a Restore action', (tester) async {
+    final usb = FakeUsb();
+    final ctl = make(usb, intent: 'connected');
+    await pumpUntil(tester, ctl.start());
+    await waitFor(tester, () => ctl.dot == Dot.on && !ctl.listsLoading && ctl.params[0]!.params.isNotEmpty);
+    final name = ctl.params[0]!.params.firstWhere((q) => q.kind == Kind.continuous).name;
+    final p = ctl.findParam(0, name)!;
+    ctl.onEdit(0, p, (p.min + p.max) / 2 + (p.max - p.min) * 0.1, 'begin', 'x');
+    ctl.onEdit(0, p, p.value, 'end');
+    ctl.frame(clockMs(), 16);
+    final want = p.value;
+    await tester.pump(const Duration(seconds: 1)); // the edits are kept after 0.8 s
+    // the board restarts: a fresh board with the preset's values
+    usb.unplug();
+    await waitFor(tester, () => !ctl.connected);
+    usb.present = true;
+    await waitFor(tester, () => ctl.dot == Dot.on && !ctl.listsLoading, ms: 12000);
+    expect(ctl.findParam(0, name)!.value, isNot(want));
+    final t = ctl.toasts.value.where((x) => x.action == 'Restore').firstOrNull;
+    expect(t, isNotNull, reason: 'a Restore toast');
+    expect(t!.text, contains('is back'));
+    t.onAction!();
+    expect(ctl.findParam(0, name)!.value, want);
+    expect(ctl.history.canUndo, isTrue);
     await finish(tester, ctl);
   });
 }

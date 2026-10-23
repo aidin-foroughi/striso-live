@@ -13,6 +13,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart' show LicenseEntryWithLineBreaks, LicenseRegistry;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:striso_core/striso_core.dart' show Transport;
@@ -72,6 +73,10 @@ void main(List<String> args) {
       padding: const EdgeInsets.all(8),
       child: Text('This panel hit an error: ${d.exceptionAsString()}', style: ui(12, color: const Color(0xFFFFD9D9))),
     );
+    // Inter, bundled: its licence in the app's licence list
+    LicenseRegistry.addLicense(() async* {
+      yield LicenseEntryWithLineBreaks(['Inter'], await rootBundle.loadString('assets/fonts/OFL.txt'));
+    });
     final options = AppOptions.parse(args);
     appLog.info('Striso Live ${args.isEmpty ? '' : '(${args.join(' ')}) '}on ${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
     final ctl = AppController(

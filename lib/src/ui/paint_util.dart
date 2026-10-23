@@ -53,6 +53,7 @@ void drawText(
         text: text,
         style: TextStyle(
           fontFamily: family ?? uiFont,
+          fontVariations: [FontVariation.weight(weight.value.toDouble())],
           fontFamilyFallback: uiFontFallback,
           fontSize: size,
           color: color,
@@ -75,7 +76,13 @@ double textWidth(String text, double size, {FontWeight weight = FontWeight.w600}
   final tp = TextPainter(
     text: TextSpan(
       text: text,
-      style: TextStyle(fontFamily: uiFont, fontFamilyFallback: uiFontFallback, fontSize: size, fontWeight: weight),
+      style: TextStyle(
+        fontFamily: uiFont,
+        fontFamilyFallback: uiFontFallback,
+        fontSize: size,
+        fontWeight: weight,
+        fontVariations: [FontVariation.weight(weight.value.toDouble())],
+      ),
     ),
     textDirection: TextDirection.ltr,
   )..layout();

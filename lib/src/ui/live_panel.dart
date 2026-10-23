@@ -1,5 +1,5 @@
-// Around the board: the invite card, the probe line, the settings-mode panel, the chord readout
-// with roman numerals and the progression strip.
+// Around the board: the harmony strip (DESIGN.md 4.4: chord, roman numeral and function, the
+// progression, the key), the hover readout, and the settings-keys detail for the Setup tab.
 
 import 'package:flutter/material.dart';
 import 'package:striso_core/striso_core.dart';
@@ -8,352 +8,11 @@ import '../controller.dart';
 import '../harmony_tracker.dart';
 import '../theme.dart';
 
-class InviteCard extends StatelessWidget {
-  final AppController ctl;
-  const InviteCard(this.ctl, {super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: ctl,
-      builder: (context, _) {
-        if (ctl.connected) return const SizedBox.shrink();
-        final busy = ctl.invite == InviteState.connecting;
-        return Container(
-          color: const Color(0x8015121F),
-          alignment: Alignment.center,
-          child: Container(
-            key: const Key('invite'),
-            constraints: const BoxConstraints(maxWidth: 460),
-            padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 26),
-            decoration: BoxDecoration(
-              color: const Color(0xF01C1929),
-              border: Border.all(color: Pal.line),
-              borderRadius: BorderRadius.circular(14),
-              boxShadow: const [BoxShadow(color: Color(0x8C05030C), blurRadius: 60, offset: Offset(0, 20))],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('Plug in your Striso', style: ui(26, weight: FontWeight.w300)),
-                const SizedBox(height: 8),
-                Text(
-                  'Striso Live talks to the board directly over USB. Plug it in and switch it on.',
-                  textAlign: TextAlign.center,
-                  style: ui(14, color: Pal.muted),
-                ),
-                const SizedBox(height: 18),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Btn(
-                      ctl.invite == InviteState.reconnect ? 'Connect now' : 'Connect',
-                      key: const Key('btn-connect-2'),
-                      kind: BtnKind.primary,
-                      fontSize: 15,
-                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-                      onPressed: busy ? null : ctl.userConnect,
-                    ),
-                    const SizedBox(width: 10),
-                    Btn(
-                      'Try the demo',
-                      key: const Key('btn-demo'),
-                      fontSize: 15,
-                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-                      onPressed: busy ? null : ctl.connectDemo,
-                    ),
-                  ],
-                ),
-                if (ctl.inviteText.isNotEmpty) ...[
-                  const SizedBox(height: 14),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (busy) ...[const StatusPulse(), const SizedBox(width: 8)],
-                      Flexible(
-                        child: Text(ctl.inviteText, style: ui(14, color: Pal.honey)),
-                      ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class StatusPulse extends StatefulWidget {
-  const StatusPulse({super.key});
-  @override
-  State<StatusPulse> createState() => _StatusPulseState();
-}
-
-class _StatusPulseState extends State<StatusPulse> with SingleTickerProviderStateMixin {
-  late final AnimationController a = AnimationController(vsync: this, duration: const Duration(milliseconds: 700))..repeat(reverse: true);
-  @override
-  void dispose() {
-    a.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => FadeTransition(
-    opacity: Tween<double>(begin: 1, end: 0.3).animate(a),
-    child: Container(
-      width: 10,
-      height: 10,
-      decoration: const BoxDecoration(color: Pal.honey, shape: BoxShape.circle),
-    ),
-  );
-}
-
-class ProbeLine extends StatelessWidget {
-  final AppController ctl;
-  const ProbeLine(this.ctl, {super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: ctl.stats,
-      builder: (context, _) {
-        final id = ctl.hover, hc = ctl.hoverControl;
-        final live = ctl.live;
-        List<InlineSpan> spans = [];
-        TextSpan b(String t) => TextSpan(
-          text: t,
-          style: ui(14, weight: FontWeight.w600),
-        );
-        TextSpan k(String t) => TextSpan(
-          text: t,
-          style: ui(12.5, color: Pal.faint),
-        );
-        TextSpan v(String t) => TextSpan(
-          text: t,
-          style: ui(12.5, color: Pal.muted),
-        );
-        const gap = TextSpan(text: '    ');
-        if (ctl.settingsOn && ctl.tab == AppTab.setup && (id >= 0 || hc >= 0)) {
-          final f = id >= 0 ? settingsKeys[id] : null;
-          final text = f != null
-              ? f.describe(id)
-              : id >= 0
-              ? ['No settings function', 'key $id']
-              : hc == 3
-              ? ['Settings: hold it and press a key']
-              : (settingsControls[hc] != null && hc != 3 ? [settingsControls[hc]!] : ['Glissando']);
-          spans = [b(text.first), gap, v(text.skip(1).join('. '))];
-        } else if (id >= 0) {
-          final n = noteName(id, live.transpose, live.transposeFifths);
-          spans = [
-            b(n.full),
-            gap,
-            k('key '),
-            v('$id'),
-            gap,
-            k('pressure '),
-            v(live.raw[id].toStringAsFixed(3)),
-            gap,
-            k('velocity '),
-            v(live.vpres[id].toStringAsFixed(2)),
-            gap,
-            k('tilt '),
-            v('x ${live.x[id].toStringAsFixed(2)}  y ${live.y[id].toStringAsFixed(2)}'),
-            if (ctl.playable) ...[gap, k('click and hold to play')],
-          ];
-        } else if (hc >= 0) {
-          spans = [b(controls[hc].name), gap, v(live.controls[hc] == 1 ? 'pressed' : 'released')];
-        }
-        return Container(
-          constraints: const BoxConstraints(minHeight: 30),
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-          child: Text.rich(TextSpan(children: spans)),
-        );
-      },
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------------------------
-// settings overlay panel
-
-class SettingsPanel extends StatelessWidget {
-  final AppController ctl;
-  const SettingsPanel(this.ctl, {super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final voices = ctl.settingsVoices();
-    final groups = <String, List<MapEntry<int, SettingsKey>>>{};
-    for (final e in settingsKeys.entries) {
-      (groups[e.value.group] ??= []).add(e);
-    }
-    final how = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Settings mode on the Striso', style: ui(13.5, weight: FontWeight.w600)),
-        const SizedBox(height: 6),
-        for (final (i, t) in howToSettings.indexed)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Text('${i + 1}. $t', style: ui(12.5, color: Pal.muted, height: 1.45)),
-          ),
-        const SizedBox(height: 4),
-        Text(
-          'From the firmware (synth_control.cpp config_but). Keys marked ? depend on the board’s stored settings. Click a voice key to switch voice; click it again for its next preset.',
-          style: ui(12, color: Pal.faint, height: 1.4),
-        ),
-      ],
-    );
-    Widget group(String name, Color gc, List<Widget> items) => SizedBox(
-      width: 270,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            name,
-            style: ui(12, color: gc, weight: FontWeight.w600),
-          ),
-          const SizedBox(height: 4),
-          ...items,
-        ],
-      ),
-    );
-    final boxes = <Widget>[];
-    for (final g in SettingsGroup.order) {
-      final items = groups[g];
-      if (items == null) continue;
-      final gc = rgb(groupColors[g] ?? 0xffffff);
-      boxes.add(
-        group(g, gc, [
-          for (final MapEntry(key: id, value: f) in items)
-            _settingsItem(id, f, f.led != null ? rgb(ledColor(f.led!)) : (f.danger ? const Color(0xFFFF6B6B) : gc), voices[f.engine]),
-        ]),
-      );
-    }
-    boxes.add(
-      group('Buttons with Settings held', Pal.honey, [
-        for (final t in [settingsControls[1]!, settingsControls[2]!, settingsBothOctaves])
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 4),
-            child: Text(t, style: ui(12.5)),
-          ),
-      ]),
-    );
-    return Container(
-      key: const Key('settings-panel'),
-      constraints: const BoxConstraints(maxHeight: 420),
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: Pal.seam)),
-      ),
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
-      child: SingleChildScrollView(
-        child: LayoutBuilder(
-          builder: (context, c) {
-            final wide = c.maxWidth > 900;
-            final grid = Wrap(spacing: 18, runSpacing: 10, children: boxes);
-            return wide
-                ? Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(width: c.maxWidth * 0.27, child: how),
-                      const SizedBox(width: 18),
-                      Expanded(child: grid),
-                    ],
-                  )
-                : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [how, const SizedBox(height: 10), grid]);
-          },
-        ),
-      ),
-    );
-  }
-
-  Widget _settingsItem(int id, SettingsKey f, Color chipColor, SettingsVoice? v) {
-    final parts = f.describe(id);
-    final sel = id == ctl.settingsSelected;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 1),
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
-      decoration: BoxDecoration(
-        color: sel ? Pal.panel2 : null,
-        border: sel ? Border.all(color: Pal.glacier) : null,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                constraints: const BoxConstraints(minWidth: 44),
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                decoration: BoxDecoration(
-                  border: Border.all(color: chipColor),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  f.short + (f.uncertain ? '?' : ''),
-                  textAlign: TextAlign.center,
-                  style: ui(11.5, color: chipColor, weight: FontWeight.w600),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text.rich(
-                  TextSpan(
-                    style: ui(12.5),
-                    children: [
-                      TextSpan(
-                        text: parts.first,
-                        style: ui(12.5, weight: FontWeight.w600),
-                      ),
-                      TextSpan(
-                        text: ' ${parts.skip(1).join('. ')}',
-                        style: ui(12.5, color: Pal.faint),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-          if (v != null)
-            Padding(
-              padding: const EdgeInsets.only(left: 52, top: 4),
-              child: v.count == 0
-                  ? Text('not in this firmware (the led shows red)', style: ui(12, color: Pal.faint))
-                  : Wrap(
-                      spacing: 4,
-                      runSpacing: 4,
-                      children: [
-                        for (final p in v.list)
-                          Btn(
-                            p.preset ?? p.engine,
-                            small: true,
-                            pressed: p.index == ctl.current,
-                            tooltip: 'Switch to ${p.name}',
-                            onPressed: () => ctl.connected ? ctl.selectVoice(p.index) : ctl.toast('Connect to switch voices', 'warn'),
-                          ),
-                      ],
-                    ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------------------------
-// chord, roman numeral, key and progression
-
 class RomanText extends StatelessWidget {
   final Roman r;
   final double size;
   final Color color;
-  const RomanText(this.r, {super.key, this.size = 44, this.color = Pal.honey});
+  const RomanText(this.r, {super.key, this.size = TypeSize.roman, this.color = Pal.accent});
 
   @override
   Widget build(BuildContext context) {
@@ -416,16 +75,20 @@ class RomanText extends StatelessWidget {
   }
 }
 
-Color funcColor(String? f) => switch (f) {
-  'T' => Pal.glacier,
-  'S' => Pal.honey,
-  'D' => Pal.ember,
-  _ => Pal.line,
-};
+const _functionWord = {'T': 'tonic', 'S': 'subdominant', 'D': 'dominant'};
 
-class HarmonyReadout extends StatelessWidget {
+String chordSub(Harmony? a, MusicKey? key) {
+  if (a == null) return 'Hold two or more keys to name the chord.';
+  if (a.kind == HarmonyKind.note) return key != null ? 'scale degree ${a.degree} (${a.solfegeName})' : 'one note';
+  if (a.kind == HarmonyKind.interval) return a.long;
+  return '${a.long}${a.alt != null ? ' · also ${a.alt}' : ''}';
+}
+
+/// The harmony strip: 96 px, chord | roman, function and progression | key.
+class HarmonyStrip extends StatelessWidget {
   final AppController ctl;
-  const HarmonyReadout(this.ctl, {super.key});
+  final bool compact;
+  const HarmonyStrip(this.ctl, {super.key, this.compact = false});
 
   @override
   Widget build(BuildContext context) {
@@ -435,135 +98,132 @@ class HarmonyReadout extends StatelessWidget {
         final h = ctl.harmony;
         final a = h.shown;
         final key = ctl.currentKey;
-        final dim = h.released ? 0.45 : 1.0;
-        String sub;
-        if (a == null) {
-          sub = 'Hold two or more keys to name the chord.';
-        } else if (a.kind == HarmonyKind.note) {
-          sub = key != null ? 'scale degree ${a.degree} (${a.solfegeName})' : 'one note';
-        } else if (a.kind == HarmonyKind.interval) {
-          sub = '${a.long}  –  ${a.notes.join(' ')}';
-        } else {
-          sub = '${a.notes.join(' ')}  –  ${a.long}${a.alt != null ? '  –  ${a.alt}' : ''}';
-        }
-        final chord = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
+        final dim = h.released ? 0.42 : 1.0;
+        final chord = SizedBox(
+          width: compact ? 200 : 280,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              AnimatedSwitcher(
+                duration: Timing.quick,
+                child: Opacity(
+                  key: ValueKey(a?.name),
+                  opacity: dim,
+                  child: Tooltip(
+                    message: a?.alt != null ? 'also written ${a!.alt}' : '',
+                    child: Text(
+                      a?.name ?? ' ',
+                      key: const Key('h-name'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: ui(TypeSize.chord, weight: FontWeight.w500),
+                    ),
+                  ),
+                ),
+              ),
+              Text(
+                chordSub(a, key),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: ui(TypeSize.small, color: Pal.text2),
+              ),
+            ],
+          ),
+        );
+        final roman = Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Opacity(
-              opacity: dim,
-              child: Tooltip(
-                message: a?.alt != null ? 'also written ${a!.alt}' : '',
+            if (a?.roman != null) ...[
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Opacity(opacity: dim, child: RomanText(a!.roman!)),
+                ),
+              ),
+              const SizedBox(width: Space.s),
+              Flexible(
                 child: Text(
-                  a?.name ?? ' ',
-                  key: const Key('h-name'),
+                  a.funcLabel?.toLowerCase() ?? _functionWord[a.func] ?? '',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: ui(46, weight: FontWeight.w600, height: 1.05),
+                  style: ui(TypeSize.small, color: Pal.text2),
                 ),
               ),
-            ),
-            Text(
-              sub,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: ui(13, color: Pal.muted),
-            ),
-          ],
-        );
-        final romanBox = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              height: 52,
-              child: Opacity(
+              const SizedBox(width: Space.l),
+            ] else if (a?.kind == HarmonyKind.note && key != null) ...[
+              Opacity(
                 opacity: dim,
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: a?.roman != null
-                      ? FittedBox(child: RomanText(a!.roman!))
-                      : Text(a?.kind == HarmonyKind.note && key != null ? (a!.degree ?? '') : ' ', style: serif(44, color: Pal.honey)),
+                child: Text(a!.degree ?? '', style: serif(TypeSize.roman, color: Pal.accent)),
+              ),
+              const SizedBox(width: Space.l),
+            ] else if (a?.kind == HarmonyKind.chord && key == null) ...[
+              Flexible(
+                child: Text(
+                  'Pick a key for roman numerals',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: ui(TypeSize.small, color: Pal.text3),
                 ),
               ),
-            ),
-            SizedBox(
-              height: 24,
-              child: Row(
-                children: [
-                  if (a?.roman != null) ...[
-                    Container(
-                      width: 22,
-                      height: 22,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(color: funcColor(a!.func), shape: BoxShape.circle),
-                      child: Text(
-                        a.func ?? '?',
-                        style: ui(12.5, weight: FontWeight.w600, color: a.func == null ? Pal.muted : Pal.ink),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        a.funcLabel ?? '',
-                        overflow: TextOverflow.ellipsis,
-                        style: ui(13, color: Pal.muted),
-                      ),
-                    ),
-                    if (a.tag != null && a.tag != 'chromatic') ...[
-                      const SizedBox(width: 8),
-                      Text(a.tag == 'secondary' ? 'applied chord' : a.tag!, style: ui(13, color: Pal.faint)),
-                    ],
-                  ] else if (a?.kind == HarmonyKind.chord && key == null)
-                    Flexible(
-                      child: Text(
-                        'Pick a key above for roman numerals and function.',
-                        overflow: TextOverflow.ellipsis,
-                        style: ui(13, color: Pal.muted),
-                      ),
-                    ),
-                ],
-              ),
-            ),
+              const SizedBox(width: Space.l),
+            ],
+            Expanded(child: Progression(ctl)),
           ],
         );
         final sug = h.suggestion;
-        final keyBox = Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(key?.name ?? 'No key', style: ui(15)),
-            if (sug != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Row(
+        final bh = barryHarrisText(key);
+        final keyBox = SizedBox(
+          width: compact ? 220 : 300,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(key?.name ?? 'No key', style: ui(TypeSize.body, color: key == null ? Pal.text3 : Pal.text1)),
+              if (bh != null)
+                Tooltip(
+                  message:
+                      'Barry Harris: alternate scale tones belong to the chord and to the diminished seventh chord.\n'
+                      'On the board the chord tones have solid rims, the diminished tones dashed rims.',
+                  child: Text(
+                    bh,
+                    key: const Key('bh-text'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: ui(TypeSize.small, color: Pal.text2),
+                  ),
+                ),
+              if (sug != null)
+                Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('Sounds like ${sug.name} ', style: ui(12.5, color: Pal.muted)),
-                    Btn('Use', small: true, onPressed: ctl.useSuggestedKey),
+                    Flexible(
+                      child: Text(
+                        'Sounds like ${sug.name}',
+                        overflow: TextOverflow.ellipsis,
+                        style: ui(TypeSize.small, color: Pal.text2),
+                      ),
+                    ),
+                    const SizedBox(width: Space.xs),
+                    _LinkButton('Use', onTap: ctl.useSuggestedKey),
                   ],
                 ),
-              ),
-          ],
-        );
-        return Container(
-          constraints: const BoxConstraints(minHeight: 104),
-          padding: const EdgeInsets.fromLTRB(20, 6, 20, 4),
-          decoration: const BoxDecoration(
-            border: Border(top: BorderSide(color: Pal.seam)),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(flex: 125, child: chord),
-              const SizedBox(width: 18),
-              Expanded(flex: 100, child: romanBox),
-              const SizedBox(width: 18),
-              Expanded(
-                flex: 90,
-                child: Padding(padding: const EdgeInsets.only(bottom: 4), child: keyBox),
-              ),
             ],
+          ),
+        );
+        return SizedBox(
+          height: Sizes.harmony,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Space.gutter),
+            child: Row(
+              children: [
+                chord,
+                const SizedBox(width: Space.column),
+                Expanded(child: roman),
+                const SizedBox(width: Space.column),
+                keyBox,
+              ],
+            ),
           ),
         );
       },
@@ -571,6 +231,24 @@ class HarmonyReadout extends StatelessWidget {
   }
 }
 
+class _LinkButton extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  const _LinkButton(this.label, {required this.onTap});
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: SystemMouseCursors.click,
+    child: GestureDetector(
+      onTap: onTap,
+      child: Text(
+        label,
+        style: ui(TypeSize.small, color: Pal.accent, weight: FontWeight.w500),
+      ),
+    ),
+  );
+}
+
+/// The progression as ghost chips, newest right; Clear at the end.
 class Progression extends StatelessWidget {
   final AppController ctl;
   const Progression(this.ctl, {super.key});
@@ -581,49 +259,227 @@ class Progression extends StatelessWidget {
       listenable: ctl.harmony,
       builder: (context, _) {
         final prog = ctl.harmony.prog;
-        return Container(
-          constraints: const BoxConstraints(minHeight: 40),
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 6),
-          child: Row(
-            children: [
-              Expanded(
-                child: ClipRect(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    reverse: true,
-                    child: Row(
-                      children: [
-                        if (prog.isEmpty) Text('Chords you play line up here.', style: ui(12.5, color: Pal.faint)),
-                        for (final (i, e) in prog.indexed) Padding(padding: const EdgeInsets.only(right: 6), child: _chip(e, i == prog.length - 1)),
-                      ],
-                    ),
+        return Row(
+          children: [
+            Expanded(
+              child: ClipRect(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  reverse: true,
+                  child: Row(
+                    children: [
+                      if (prog.isEmpty) Text('Chords you play line up here.', style: ui(TypeSize.small, color: Pal.text3)),
+                      for (final e in prog) _Chip(e),
+                    ],
                   ),
                 ),
               ),
-              Btn('Clear', kind: BtnKind.quiet, small: true, onPressed: ctl.harmony.clearProgression),
-            ],
-          ),
+            ),
+            if (prog.isNotEmpty) Btn('Clear', kind: BtnKind.ghost, onPressed: ctl.harmony.clearProgression),
+          ],
         );
       },
     );
   }
+}
 
-  Widget _chip(ProgEntry e, bool last) {
-    final a = e.a;
-    final fc = a.roman != null ? funcColor(a.func) : (last ? Pal.muted : Pal.line);
+class _Chip extends StatefulWidget {
+  final ProgEntry e;
+  const _Chip(this.e);
+  @override
+  State<_Chip> createState() => _ChipState();
+}
+
+class _ChipState extends State<_Chip> {
+  bool _hover = false;
+  @override
+  Widget build(BuildContext context) {
+    final a = widget.e.a;
     return Tooltip(
       message: a.roman != null ? '${a.name}${a.funcLabel != null ? ' – ${a.funcLabel}' : ''}' : a.notes.join(' '),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(10, 3, 10, 4),
-        decoration: BoxDecoration(
-          color: Pal.panel2,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: last ? fc : Pal.line),
-          // the function colour as an underline
-          boxShadow: [BoxShadow(color: fc, offset: const Offset(0, 1.5))],
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: Container(
+          height: 24,
+          margin: const EdgeInsets.only(right: Space.xs),
+          padding: const EdgeInsets.symmetric(horizontal: Space.s),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(Radii.small),
+            border: Border.all(color: _hover ? Pal.hairline : Colors.transparent),
+          ),
+          child: a.roman != null ? Text(a.roman!.text, style: serif(15, color: Pal.text2)) : Text(a.name, style: ui(TypeSize.body, color: Pal.text2)),
         ),
-        child: a.roman != null ? Text(a.roman!.text, style: serif(16)) : Text(a.name, style: ui(13, color: Pal.muted)),
       ),
     );
   }
+}
+
+/// The key under the pointer: note, key number, pressure, velocity, tilt (or its settings-mode
+/// function in the Setup tab's settings mode).
+class HoverReadout extends StatelessWidget {
+  final AppController ctl;
+  const HoverReadout(this.ctl, {super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: ctl.stats,
+      builder: (context, _) {
+        final id = ctl.hover, hc = ctl.hoverControl;
+        final live = ctl.live;
+        String text = '';
+        if (ctl.settingsOn && ctl.tab == AppTab.setup && (id >= 0 || hc >= 0)) {
+          final f = id >= 0 ? settingsKeys[id] : null;
+          text = f != null
+              ? f.describe(id).join(' · ')
+              : id >= 0
+              ? 'No settings function · key $id'
+              : hc == 3
+              ? 'Settings: hold it and press a key'
+              : (settingsControls[hc] ?? 'Glissando');
+        } else if (id >= 0) {
+          final n = noteName(id, live.transpose, live.transposeFifths);
+          final f = ctl.tab == AppTab.setup ? ctl.keyParam(id)?.value : null;
+          text = [
+            n.full,
+            'key $id',
+            'pressure ${live.raw[id].toStringAsFixed(3)}',
+            'velocity ${live.vpres[id].toStringAsFixed(2)}',
+            'tilt ${live.x[id].toStringAsFixed(2)} ${live.y[id].toStringAsFixed(2)}',
+            if (f != null) '×${f.toStringAsFixed(2)}',
+          ].join(' · ');
+        } else if (hc >= 0) {
+          text = '${controls[hc].name} · ${live.controls[hc] == 1 ? 'pressed' : 'released'}';
+        }
+        return Text(
+          text,
+          key: const Key('hover-readout'),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: ui(TypeSize.small, color: Pal.text2),
+        );
+      },
+    );
+  }
+}
+
+/// Setup, settings keys mode: the how-to (two lines and More), the selected or hovered key's
+/// function, and for voice keys the engine's presets.
+class SettingsInfo extends StatefulWidget {
+  final AppController ctl;
+  const SettingsInfo(this.ctl, {super.key});
+  @override
+  State<SettingsInfo> createState() => _SettingsInfoState();
+}
+
+class _SettingsInfoState extends State<SettingsInfo> {
+  bool more = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final ctl = widget.ctl;
+    return ListenableBuilder(
+      listenable: Listenable.merge([ctl, ctl.stats]),
+      builder: (context, _) {
+        final id = ctl.hover >= 0 ? ctl.hover : ctl.settingsSelected;
+        final f = id >= 0 ? settingsKeys[id] : null;
+        final voices = ctl.settingsVoices();
+        final v = f?.engine != null ? voices[f!.engine] : null;
+        return Column(
+          key: const Key('settings-panel'),
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Micro('Settings mode'),
+            const SizedBox(height: Space.s),
+            Text(howToSettings[0], style: ui(TypeSize.body, color: Pal.text2)),
+            const SizedBox(height: Space.xs),
+            Text(howToSettings[1], style: ui(TypeSize.body, color: Pal.text2)),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Btn(more ? 'Less' : 'More ▸', kind: BtnKind.ghost, onPressed: () => setState(() => more = !more)),
+            ),
+            if (more) ...[
+              for (final t in howToSettings.skip(2))
+                Padding(
+                  padding: const EdgeInsets.only(bottom: Space.xs),
+                  child: Text(t, style: ui(TypeSize.body, color: Pal.text2)),
+                ),
+              Text(
+                'From the firmware (synth_control.cpp config_but). Keys marked ? depend on the board’s stored settings. '
+                'Click a voice key to switch voice; click it again for its next preset.',
+                style: ui(TypeSize.small, color: Pal.text3),
+              ),
+              const SizedBox(height: Space.s),
+              for (final t in [settingsControls[1]!, settingsControls[2]!, settingsBothOctaves])
+                Padding(
+                  padding: const EdgeInsets.only(bottom: Space.xs),
+                  child: Text(t, style: ui(TypeSize.small, color: Pal.text2)),
+                ),
+            ],
+            const SizedBox(height: Space.l),
+            if (f == null)
+              Text(id >= 0 ? 'Key $id has no settings function.' : 'Point at a key, or click one.', style: ui(TypeSize.body, color: Pal.text2))
+            else ...[
+              Text(
+                '${f.title}${f.uncertain ? ' (?)' : ''}',
+                style: ui(TypeSize.title, weight: FontWeight.w600, color: f.danger ? Pal.error : Pal.text1),
+              ),
+              const SizedBox(height: Space.xs),
+              for (final line in f.describe(id).skip(1)) Text(line, style: ui(TypeSize.body, color: Pal.text2)),
+              if (v != null) ...[
+                const SizedBox(height: Space.m),
+                if (v.count == 0) Text('Not in this firmware.', style: ui(TypeSize.body, color: Pal.text3)),
+                for (final p in v.list)
+                  _PresetLine(
+                    label: p.preset ?? p.engine,
+                    current: p.index == ctl.current,
+                    color: engineColor(p.engine),
+                    onTap: () => ctl.connected ? ctl.selectVoice(p.index) : ctl.toast('Connect to switch voices', 'warn'),
+                  ),
+              ],
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _PresetLine extends StatefulWidget {
+  final String label;
+  final bool current;
+  final Color color;
+  final VoidCallback onTap;
+  const _PresetLine({required this.label, required this.current, required this.color, required this.onTap});
+  @override
+  State<_PresetLine> createState() => _PresetLineState();
+}
+
+class _PresetLineState extends State<_PresetLine> {
+  bool _hover = false;
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: SystemMouseCursors.click,
+    onEnter: (_) => setState(() => _hover = true),
+    onExit: (_) => setState(() => _hover = false),
+    child: GestureDetector(
+      onTap: widget.onTap,
+      child: Container(
+        height: Sizes.row,
+        padding: const EdgeInsets.symmetric(horizontal: Space.s),
+        decoration: BoxDecoration(color: _hover ? Pal.bg2 : null, borderRadius: BorderRadius.circular(Radii.small)),
+        child: Row(
+          children: [
+            SizedBox(width: 12, child: widget.current ? Pip(widget.color) : null),
+            Text(
+              widget.label,
+              style: ui(TypeSize.body, color: widget.current ? Pal.text1 : Pal.text2, weight: widget.current ? FontWeight.w500 : FontWeight.w400),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }

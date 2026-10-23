@@ -17,7 +17,7 @@ is live about 0.3 s after it starts talking to the board.
 
 ### Windows
 
-1. Unzip `StrisoLive-1.0.0-windows-x64.zip` anywhere and run `Striso Live\StrisoLive.exe`.
+1. Unzip `StrisoLive-1.1.0-windows-x64.zip` anywhere and run `Striso Live\StrisoLive.exe`.
 2. The build is not signed, so SmartScreen may say *Windows protected your PC*: click
    **More info**, then **Run anyway**. Windows remembers it for this file.
 3. Plug in the Striso and click **Connect** (or **Try the demo** without a board).
@@ -59,10 +59,26 @@ whose `INFO_UF2.TXT` names the Striso (and only when there is exactly one), back
 0x08020000-0x08040000 and read back as the intended records (the same bytes as
 `tools/striso.py save_touch`), waits for the restart, reconnects and reads the values back.
 
+### Layout
+
+- **Play**: the engine row (the Striso's voice-key colours), this engine's presets and your
+  sounds; the board with key, scale (66 scales in groups, searchable, with degree formulas) and
+  labels; the chord, roman numeral, progression and key; the hero knobs of the voice (per engine
+  and preset, by the firmware's parameter names) and the reverb and delay amounts.
+- **Sound**: every voice and effect parameter, undo/redo, Reset, Mutate, A/B, Save sound, Copy as
+  C; My sounds; the morph pad (closed until you open it).
+- **Setup**: Sensitivity, Key equalizer or Settings keys on the big board; Save to Striso;
+  motion; firmware.
+- **Stage mode** (F or F11, Esc leaves): only the board and the chord, larger.
+- After a reconnect, if the board lost your edits (a restart, Save to Striso), a toast offers to
+  restore the edited sound.
+
 ### Keys
 
-`[` `]` previous/next voice, `Ctrl+Z` undo, `Ctrl+Shift+Z` redo, `M` mutate, `S` settings keys.
-Knobs: drag (Shift: fine), scroll, arrow keys; double-click resets; Alt+click locks against Mutate.
+`1`-`7` engines, `[` `]` previous/next preset, `Ctrl+1/2/3` tabs, `Ctrl+Z`/`Ctrl+Y` undo/redo,
+`Ctrl+S` save the sound, `M` mutate, `B` (hold) A/B, `F`/`F11` stage, `` ` `` console, `S`
+settings keys, `?` all of these. Knobs: drag (Shift: fine), scroll, arrow keys; double-click
+resets; Alt+click locks against Mutate.
 
 ### Command line
 
@@ -86,7 +102,7 @@ cd tools/striso_live
 flutter test                                 # widget and controller tests (headless)
 (cd packages/striso_core && dart test)       # protocol, parser, client, harmony, params, touch, config
 flutter build windows --release              # build\windows\x64\runner\Release\StrisoLive.exe
-powershell -File tool\package_windows.ps1    # dist\StrisoLive-1.0.0-windows-x64.zip
+powershell -File tool\package_windows.ps1    # dist\StrisoLive-1.1.0-windows-x64.zip
 
 flutter build macos --release
 tool/bundle_libusb_macos.sh "build/macos/Build/Products/Release/Striso Live.app"   # needs brew's libusb
@@ -116,5 +132,8 @@ dart run bin/striso_probe.dart --lib path\to\libusb-1.0.dll connect 1
   fits), the I/O in a background isolate with 16 bulk IN transfers in flight; the UI never waits
   on USB.
 - `lib/`: the app (controller, panels, painters).
+- `assets/fonts/Inter.ttf`: Inter (variable), SIL Open Font License 1.1 (`assets/fonts/OFL.txt`),
+  bundled so the type is the same on Windows and macOS. Design tokens and components:
+  `lib/src/theme.dart`, from `DESIGN.md`.
 - `windows/libusb/libusb-1.0.dll`: libusb 1.0.30 x64 (LGPL-2.1, see `LIBUSB-NOTICE.txt`),
   installed next to the exe by `windows/CMakeLists.txt`.

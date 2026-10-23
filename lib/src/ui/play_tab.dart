@@ -1,14 +1,21 @@
-// Play: the engines and their presets (and your sounds for them) on the left, the board with the
-// chord, key and progression in the middle, the main knobs of the voice on the right.
+// Play (DESIGN.md 3): engines and this engine's presets plus your sounds on the left; the board
+// with its toolbar and the harmony strip in the middle; the sound name, hero knobs and the
+// reverb/delay amounts on the right. 1000-1279 px: a narrower left column and the knobs as a
+// strip between board and harmony.
 
+import 'dart:io';
+
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:striso_core/striso_core.dart';
 
 import '../controller.dart';
 import '../theme.dart';
 import 'board_view.dart';
+import 'chrome.dart';
+import 'knobs.dart';
 import 'live_panel.dart';
-import 'sound_panel.dart';
+import 'scale_picker.dart';
 
 class PlayTab extends StatelessWidget {
   final AppController ctl;
@@ -18,28 +25,48 @@ class PlayTab extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, c) {
-        if (c.maxWidth >= Sizes.wide) {
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              SizedBox(width: Sizes.leftColumn, child: EnginePanel(ctl)),
-              const VerticalDivider(width: 1, thickness: 1, color: Pal.seam),
-              Expanded(child: BoardColumn(ctl)),
-              const VerticalDivider(width: 1, thickness: 1, color: Pal.seam),
-              SizedBox(width: Sizes.rightColumn, child: MainKnobs(ctl)),
-            ],
+        final w = c.maxWidth;
+        if (w >= 1280) {
+          final right = w >= 1480 ? Sizes.right : Sizes.rightNarrow;
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(Space.gutter, Space.s, Space.gutter, 0),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(width: Sizes.left, child: EnginePanel(ctl)),
+                const SizedBox(width: Space.column),
+                Expanded(child: BoardColumn(ctl)),
+                const SizedBox(width: Space.column),
+                SizedBox(
+                  width: right,
+                  child: HeroPanel(ctl, knobSize: w >= 1480 ? Sizes.knobHero : 48),
+                ),
+              ],
+            ),
           );
         }
-        // narrow: the board first, then the voices and the knobs, all in one scroll
+        if (w >= Sizes.minWidth) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(Space.gutter, Space.s, Space.gutter, 0),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(width: Sizes.leftNarrow, child: EnginePanel(ctl, buttonSize: 20)),
+                const SizedBox(width: Space.column),
+                Expanded(child: BoardColumn(ctl, strip: true)),
+              ],
+            ),
+          );
+        }
+        // under the minimum window size: one scroll
         return SingleChildScrollView(
+          padding: const EdgeInsets.all(Space.gutter),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SizedBox(height: (c.maxWidth / 1.15).clamp(360.0, 640.0) + 240, child: BoardColumn(ctl)),
-              const Divider(height: 1, thickness: 1, color: Pal.seam),
+              SizedBox(height: (w / 1.15).clamp(360.0, 640.0) + Sizes.toolbar + Sizes.harmony + 60, child: BoardColumn(ctl, strip: true)),
+              const SizedBox(height: Space.xl),
               EnginePanel(ctl, scroll: false),
-              const Divider(height: 1, thickness: 1, color: Pal.seam),
-              MainKnobs(ctl, scroll: false),
             ],
           ),
         );
@@ -49,12 +76,13 @@ class PlayTab extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------------------------
-// engines and presets
+// engines, presets and my sounds
 
 class EnginePanel extends StatelessWidget {
   final AppController ctl;
   final bool scroll;
-  const EnginePanel(this.ctl, {super.key, this.scroll = true});
+  final double buttonSize;
+  const EnginePanel(this.ctl, {super.key, this.scroll = true, this.buttonSize = 24});
 
   @override
   Widget build(BuildContext context) {
@@ -66,72 +94,105 @@ class EnginePanel extends StatelessWidget {
         final info = engineInfo(cur);
         final list = ctl.voices.where((v) => v.engine == cur).toList();
         final mine = ctl.presets.where((p) => p.engine == cur).toList();
+        final col = engineColor(cur);
         final body = <Widget>[
           if (!ctl.connected)
-            Padding(
-              padding: const EdgeInsets.only(top: Space.m),
-              child: Text('Voices and presets appear here once the Striso is connected.', style: ui(TypeSize.label, color: Pal.faint)),
+            const Padding(
+              padding: EdgeInsets.only(top: Space.l),
+              child: EmptyNote('Voices and presets appear here once the Striso is connected.'),
             )
           else if (ctl.voices.isEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: Space.m),
-              child: Text('This firmware has no voice list (a single voice build).', style: ui(TypeSize.label, color: Pal.faint)),
+            const Padding(
+              padding: EdgeInsets.only(top: Space.l),
+              child: EmptyNote('This firmware has no voice list (a single voice build).'),
             )
           else ...[
             const SizedBox(height: Space.l),
-            Text(info.label, style: ui(TypeSize.title + 2, weight: FontWeight.w600)),
-            if (info.blurb.isNotEmpty) Text(info.blurb, style: ui(TypeSize.caption, color: Pal.faint)),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(info.label, style: ui(TypeSize.title, weight: FontWeight.w600)),
+                ),
+                SizedBox(
+                  width: Sizes.control,
+                  height: Sizes.control,
+                  child: PopupMenuButton<String>(
+                    tooltip: 'More',
+                    icon: const Icon(Icons.more_horiz, size: 16, color: Pal.text3),
+                    padding: EdgeInsets.zero,
+                    iconSize: 16,
+                    constraints: const BoxConstraints(minWidth: 160),
+                    onSelected: (v) => v == 'refresh' ? ctl.syncVoice() : null,
+                    itemBuilder: (_) => [
+                      PopupMenuItem(
+                        value: 'refresh',
+                        enabled: ctl.connected,
+                        height: Sizes.row,
+                        child: Text('Read the voice list again', style: ui(TypeSize.body)),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (info.blurb.isNotEmpty) Text(info.blurb, style: ui(TypeSize.small, color: Pal.text3)),
             const SizedBox(height: Space.s),
             for (final v in list)
-              _PresetRow(
+              ListRow(
                 key: Key('preset-${v.index}'),
                 label: v.preset ?? info.label,
-                trailing: '${v.index}',
                 current: v.index == ctl.current,
                 pending: v.index == ctl.pendingVoice,
+                dot: col,
                 tooltip: '${v.name} (voice ${v.index})',
                 onTap: () => ctl.selectVoice(v.index),
               ),
-            const SizedBox(height: Space.l),
-            Text('My sounds', style: ui(TypeSize.label, weight: FontWeight.w600)),
+            const SizedBox(height: Space.xl),
+            const Micro('My sounds'),
             const SizedBox(height: Space.xs),
             if (mine.isEmpty)
-              Text('Sounds you save for ${info.label} show here (Sound tab, My sounds).', style: ui(TypeSize.caption, color: Pal.faint))
-            else
-              for (final p in mine)
-                _PresetRow(
-                  label: p.name,
-                  trailing: p.voice.contains(':') ? p.voice.split(':').last : '',
-                  current: ctl.lastSound == p.name,
-                  tooltip: 'Recall "${p.name}" (${p.voice})',
-                  onTap: () => ctl.recallPreset(p),
-                  mine: true,
-                ),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: Space.xs),
+                child: Text('Sounds you save appear here.', style: ui(TypeSize.body, color: Pal.text2)),
+              ),
+            for (final p in mine)
+              ListRow(
+                label: p.name,
+                current: ctl.lastSound == p.name,
+                edited: ctl.lastSound == p.name && ctl.edited,
+                dot: col,
+                tooltip: 'Recall "${p.name}" (${p.voice})',
+                onTap: () => ctl.recallPreset(p),
+                menu: (context) => soundMenu(context, ctl, p),
+              ),
+            ListRow(label: '+ Save current', ghost: true, tooltip: 'Save the sound as it is now (Ctrl+S)', onTap: () => saveSoundAs(context, ctl)),
           ],
         ];
-        final content = Padding(
-          padding: const EdgeInsets.fromLTRB(Space.l, 0, Space.l, Space.l),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: body),
-        );
+        final content = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: body);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(Space.l, Space.m, Space.l, 0),
+            SizedBox(
+              height: Sizes.toolbar,
               child: Row(
                 children: [
-                  Text('Voices', style: ui(TypeSize.title, weight: FontWeight.w600)),
-                  const Spacer(),
-                  Btn('Refresh', kind: BtnKind.quiet, small: true, tooltip: 'Read the voice list again', onPressed: ctl.connected ? ctl.syncVoice : null),
+                  Expanded(
+                    child: Wrap(
+                      spacing: buttonSize < 24 ? Space.xs : Space.s - 2,
+                      runSpacing: Space.xs,
+                      children: [
+                        for (final (i, e) in engines.indexed)
+                          EngineDot(
+                            e: e,
+                            on: e.engine == cur && ctl.connected,
+                            size: buttonSize,
+                            number: i < 7 ? i + 1 : null,
+                            onTap: () => ctl.selectEngine(e.engine),
+                          ),
+                      ],
+                    ),
+                  ),
                 ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(Space.l, Space.m, Space.l, 0),
-              child: Wrap(
-                spacing: Space.xs,
-                runSpacing: Space.xs,
-                children: [for (final e in engines) EngineDot(e: e, on: e.engine == cur, onTap: () => ctl.selectEngine(e.engine))],
               ),
             ),
             if (scroll) Expanded(child: SingleChildScrollView(child: content)) else content,
@@ -142,29 +203,73 @@ class EnginePanel extends StatelessWidget {
   }
 }
 
-/// An engine button in its voice key's led colour, like the row of voice keys on the Striso.
+/// Save the current sound under a name.
+Future<void> saveSoundAs(BuildContext context, AppController ctl) async {
+  if (!ctl.connected || ctl.voiceName.isEmpty) {
+    ctl.toast('Connect first: a sound is saved from the board', 'warn');
+    return;
+  }
+  final name = await askName(context, title: 'Save the sound', initial: ctl.lastSound ?? '${ctl.voiceName.split(':').last} ');
+  if (name != null) ctl.saveCurrent(name);
+}
+
+/// Recall, Rename, Export, Delete for one of your sounds.
+List<PopupMenuEntry<void>> soundMenu(BuildContext context, AppController ctl, Preset p) {
+  PopupMenuItem<void> item(String label, VoidCallback f, {Color color = Pal.text1}) => PopupMenuItem<void>(
+    height: Sizes.row,
+    onTap: f,
+    child: Text(label, style: ui(TypeSize.body, color: color)),
+  );
+  return [
+    item('Recall', () => ctl.recallPreset(p)),
+    item('Rename', () async {
+      final n = await askName(context, title: 'Rename "${p.name}"', initial: p.name, action: 'Rename');
+      if (n != null) ctl.renamePreset(p, n);
+    }),
+    item('Export', () async {
+      try {
+        final loc = await getSaveLocation(
+          suggestedName: '${p.name.replaceAll(RegExp(r'[^\w\- ]'), '_')}.json',
+          acceptedTypeGroups: const [
+            XTypeGroup(label: 'JSON', extensions: ['json']),
+          ],
+        );
+        if (loc == null) return;
+        await File(loc.path).writeAsString(ctl.exportPreset(p));
+        ctl.toast('Exported "${p.name}"');
+      } catch (e) {
+        ctl.toast('Export failed: $e', 'error');
+      }
+    }),
+    item('Delete', () => ctl.deletePreset(p), color: Pal.error),
+  ];
+}
+
+/// An engine button: a ring in the engine colour, filled when selected (strisy's grey disc gets
+/// a dark centre dot); missing engines at 30%.
 class EngineDot extends StatefulWidget {
   final EngineButton e;
   final bool on;
+  final double size;
+  final int? number;
   final VoidCallback onTap;
-  const EngineDot({super.key, required this.e, required this.on, required this.onTap});
+  const EngineDot({super.key, required this.e, required this.on, required this.onTap, this.size = 24, this.number});
   @override
   State<EngineDot> createState() => _EngineDotState();
 }
-
-const _engineShort = {'strisy': 'St', 'va': 'VA', 'modal': 'Mo', 'bowed': 'Bo', 'wind': 'Wi', 'ep': 'EP', 'brass': 'Br', 'reed': 'Re', 'sine': 'Si'};
 
 class _EngineDotState extends State<EngineDot> {
   bool _hover = false;
   @override
   Widget build(BuildContext context) {
     final e = widget.e;
-    final col = rgb(e.color);
+    final col = engineColor(e.engine);
     final has = e.count > 0;
     final info = engineInfo(e.engine);
-    final short = _engineShort[e.engine] ?? (e.engine.length > 2 ? e.engine.substring(0, 2) : e.engine);
     return Tooltip(
-      message: has ? '${info.label}: ${e.count} preset${e.count == 1 ? '' : 's'}' : '${info.label}: not in this firmware',
+      message: has
+          ? '${info.label}${info.blurb.isNotEmpty ? ': ${info.blurb}' : ''} (${e.count} preset${e.count == 1 ? '' : 's'})${widget.number != null ? ' · key ${widget.number}' : ''}'
+          : '${info.label}: not in this firmware',
       child: MouseRegion(
         cursor: has ? SystemMouseCursors.click : SystemMouseCursors.basic,
         onEnter: (_) => setState(() => _hover = true),
@@ -173,20 +278,16 @@ class _EngineDotState extends State<EngineDot> {
           key: Key('engine-${e.engine}'),
           onTap: has ? widget.onTap : null,
           child: AnimatedContainer(
-            duration: Timing.fast,
-            width: 30,
-            height: 30,
+            duration: Timing.quick,
+            width: widget.size,
+            height: widget.size,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: widget.on ? col : col.withValues(alpha: has ? (_hover ? 0.28 : 0.14) : 0.05),
-              border: Border.all(color: has ? col : col.withValues(alpha: 0.3), width: widget.on ? 2 : 1.2),
-              boxShadow: widget.on ? [BoxShadow(color: col.withValues(alpha: 0.55), blurRadius: 12)] : null,
+              color: widget.on ? col : Colors.transparent,
+              border: Border.all(color: has ? col : col.withValues(alpha: 0.3), width: _hover && has && !widget.on ? 2 : 1.5),
             ),
-            child: Text(
-              short,
-              style: ui(TypeSize.caption, weight: FontWeight.w600, color: widget.on ? Pal.ink : (has ? Pal.text : Pal.faint)),
-            ),
+            child: widget.on && e.engine == 'strisy' ? const Pip(Pal.accentInk, size: 6) : null,
           ),
         ),
       ),
@@ -194,192 +295,151 @@ class _EngineDotState extends State<EngineDot> {
   }
 }
 
-class _PresetRow extends StatefulWidget {
-  final String label, trailing, tooltip;
-  final bool current, pending, mine;
+/// A 28 px list row: body text2; current text1 500 with a 6 px dot; pending at 50% with a thin
+/// bar; a `⋯` menu on hover; an accent dot when the recalled sound was edited since.
+class ListRow extends StatefulWidget {
+  final String label;
+  final String? tooltip;
+  final bool current, pending, ghost, edited, dotAlways;
+  final Color? dot;
   final VoidCallback onTap;
-  const _PresetRow({
+  final List<PopupMenuEntry<void>> Function(BuildContext)? menu;
+  const ListRow({
     super.key,
     required this.label,
-    required this.trailing,
-    required this.current,
-    required this.tooltip,
     required this.onTap,
+    this.tooltip,
+    this.current = false,
     this.pending = false,
-    this.mine = false,
+    this.ghost = false,
+    this.edited = false,
+    this.dotAlways = false,
+    this.dot,
+    this.menu,
   });
   @override
-  State<_PresetRow> createState() => _PresetRowState();
+  State<ListRow> createState() => _ListRowState();
 }
 
-class _PresetRowState extends State<_PresetRow> {
+class _ListRowState extends State<ListRow> {
   bool _hover = false;
   @override
   Widget build(BuildContext context) {
     final cur = widget.current;
-    return Tooltip(
-      message: widget.tooltip,
-      waitDuration: const Duration(milliseconds: 900),
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onEnter: (_) => setState(() => _hover = true),
-        onExit: (_) => setState(() => _hover = false),
-        child: GestureDetector(
-          onTap: widget.onTap,
-          child: AnimatedContainer(
-            duration: Timing.fast,
-            margin: const EdgeInsets.only(bottom: Space.xxs),
-            padding: const EdgeInsets.symmetric(horizontal: Space.m, vertical: Space.s),
-            decoration: BoxDecoration(
-              color: cur ? Pal.honeyDim : (_hover ? Pal.panel2 : Colors.transparent),
-              borderRadius: BorderRadius.circular(Radii.small),
-              border: Border.all(color: cur ? Pal.honey : Colors.transparent),
-            ),
-            child: Opacity(
-              opacity: widget.pending ? 0.6 : 1,
-              child: Row(
+    Widget row = MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: Timing.quick,
+          height: Sizes.row,
+          padding: const EdgeInsets.only(left: Space.xs, right: Space.xs),
+          decoration: BoxDecoration(color: _hover ? Pal.bg2 : Colors.transparent, borderRadius: BorderRadius.circular(Radii.small)),
+          child: Stack(
+            children: [
+              Row(
                 children: [
-                  if (widget.mine) ...[const Icon(Icons.bookmark_outline, size: 14, color: Pal.muted), const SizedBox(width: Space.s)],
+                  SizedBox(width: 14, child: (cur || widget.dotAlways) && widget.dot != null ? Center(child: Pip(widget.dot!)) : null),
                   Expanded(
-                    child: Text(
-                      widget.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: ui(TypeSize.body, color: cur ? Pal.honey : Pal.text, weight: cur ? FontWeight.w600 : FontWeight.w400),
+                    child: Opacity(
+                      opacity: widget.pending ? 0.5 : 1,
+                      child: Text(
+                        widget.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: ui(
+                          TypeSize.body,
+                          color: widget.ghost ? (_hover ? Pal.text1 : Pal.text3) : (cur ? Pal.text1 : Pal.text2),
+                          weight: cur ? FontWeight.w500 : FontWeight.w400,
+                        ),
+                      ),
                     ),
                   ),
-                  Text(widget.trailing, style: ui(TypeSize.micro, color: Pal.faint)),
+                  if (widget.edited)
+                    const Padding(
+                      padding: EdgeInsets.only(right: Space.xs),
+                      child: Pip(Pal.accent, size: 5),
+                    ),
+                  if (widget.menu != null)
+                    Opacity(
+                      opacity: _hover ? 1 : 0,
+                      child: PopupMenuButton<void>(
+                        tooltip: 'More',
+                        padding: EdgeInsets.zero,
+                        iconSize: 16,
+                        icon: const Icon(Icons.more_horiz, size: 16, color: Pal.text2),
+                        itemBuilder: widget.menu!,
+                      ),
+                    ),
                 ],
               ),
-            ),
+              if (widget.pending)
+                const Positioned(
+                  left: 14,
+                  right: 0,
+                  bottom: 2,
+                  child: SizedBox(
+                    height: 1,
+                    child: LinearProgressIndicator(minHeight: 1, color: Pal.accent, backgroundColor: Colors.transparent),
+                  ),
+                ),
+            ],
           ),
         ),
       ),
     );
+    if (widget.tooltip != null) row = Tooltip(message: widget.tooltip!, waitDuration: const Duration(milliseconds: 900), child: row);
+    return row;
   }
 }
 
 // ---------------------------------------------------------------------------------------------
-// the board with its toolbar, chord readout and progression
+// the board with its toolbar and the harmony strip
 
 class BoardColumn extends StatelessWidget {
   final AppController ctl;
-  const BoardColumn(this.ctl, {super.key});
+  final bool strip;
+  const BoardColumn(this.ctl, {super.key, this.strip = false});
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        PlayToolbar(ctl),
-        Expanded(
-          child: Stack(
-            children: [
-              Positioned.fill(child: BoardView(ctl)),
-              Positioned.fill(child: InviteCard(ctl)),
-            ],
-          ),
-        ),
-        HarmonyReadout(ctl),
-        Progression(ctl),
-        ProbeLine(ctl),
+        PlayToolbar(ctl, showSound: strip),
+        Expanded(child: BoardStage(ctl)),
+        if (strip) KnobStrip(ctl),
+        HarmonyStrip(ctl, compact: strip),
       ],
     );
   }
 }
 
-class PlayToolbar extends StatelessWidget {
+/// The board, dimmed while disconnected (45%) or saving (60%), with the inline invite.
+class BoardStage extends StatelessWidget {
   final AppController ctl;
-  const PlayToolbar(this.ctl, {super.key});
-
-  static const _names = [
-    (Names.octave, 'Labels: D4'),
-    (Names.letters, 'Labels: D'),
-    (Names.degrees, 'Labels: 1 2 3'),
-    (Names.solfege, 'Labels: do re'),
-    (Names.off, 'Labels: none'),
-  ];
+  final bool overlays;
+  final double labelScale;
+  const BoardStage(this.ctl, {super.key, this.overlays = false, this.labelScale = 1});
 
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: ctl,
-      builder: (context, _) => Padding(
-        padding: const EdgeInsets.fromLTRB(Space.l, Space.m, Space.l, Space.xs),
-        child: Row(
-          children: [
-            Expanded(child: LiveStats(ctl)),
-            SmallSelect<int>(
-              width: 62,
-              value: ctl.keyRoot,
-              items: ctl.rootChoices,
-              onChanged: ctl.keyScale == 'off' ? null : (v) => ctl.setKey(root: v),
-            ),
-            const SizedBox(width: Space.xs),
-            SmallSelect<String>(
-              key: const Key('key-scale'),
-              value: ctl.keyScale,
-              items: [for (final id in scaleOrder) (id, id == 'off' ? 'No key' : scales[id]!.label)],
-              onChanged: (v) => ctl.setKey(scale: v),
-            ),
-            const SizedBox(width: Space.s),
-            Tooltip(
-              message: 'Key labels: note names with octave, note names, scale degrees or solfège (with a key), or none',
-              waitDuration: const Duration(milliseconds: 900),
-              child: SmallSelect<Names>(key: const Key('names'), value: ctl.names, items: _names, onChanged: ctl.setNames),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Keys down, messages per second (and a silent stream), the transposition.
-class LiveStats extends StatelessWidget {
-  final AppController ctl;
-  const LiveStats(this.ctl, {super.key});
-
-  Widget _stat(String b, String rest, {Color? color}) => Text.rich(
-    TextSpan(
-      style: ui(TypeSize.small, color: color ?? Pal.muted),
-      children: [
-        TextSpan(text: b, style: ui(TypeSize.small, color: color ?? Pal.text, weight: FontWeight.w600)),
-        TextSpan(text: rest),
-      ],
-    ),
-  );
-
-  @override
-  Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: ctl.stats,
       builder: (context, _) {
-        final t = ctl.live.transpose;
-        final stalled = ctl.streamStalled;
-        return Wrap(
-          spacing: Space.l,
-          crossAxisAlignment: WrapCrossAlignment.center,
+        final opacity = ctl.saving ? 0.6 : (ctl.connected ? 1.0 : 0.45);
+        return Stack(
           children: [
-            _stat('${ctl.live.activeCount()}', ' keys down'),
-            Tooltip(
-              message: ctl.diagnosticsText().split('  |  ').join('\n'),
-              child: _stat('${ctl.live.rate.round()}', stalled ? ' messages/s (stream silent)' : ' messages/s', color: stalled ? Pal.honey : null),
-            ),
-            if (t != 0)
-              Tooltip(
-                message: 'Transposition guessed from the octave buttons. Click to reset to D4 in the middle.',
-                child: MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: GestureDetector(
-                    onTap: ctl.resetTranspose,
-                    child: Text(
-                      'Transposed ${t > 0 ? '+' : '−'}${t.abs() % 12 == 0 ? '${t.abs() ~/ 12} oct' : '${t.abs()} st'}',
-                      style: ui(TypeSize.small, color: Pal.honey),
-                    ),
-                  ),
-                ),
+            Positioned.fill(
+              child: AnimatedOpacity(
+                duration: Timing.open,
+                opacity: opacity,
+                child: BoardView(ctl, overlays: overlays, labelScale: labelScale),
               ),
+            ),
+            if (!ctl.saving) Positioned.fill(child: InviteCard(ctl)),
           ],
         );
       },
@@ -387,13 +447,165 @@ class LiveStats extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------------------------
-// the main knobs
-
-class MainKnobs extends StatelessWidget {
+class PlayToolbar extends StatelessWidget {
   final AppController ctl;
-  final bool scroll;
-  const MainKnobs(this.ctl, {super.key, this.scroll = true});
+  final bool showSound;
+  const PlayToolbar(this.ctl, {super.key, this.showSound = false});
+
+  static const names = [
+    (Names.octave, 'D4  note and octave'),
+    (Names.letters, 'D  note'),
+    (Names.degrees, '1 2 3  degrees'),
+    (Names.solfege, 'do re  solfège'),
+    (Names.off, '—  no labels'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: ctl,
+      builder: (context, _) {
+        final t = ctl.live.transpose;
+        return SizedBox(
+          height: Sizes.toolbar,
+          child: Row(
+            children: [
+              KeyPicker(ctl),
+              const SizedBox(width: Space.s),
+              Tooltip(
+                message: 'Key labels: note names with octave, note names, scale degrees or solfège (with a key), or none',
+                waitDuration: const Duration(milliseconds: 900),
+                child: SmallSelect<Names>(
+                  key: const Key('names'),
+                  value: ctl.names,
+                  items: [for (final (n, l) in names) (n, l.split('  ').first)],
+                  onChanged: ctl.setNames,
+                ),
+              ),
+              if (t != 0) ...[
+                const SizedBox(width: Space.s),
+                Btn(
+                  'Transposed ${t > 0 ? '+' : '−'}${t.abs() % 12 == 0 ? '${t.abs() ~/ 12} oct' : '${t.abs()} st'}  ✕',
+                  kind: BtnKind.ghost,
+                  tooltip: 'Guessed from the octave buttons. Click to reset to D4 in the middle.',
+                  onPressed: ctl.resetTranspose,
+                ),
+              ],
+              const SizedBox(width: Space.l),
+              Expanded(
+                child: Align(alignment: Alignment.centerRight, child: HoverReadout(ctl)),
+              ),
+              if (showSound && ctl.voiceName.isNotEmpty) ...[const SizedBox(width: Space.l), SoundName(ctl, size: TypeSize.title)],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Key root (disabled while the scale is Off) and the scale.
+class KeyPicker extends StatelessWidget {
+  final AppController ctl;
+  const KeyPicker(this.ctl, {super.key});
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      SmallSelect<int>(
+        width: 64,
+        value: ctl.keyRoot,
+        items: ctl.rootChoices,
+        onChanged: ctl.keyScale == 'off' ? null : (v) => ctl.setKey(root: v),
+      ),
+      const SizedBox(width: Space.xs),
+      ScalePicker(
+        value: ctl.keyScale,
+        onChanged: (v) => ctl.setKey(scale: v),
+      ),
+    ],
+  );
+}
+
+/// The current sound: name in sound type, the engine in its colour, DEMO in the demo, an accent
+/// dot when edited.
+class SoundName extends StatelessWidget {
+  final AppController ctl;
+  final double size;
+  final bool stacked;
+  const SoundName(this.ctl, {super.key, this.size = TypeSize.sound, this.stacked = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final engine = ctl.voiceName.isEmpty ? '' : ctl.voiceName.split(':').first;
+    if (stacked) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            ctl.lastSound ?? ctl.nowPreset,
+            key: const Key('now-preset'),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: ui(size, weight: FontWeight.w500, color: ctl.voiceName.isEmpty ? Pal.text3 : Pal.text1),
+          ),
+          Row(
+            children: [
+              if (engine.isNotEmpty) Text(engineInfo(engine).label.toLowerCase(), style: ui(TypeSize.small, color: engineColor(engine))),
+              if (ctl.mode == ConnMode.demo && ctl.connected) ...[
+                const SizedBox(width: Space.s),
+                Text(
+                  'DEMO',
+                  key: const Key('demo-chip'),
+                  style: microStyle(color: Pal.demo),
+                ),
+              ],
+            ],
+          ),
+        ],
+      );
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: [
+        Flexible(
+          child: Text(
+            ctl.lastSound ?? ctl.nowPreset,
+            key: const Key('now-preset'),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: ui(size, weight: FontWeight.w500, color: ctl.voiceName.isEmpty ? Pal.text3 : Pal.text1),
+          ),
+        ),
+        if (engine.isNotEmpty) ...[
+          const SizedBox(width: Space.s),
+          Text(engineInfo(engine).label.toLowerCase(), style: ui(TypeSize.small, color: engineColor(engine))),
+        ],
+        if (ctl.mode == ConnMode.demo && ctl.connected) ...[
+          const SizedBox(width: Space.s),
+          Text(
+            'DEMO',
+            key: const Key('demo-chip'),
+            style: microStyle(color: Pal.demo),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// hero knobs
+
+/// The effect's on/off parameter (demo board: chorus, delay, reverb, trem), if it has one.
+Param? fxSwitch(AppController ctl, Param p) => ctl.params[1]!.params.where((q) => q.group == p.group && q.kind == Kind.onOff && q != p).firstOrNull;
+
+class HeroPanel extends StatelessWidget {
+  final AppController ctl;
+  final double knobSize;
+  const HeroPanel(this.ctl, {super.key, this.knobSize = Sizes.knobHero});
 
   @override
   Widget build(BuildContext context) {
@@ -402,75 +614,73 @@ class MainKnobs extends StatelessWidget {
       builder: (context, _) {
         final knobs = ctl.mainKnobs();
         final fx = ctl.mainFx();
-        Widget grid(List<Param> ps, int t, Color accent) => Wrap(
-          spacing: Space.xs,
-          runSpacing: Space.s,
+        Widget grid(List<Param> ps, int t) => Wrap(
+          spacing: Space.s,
+          runSpacing: Space.m,
           children: [
             for (final p in ps)
               p.kind == Kind.onOff
-                  ? ToggleCtl(ctl: ctl, target: t, p: p, accent: accent, accentDim: accent.withValues(alpha: 0.16))
-                  : Knob(ctl: ctl, target: t, p: p, accent: accent),
+                  ? ToggleCtl(ctl: ctl, target: t, p: p)
+                  : Knob(ctl: ctl, target: t, p: p, size: knobSize, enable: t == 1 ? fxSwitch(ctl, p) : null),
           ],
         );
-        final body = Padding(
-          padding: const EdgeInsets.fromLTRB(Space.l, 0, Space.l, Space.l),
+        return SingleChildScrollView(
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              SoundName(ctl, stacked: true),
+              const SizedBox(height: Space.l),
               if (knobs.isEmpty && fx.isEmpty)
-                Text(
+                EmptyNote(
                   !ctl.connected
-                      ? 'The main knobs of the voice show here once the Striso is connected.'
+                      ? "Connect to see this voice's parameters."
                       : ctl.listsLoading
                       ? 'Reading the parameters from the board…'
                       : 'This voice has no live parameters.',
-                  style: ui(TypeSize.label, color: Pal.faint),
                 ),
-              if (knobs.isNotEmpty) ...[
-                const SizedBox(height: Space.m),
-                Text('Voice', style: ui(TypeSize.small, color: Pal.honey)),
-                const SizedBox(height: Space.xs),
-                grid(knobs, 0, Pal.honey),
-              ],
-              if (fx.isNotEmpty) ...[
-                const SizedBox(height: Space.l),
-                Text('Effects', style: ui(TypeSize.small, color: Pal.glacier)),
-                const SizedBox(height: Space.xs),
-                grid(fx, 1, Pal.glacier),
-              ],
+              if (knobs.isNotEmpty) grid(knobs, 0),
+              if (fx.isNotEmpty) ...[const SizedBox(height: Space.xl), grid(fx, 1)],
               if (ctl.hasSound) ...[
-                const SizedBox(height: Space.l),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Btn(
-                    'All ${ctl.params[0]!.params.length + ctl.params[1]!.params.length} parameters',
-                    key: const Key('to-sound'),
-                    small: true,
-                    kind: BtnKind.quiet,
-                    tooltip: 'The full racks, mutate, morph and your sounds',
-                    onPressed: () => ctl.setTab(AppTab.sound),
-                  ),
-                ),
+                const SizedBox(height: Space.xl),
+                Btn('Edit in Sound →', key: const Key('to-sound'), kind: BtnKind.ghost, onPressed: () => ctl.setTab(AppTab.sound)),
               ],
             ],
           ),
         );
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(Space.l, Space.m, Space.l, 0),
-              child: Row(
-                children: [
-                  Text('Sound', style: ui(TypeSize.title, weight: FontWeight.w600)),
-                  const Spacer(),
-                  Btn('Undo', small: true, kind: BtnKind.quiet, tooltip: 'Undo (Ctrl+Z)', onPressed: ctl.history.canUndo ? ctl.undo : null),
-                  Btn('Redo', small: true, kind: BtnKind.quiet, tooltip: 'Redo (Ctrl+Shift+Z)', onPressed: ctl.history.canRedo ? ctl.redo : null),
-                ],
-              ),
-            ),
-            if (scroll) Expanded(child: SingleChildScrollView(child: body)) else body,
-          ],
+      },
+    );
+  }
+}
+
+/// 1000-1279 px: the hero knobs and the effect amounts in one row under the board.
+class KnobStrip extends StatelessWidget {
+  final AppController ctl;
+  const KnobStrip(this.ctl, {super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: ctl,
+      builder: (context, _) {
+        final knobs = [...ctl.mainKnobs(), ...ctl.mainFx()];
+        if (knobs.isEmpty) return const SizedBox.shrink();
+        return SizedBox(
+          height: Sizes.knobStrip + 34,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            children: [
+              for (final p in knobs)
+                p.kind == Kind.onOff
+                    ? ToggleCtl(ctl: ctl, target: ctl.params[1]!.params.contains(p) ? 1 : 0, p: p)
+                    : Knob(
+                        ctl: ctl,
+                        target: ctl.params[1]!.params.contains(p) ? 1 : 0,
+                        p: p,
+                        size: Sizes.knobStrip,
+                        enable: ctl.params[1]!.params.contains(p) ? fxSwitch(ctl, p) : null,
+                      ),
+            ],
+          ),
         );
       },
     );

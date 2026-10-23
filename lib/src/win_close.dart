@@ -21,7 +21,10 @@ int _enum(int hwnd, int _) {
 
 final _user32 = DynamicLibrary.open('user32.dll');
 final _kernel32 = DynamicLibrary.open('kernel32.dll');
-final _enumWindows = _user32.lookupFunction<Int32 Function(Pointer<NativeFunction<_EnumProcN>>, IntPtr), int Function(Pointer<NativeFunction<_EnumProcN>>, int)>('EnumWindows');
+final _enumWindows = _user32
+    .lookupFunction<Int32 Function(Pointer<NativeFunction<_EnumProcN>>, IntPtr), int Function(Pointer<NativeFunction<_EnumProcN>>, int)>(
+      'EnumWindows',
+    );
 final _getPid = _user32.lookupFunction<Uint32 Function(IntPtr, Pointer<Uint32>), int Function(int, Pointer<Uint32>)>('GetWindowThreadProcessId');
 final _isVisibleOrMin = _user32.lookupFunction<Int32 Function(IntPtr), int Function(int)>('IsWindowVisible');
 final _getParent = _user32.lookupFunction<IntPtr Function(IntPtr), int Function(int)>('GetParent');
