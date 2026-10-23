@@ -362,4 +362,82 @@ void main() {
     expect(kf.estimate()!.name, 'B♭ major');
     expect(KeyFinder().estimate(), isNull);
   });
+  group('scale library', () {
+    String spelled(String id, int pc) {
+      final k = makeKey(pc, id)!;
+      return [for (final f in scales[id]!.fifths!) tpcName(k.tonic + f)].join(' ');
+    }
+
+    test('spellings in their keys, sharps or flats by the smaller signature', () {
+      expect(spelled('phrygdom', 6), 'F♯ G A♯ B C♯ D E');
+      expect(spelled('neapmin', 3), 'E♭ F♭ G♭ A♭ B♭ C♭ D');
+      expect(spelled('altered', 2), 'D E♭ F G♭ A♭ B♭ C');
+      expect(spelled('bebopdom', 0), 'C D E F G A B♭ B');
+      expect(spelled('hungmin', 9), 'A B C D♯ E F G♯');
+      expect(spelled('lyddom', 7), 'G A B C♯ D E F');
+      expect(spelled('harmmajor', 10), 'B♭ C D E♭ F G♭ A');
+      expect(spelled('bh6dim', 0), 'C D E F G A♭ A B');
+      expect(spelled('hirajoshi', 4), 'E F♯ G B C');
+      expect(spelled('ultralocrian', 2), 'D E♭ F G♭ A♭ B♭ C♭');
+      expect(spelled('enigmatic', 0), 'C D♭ E F♯ G♯ A♯ B');
+      expect(spelled('dorian4', 2), 'D E F G♯ A B C');
+      expect(spelled('neapmaj', 7), 'G A♭ B♭ C D E F♯');
+      expect(spelled('bebopdor', 2), 'D E F F♯ G A B C');
+      expect(spelled('insen', 4), 'E F A B D');
+      expect(spelled('augmented', 0), 'C E♭ E G G♯ B');
+      expect(spelled('dblharm', 4), 'E F G♯ A B C D♯');
+      expect(spelled('chromatic', 0).split(' ').length, 12);
+    });
+
+    test('formulas, groups and every scale distinct and numbered', () {
+      expect(scaleFormula('harmonic'), '1 2 ♭3 4 5 ♭6 ♮7');
+      expect(scaleFormula('lydaug'), '1 2 3 ♯4 ♯5 6 7');
+      expect(scaleFormula('ultralocrian'), '1 ♭2 ♭3 ♭4 ♭5 ♭6 𝄫7');
+      expect(scaleFormula('bh7b5dim'), '1 2 3 4 ♭5 ♭6 ♭7 ♮7');
+      expect(scales.length, greaterThanOrEqualTo(60));
+      for (final (g, ids) in scaleGroups) {
+        for (final id in ids) {
+          expect(scales.containsKey(id), isTrue, reason: '$g: $id');
+        }
+      }
+      for (final id in scaleOrder.skip(1)) {
+        final f = scales[id]!.fifths!;
+        expect({for (final x in f) mod(x * 7, 12)}.length, f.length, reason: '$id has two notes on one pitch');
+        expect(f.first, 0, reason: id);
+        for (var pc = 0; pc < 12; pc++) {
+          final k = makeKey(pc, id)!;
+          expect(k.degreeFifths.length, 7, reason: id);
+        }
+      }
+    });
+
+    test('every chord in every scale and key gets a reading, never a crash', () {
+      const chords = ['C E G', 'D F A C', 'G B D F', 'F A C', 'B D F', 'E G# B', 'Db F Ab', 'Ab C Eb F#', 'C Eb Gb Bbb', 'C D'];
+      for (final id in scaleOrder.skip(1)) {
+        for (final pc in [0, 3, 6, 9, 10]) {
+          final k = makeKey(pc, id)!;
+          for (final ch in chords) {
+            final a = analyze(placed(ch), k);
+            expect(a, isNotNull, reason: '$id $pc $ch');
+            if (a!.kind == HarmonyKind.chord) expect(a.roman, isNotNull, reason: '$id $pc $ch');
+          }
+        }
+      }
+    });
+
+    test('Barry Harris: alternate tones of the sixth chord and the diminished chord', () {
+      final c = makeKey(0, 'bh6dim')!;
+      expect(barryHarrisText(c), 'C6 (C E G A) + B°7 (B D F A♭)');
+      expect(barryHarrisRole(c, parseNote('E').tpc), BarryHarrisRole.chord);
+      expect(barryHarrisRole(c, parseNote('Ab').tpc), BarryHarrisRole.dim);
+      expect(barryHarrisRole(c, parseNote('F#').tpc), isNull);
+      expect(barryHarrisText(makeKey(9, 'bhm6dim')), 'Am6 (A C E F♯) + G♯°7 (G♯ B D F)');
+      expect(barryHarrisText(makeKey(7, 'bh7dim')), 'G7 (G B D F) + F♯°7 (F♯ A C E♭)');
+      expect(barryHarrisText(makeKey(0, 'bh7b5dim')), 'C7♭5 (C E G♭ B♭) + B°7 (B D F A♭)');
+      expect(barryHarrisText(makeKey(0, 'major')), isNull);
+      // a C6 chord in C major 6th diminished is still I
+      expect(roman('C E G A', 'C major'), 'Iadd6');
+      expect(analyze(placed('C E G A'), c)!.roman!.text, 'Iadd6');
+    });
+  });
 }

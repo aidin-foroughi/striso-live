@@ -63,45 +63,254 @@ class ScaleDef {
   final String? ref; // 'major' | 'minor' | null
   final int sig;
   final bool raise;
-  const ScaleDef(this.label, this.key, this.fifths, this.ref, this.sig, {this.raise = false});
+
+  /// The 7-degree scale that numbers the chords of a scale that has not 7 notes (bebop, Barry
+  /// Harris, pentatonics); null: major or natural minor by [ref].
+  final List<int>? parent;
+
+  /// Barry Harris scales: the tones of the 6th (or 7th) chord; the others form the diminished
+  /// seventh chord.
+  final List<int>? chordTones;
+  final String? chordName, dimName;
+
+  const ScaleDef(
+    this.label,
+    this.key,
+    this.fifths,
+    this.ref,
+    this.sig, {
+    this.raise = false,
+    this.parent,
+    this.chordTones,
+    this.chordName,
+    this.dimName,
+  });
 }
 
-const Map<String, ScaleDef> scales = {
-  'off': ScaleDef('Off', '', null, null, 0),
-  'major': ScaleDef('Major', 'major', _major, 'major', 0),
-  'minor': ScaleDef('Natural minor', 'minor', _natMinor, 'minor', -3, raise: true),
-  'harmonic': ScaleDef('Harmonic minor', 'harmonic minor', [0, 2, -3, -1, 1, -4, 5], 'minor', -3, raise: true),
-  'melodic': ScaleDef('Melodic minor', 'melodic minor', [0, 2, -3, -1, 1, 3, 5], 'minor', -3, raise: true),
-  'dorian': ScaleDef('Dorian', 'dorian', [0, 2, -3, -1, 1, 3, -2], 'minor', -2),
-  'phrygian': ScaleDef('Phrygian', 'phrygian', [0, -5, -3, -1, 1, -4, -2], 'minor', -4),
-  'lydian': ScaleDef('Lydian', 'lydian', [0, 2, 4, 6, 1, 3, 5], 'major', 1),
-  'mixolydian': ScaleDef('Mixolydian', 'mixolydian', [0, 2, 4, -1, 1, 3, -2], 'major', -1),
-  'locrian': ScaleDef('Locrian', 'locrian', [0, -5, -3, -1, -6, -4, -2], 'minor', -5),
-  'majpent': ScaleDef('Major pentatonic', 'major pentatonic', [0, 2, 4, 1, 3], 'major', 0),
-  'minpent': ScaleDef('Minor pentatonic', 'minor pentatonic', [0, -3, -1, 1, -2], 'minor', -3, raise: true),
-  'blues': ScaleDef('Blues', 'blues', [0, -3, -1, -6, 1, -2], 'minor', -3, raise: true),
-  'whole': ScaleDef('Whole tone', 'whole tone', [0, 2, 4, 6, 8, 10], null, 0),
-  'dimhw': ScaleDef('Diminished (half-whole)', 'half-whole diminished', [0, -5, -3, 4, 6, 1, 3, -2], null, 0),
-  'dimwh': ScaleDef('Diminished (whole-half)', 'whole-half diminished', [0, 2, -3, -1, -6, -4, 3, 5], null, 0),
+// line-of-fifths position of each major-scale degree above the tonic: 1 2 3 4 5 6 7
+const List<int> _degreeFifths = [0, 2, 4, -1, 1, 3, 5];
+
+/// A degree formula as written by musicians ("1 2 b3 4 5 b6 7", "#4", "bb7", "n7" for a natural)
+/// to line-of-fifths offsets from the tonic, in scale order.
+List<int> formulaFifths(String formula) {
+  final out = <int>[];
+  for (final t in formula.trim().split(RegExp(r'\s+'))) {
+    final m = RegExp(r'^(bb|b|##|#|x|n)?([1-7])$').firstMatch(t);
+    if (m == null) throw FormatException('bad scale degree "$t" in "$formula"');
+    final acc = switch (m[1]) {
+      'bb' => -2,
+      'b' => -1,
+      '#' => 1,
+      '##' || 'x' => 2,
+      _ => 0,
+    };
+    out.add(_degreeFifths[int.parse(m[2]!) - 1] + 7 * acc);
+  }
+  return out;
+}
+
+List<int> _f(String formula) => formulaFifths(formula);
+
+/// A scale from its formula; the key signature centres the tonic spelling (fewest sharps/flats).
+ScaleDef _scale(
+  String label,
+  String key,
+  String formula, {
+  String? ref,
+  bool raise = false,
+  String? parent,
+  String? chord,
+  String? chordName,
+  String? dimName,
+}) {
+  final fifths = _f(formula);
+  final mean = fifths.reduce((a, b) => a + b) / fifths.length;
+  final third = fifths.contains(-3) && !fifths.contains(4)
+      ? 'minor'
+      : fifths.contains(4)
+      ? 'major'
+      : null;
+  return ScaleDef(
+    label,
+    key,
+    fifths,
+    ref ?? third,
+    mean.round() - 2,
+    raise: raise,
+    parent: parent != null ? _f(parent) : null,
+    chordTones: chord != null ? _f(chord) : null,
+    chordName: chordName,
+    dimName: dimName,
+  );
+}
+
+const _mixolydian = '1 2 3 4 5 6 b7';
+const _ionian = '1 2 3 4 5 6 7';
+const _aeolian = '1 2 b3 4 5 b6 b7';
+
+/// Every scale by id. The first sixteen are the app's original ones (unchanged spellings).
+final Map<String, ScaleDef> scales = {
+  'off': const ScaleDef('Off', '', null, null, 0),
+  'major': const ScaleDef('Major', 'major', _major, 'major', 0),
+  'minor': const ScaleDef('Natural minor', 'minor', _natMinor, 'minor', -3, raise: true),
+  'harmonic': const ScaleDef('Harmonic minor', 'harmonic minor', [0, 2, -3, -1, 1, -4, 5], 'minor', -3, raise: true),
+  'melodic': const ScaleDef('Melodic minor', 'melodic minor', [0, 2, -3, -1, 1, 3, 5], 'minor', -3, raise: true),
+  'dorian': const ScaleDef('Dorian', 'dorian', [0, 2, -3, -1, 1, 3, -2], 'minor', -2),
+  'phrygian': const ScaleDef('Phrygian', 'phrygian', [0, -5, -3, -1, 1, -4, -2], 'minor', -4),
+  'lydian': const ScaleDef('Lydian', 'lydian', [0, 2, 4, 6, 1, 3, 5], 'major', 1),
+  'mixolydian': const ScaleDef('Mixolydian', 'mixolydian', [0, 2, 4, -1, 1, 3, -2], 'major', -1),
+  'locrian': const ScaleDef('Locrian', 'locrian', [0, -5, -3, -1, -6, -4, -2], 'minor', -5),
+  'majpent': const ScaleDef('Major pentatonic', 'major pentatonic', [0, 2, 4, 1, 3], 'major', 0),
+  'minpent': const ScaleDef('Minor pentatonic', 'minor pentatonic', [0, -3, -1, 1, -2], 'minor', -3, raise: true),
+  'blues': const ScaleDef('Minor blues', 'blues', [0, -3, -1, -6, 1, -2], 'minor', -3, raise: true),
+  'whole': const ScaleDef('Whole tone', 'whole tone', [0, 2, 4, 6, 8, 10], null, 0),
+  'dimhw': const ScaleDef('Diminished (half-whole)', 'half-whole diminished', [0, -5, -3, 4, 6, 1, 3, -2], null, 0),
+  'dimwh': const ScaleDef('Diminished (whole-half)', 'whole-half diminished', [0, 2, -3, -1, -6, -4, 3, 5], null, 0),
+  // modes of major: aliases
+  'ionian': const ScaleDef('Ionian (major)', 'ionian', _major, 'major', 0),
+  'aeolian': const ScaleDef('Aeolian (natural minor)', 'aeolian', _natMinor, 'minor', -3, raise: true),
+  // melodic minor modes
+  'dorianb2': _scale('Dorian ♭2 (Phrygian ♮6)', 'dorian ♭2', '1 b2 b3 4 5 6 b7'),
+  'lydaug': _scale('Lydian augmented', 'lydian augmented', '1 2 3 #4 #5 6 7'),
+  'lyddom': _scale('Lydian dominant', 'lydian dominant', '1 2 3 #4 5 6 b7'),
+  'mixob6': _scale('Mixolydian ♭6', 'mixolydian ♭6', '1 2 3 4 5 b6 b7'),
+  'locrian2': _scale('Locrian ♮2', 'locrian ♮2', '1 2 b3 4 b5 b6 b7'),
+  'altered': _scale('Altered (super-Locrian)', 'altered', '1 b2 b3 b4 b5 b6 b7', ref: 'major'),
+  // harmonic minor modes
+  'locrian6': _scale('Locrian ♮6', 'locrian ♮6', '1 b2 b3 4 b5 6 b7'),
+  'ionian5': _scale('Ionian ♯5', 'ionian ♯5', '1 2 3 4 #5 6 7'),
+  'dorian4': _scale('Dorian ♯4 (Ukrainian dorian)', 'dorian ♯4', '1 2 b3 #4 5 6 b7'),
+  'phrygdom': _scale('Phrygian dominant', 'phrygian dominant', '1 b2 3 4 5 b6 b7'),
+  'lydian2': _scale('Lydian ♯2', 'lydian ♯2', '1 #2 3 #4 5 6 7'),
+  'ultralocrian': _scale('Ultralocrian', 'ultralocrian', '1 b2 b3 b4 b5 b6 bb7', ref: 'minor'),
+  // harmonic major and its modes
+  'harmmajor': _scale('Harmonic major', 'harmonic major', '1 2 3 4 5 b6 7'),
+  'dorianb5': _scale('Dorian ♭5', 'dorian ♭5', '1 2 b3 4 b5 6 b7'),
+  'phrygianb4': _scale('Phrygian ♭4', 'phrygian ♭4', '1 b2 b3 b4 5 b6 b7', ref: 'minor'),
+  'lydianb3': _scale('Lydian ♭3', 'lydian ♭3', '1 2 b3 #4 5 6 7'),
+  'mixob2': _scale('Mixolydian ♭2', 'mixolydian ♭2', '1 b2 3 4 5 6 b7'),
+  'lydaug2': _scale('Lydian augmented ♯2', 'lydian augmented ♯2', '1 #2 3 #4 #5 6 7'),
+  'locrianbb7': _scale('Locrian 𝄫7', 'locrian 𝄫7', '1 b2 b3 4 b5 b6 bb7'),
+  // double harmonic family
+  'dblharm': _scale('Double harmonic (Byzantine, Arabic)', 'double harmonic', '1 b2 3 4 5 b6 7'),
+  'hungmin': _scale('Hungarian minor', 'Hungarian minor', '1 2 b3 #4 5 b6 7'),
+  'hungmaj': _scale('Hungarian major', 'Hungarian major', '1 #2 3 #4 5 6 b7'),
+  'neapmaj': _scale('Neapolitan major', 'Neapolitan major', '1 b2 b3 4 5 6 7'),
+  'neapmin': _scale('Neapolitan minor', 'Neapolitan minor', '1 b2 b3 4 5 b6 7'),
+  'persian': _scale('Persian', 'Persian', '1 b2 3 4 b5 b6 7'),
+  'enigmatic': _scale('Enigmatic', 'enigmatic', '1 b2 3 #4 #5 #6 7'),
+  // bebop: eight notes, chords numbered by the parent mode
+  'bebopdom': _scale('Dominant bebop', 'dominant bebop', '1 2 3 4 5 6 b7 7', parent: _mixolydian),
+  'bebopmaj': _scale('Major bebop', 'major bebop', '1 2 3 4 5 #5 6 7', parent: _ionian),
+  'bebopdor': _scale('Dorian bebop', 'dorian bebop', '1 2 b3 3 4 5 6 b7', ref: 'minor', parent: '1 2 b3 4 5 6 b7'),
+  'bebopmel': _scale('Melodic minor bebop', 'melodic minor bebop', '1 2 b3 4 5 #5 6 7', ref: 'minor', raise: true),
+  'bebophar': _scale('Harmonic minor bebop', 'harmonic minor bebop', '1 2 b3 4 5 b6 b7 7', ref: 'minor', raise: true),
+  // Barry Harris: alternate tones belong to the sixth (or seventh) chord and to a diminished seventh
+  'bh6dim': _scale(
+    'Major 6th diminished',
+    'major 6th diminished',
+    '1 2 3 4 5 b6 6 7',
+    parent: _ionian,
+    chord: '1 3 5 6',
+    chordName: '6',
+    dimName: '°7',
+  ),
+  'bhm6dim': _scale(
+    'Minor 6th diminished',
+    'minor 6th diminished',
+    '1 2 b3 4 5 b6 6 7',
+    ref: 'minor',
+    raise: true,
+    chord: '1 b3 5 6',
+    chordName: 'm6',
+    dimName: '°7',
+  ),
+  'bh7dim': _scale(
+    'Dominant 7th diminished',
+    'dominant 7th diminished',
+    '1 2 3 4 5 b6 b7 7',
+    parent: _mixolydian,
+    chord: '1 3 5 b7',
+    chordName: '7',
+    dimName: '°7',
+  ),
+  'bh7b5dim': _scale(
+    'Dominant 7♭5 diminished',
+    'dominant 7♭5 diminished',
+    '1 2 3 4 b5 b6 b7 7',
+    parent: _mixolydian,
+    chord: '1 3 b5 b7',
+    chordName: '7♭5',
+    dimName: '°7',
+  ),
+  // blues and pentatonics
+  'majblues': _scale('Major blues', 'major blues', '1 2 b3 3 5 6', ref: 'major', parent: _ionian),
+  'combblues': _scale('Combined blues (major + minor)', 'combined blues', '1 2 b3 3 4 b5 5 6 b7', ref: 'major', parent: _mixolydian),
+  'egyptian': _scale('Egyptian (suspended pentatonic)', 'Egyptian', '1 2 4 5 b7', parent: _mixolydian),
+  'mangong': _scale('Man gong', 'man gong', '1 b3 4 b6 b7', parent: _aeolian),
+  // Japanese and world
+  'yo': _scale('Yo (Ritusen)', 'yo', '1 2 4 5 6', parent: _ionian),
+  'insen': _scale('In-sen', 'in-sen', '1 b2 4 5 b7', parent: '1 b2 b3 4 5 b6 b7'),
+  'hirajoshi': _scale('Hirajoshi', 'hirajoshi', '1 2 b3 5 b6', parent: _aeolian),
+  'iwato': _scale('Iwato', 'iwato', '1 b2 4 b5 b7', parent: '1 b2 b3 4 b5 b6 b7'),
+  'kumoi': _scale('Kumoi', 'kumoi', '1 2 b3 5 6', parent: '1 2 b3 4 5 6 b7'),
+  'pelog': _scale('Pelog (5-note 12-TET approximation)', 'pelog', '1 b2 b3 5 b6', parent: '1 b2 b3 4 5 b6 b7'),
+  // symmetric
+  'augmented': _scale('Augmented (hexatonic)', 'augmented', '1 b3 3 5 #5 7', ref: 'major', parent: _ionian),
+  'tritone': _scale('Tritone', 'tritone', '1 b2 3 b5 5 b7', parent: _mixolydian),
+  'chromatic': _scale('Chromatic', 'chromatic', '1 b2 2 b3 3 4 #4 5 b6 6 b7 7', ref: 'major', parent: _ionian),
+  // others
+  'spanish8': _scale('Spanish 8-tone', 'Spanish 8-tone', '1 b2 b3 3 4 5 b6 b7', ref: 'major', parent: '1 b2 3 4 5 b6 b7'),
+  'prometheus': _scale('Prometheus', 'Prometheus', '1 2 3 #4 6 b7', parent: '1 2 3 #4 5 6 b7'),
+  'romanian': _scale('Romanian minor (= Dorian ♯4)', 'Romanian minor', '1 2 b3 #4 5 6 b7'),
+  'gypsy': _scale('Hungarian gypsy', 'Hungarian gypsy', '1 2 b3 #4 5 b6 b7'),
+  'flamenco': _scale('Flamenco (= Phrygian dominant)', 'flamenco', '1 b2 3 4 5 b6 b7'),
 };
-const List<String> scaleOrder = [
-  'off',
-  'major',
-  'minor',
-  'harmonic',
-  'melodic',
-  'dorian',
-  'phrygian',
-  'lydian',
-  'mixolydian',
-  'locrian',
-  'majpent',
-  'minpent',
-  'blues',
-  'whole',
-  'dimhw',
-  'dimwh',
+
+/// The scale picker's sections, in order (a scale may appear in more than one).
+const List<(String, List<String>)> scaleGroups = [
+  ('Common', ['major', 'minor', 'dorian', 'mixolydian', 'blues', 'majpent', 'minpent']),
+  ('Modes of major', ['ionian', 'dorian', 'phrygian', 'lydian', 'mixolydian', 'aeolian', 'locrian']),
+  ('Melodic minor', ['melodic', 'dorianb2', 'lydaug', 'lyddom', 'mixob6', 'locrian2', 'altered']),
+  ('Harmonic minor', ['harmonic', 'locrian6', 'ionian5', 'dorian4', 'phrygdom', 'lydian2', 'ultralocrian']),
+  ('Harmonic major', ['harmmajor', 'dorianb5', 'phrygianb4', 'lydianb3', 'mixob2', 'lydaug2', 'locrianbb7']),
+  ('Bebop', ['bebopdom', 'bebopmaj', 'bebopdor', 'bebopmel', 'bebophar']),
+  ('Barry Harris', ['bh6dim', 'bhm6dim', 'bh7dim', 'bh7b5dim']),
+  ('Blues & pentatonic', ['majblues', 'blues', 'combblues', 'majpent', 'minpent', 'egyptian', 'mangong']),
+  ('Japanese & world', ['yo', 'insen', 'hirajoshi', 'iwato', 'kumoi', 'pelog']),
+  ('Symmetric', ['whole', 'dimhw', 'dimwh', 'augmented', 'tritone', 'chromatic']),
+  (
+    'Exotic',
+    ['dblharm', 'hungmin', 'hungmaj', 'neapmaj', 'neapmin', 'persian', 'enigmatic', 'spanish8', 'prometheus', 'romanian', 'gypsy', 'flamenco'],
+  ),
 ];
+
+/// Every scale id once, 'off' first.
+final List<String> scaleOrder = [...scales.keys];
+
+/// The degree formula of a scale: "1 2 ♭3 4 5 ♭6 ♮7". Natural 6 and 7 get ♮ in scales
+/// with a minor third.
+String scaleFormula(String id) {
+  final f = scales[id]?.fifths;
+  if (f == null) return '';
+  final minor = f.contains(-3);
+  int degOf(int x) => ((x * 4) % 7 + 7) % 7;
+  final degs = [for (final x in f) degOf(x)];
+  return [
+    for (final x in f)
+      () {
+        // the degree: the letter step above the tonic (line of fifths: 4 per step mod 7)
+        final deg = ((x * 4) % 7 + 7) % 7;
+        final acc = (x - _degreeFifths[deg]) ~/ 7;
+        final sign = acc == 0
+            ? ((minor && (deg == 5 || deg == 6)) || degs.where((d) => d == deg).length > 1 ? '♮' : '')
+            : acc > 0
+            ? '♯' * acc
+            : (acc == -2 ? '𝄫' : '♭' * -acc);
+        return '$sign${deg + 1}';
+      }(),
+  ].join(' ');
+}
 
 /// The tonic spelling with the smaller key signature (Bb major, not A# major); flats on a tie.
 int spellTonic(int pc, [String type = 'major']) {
@@ -122,6 +331,9 @@ class MusicKey {
   final bool raise;
   final Set<int> tpcs, pcs, pool;
   final List<int> degreeFifths, degreePcs;
+
+  /// Barry Harris scales: the tones of the sixth/seventh chord (the rest is the diminished chord).
+  final Set<int>? chordTpcs;
   const MusicKey({
     required this.pc,
     required this.type,
@@ -134,6 +346,7 @@ class MusicKey {
     required this.degreePcs,
     required this.pool,
     required this.name,
+    this.chordTpcs,
   });
 }
 
@@ -148,9 +361,7 @@ MusicKey? makeKey(int pc, String type) {
       ? _natMinor
       : fifths.length == 7
       ? fifths
-      : sc.ref == 'minor'
-      ? _natMinor
-      : _major;
+      : sc.parent ?? (sc.ref == 'minor' ? _natMinor : _major);
   final degreePcs = [for (final f in degreeFifths) pcOf(tonic + f)];
   final pool = {...degreePcs};
   if (sc.raise) pool.addAll([pcOf(tonic + 5), pcOf(tonic + 3)]);
@@ -169,10 +380,34 @@ MusicKey? makeKey(int pc, String type) {
     degreePcs: degreePcs,
     pool: pool,
     name: '${tpcName(tonic)} ${sc.key}',
+    chordTpcs: sc.chordTones == null ? null : {for (final f in sc.chordTones!) tonic + f},
   );
 }
 
 enum KeyRelation { none, root, inScale, rootEnharmonic, enharmonic, out }
+
+enum BarryHarrisRole { chord, dim }
+
+/// In a Barry Harris scale: does this spelled note belong to the chord or to the diminished chord?
+BarryHarrisRole? barryHarrisRole(MusicKey? key, int tpc) {
+  final chord = key?.chordTpcs;
+  if (key == null || chord == null || !key.tpcs.contains(tpc)) return null;
+  return chord.contains(tpc) ? BarryHarrisRole.chord : BarryHarrisRole.dim;
+}
+
+/// "C6 (C E G A) + B°7 (B D F A♭)" for a Barry Harris scale, else null.
+String? barryHarrisText(MusicKey? key) {
+  if (key == null || key.chordTpcs == null) return null;
+  final sc = scales[key.type]!;
+  final all = [for (final f in sc.fifths!) key.tonic + f];
+  final chord = all.where(key.chordTpcs!.contains).toList();
+  final dim = all.where((t) => !key.chordTpcs!.contains(t)).toList();
+  // the diminished chord, named from its tone a half step below the tonic (the leading tone)
+  final lead = dim.where((t) => mod(pcOf(t) - pcOf(key.tonic), 12) == 11).firstOrNull ?? dim.first;
+  final dimOrder = [lead, ...dim.where((t) => t != lead)]..sort((a, b) => mod(pcOf(a) - pcOf(lead), 12) - mod(pcOf(b) - pcOf(lead), 12));
+  String names(List<int> l) => l.map(tpcName).join(' ');
+  return '${tpcName(key.tonic)}${sc.chordName} (${names(chord)}) + ${tpcName(lead)}${sc.dimName} (${names(dimOrder)})';
+}
 
 KeyRelation keyRelation(MusicKey? key, int tpc) {
   if (key == null) return KeyRelation.none;
