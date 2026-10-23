@@ -34,7 +34,7 @@ class Pal {
   static Color t(double a) => text1.withValues(alpha: a);
 }
 
-/// The seven engine colours (near-equal lightness), keyed by engine.
+/// The eight engine colours (near-equal lightness), keyed by engine.
 const Map<String, Color> engineColors = {
   'strisy': Color(0xFFB9B9C2),
   'va': Color(0xFFFF8A3D),
@@ -45,6 +45,7 @@ const Map<String, Color> engineColors = {
   'ep': Color(0xFFB48CFF),
   'epiano': Color(0xFFB48CFF),
   'brass': Color(0xFFE9A23B),
+  'trumpet': Color(0xFF2BB7C9), // cyan, L* 68.5: dE >= 31 from modal, 54 from wind, 70 from the accent (also protan/deutan)
 };
 
 Color engineColor(String engine) => engineColors[engine] ?? Pal.text2;

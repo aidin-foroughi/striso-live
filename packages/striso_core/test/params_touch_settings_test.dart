@@ -18,10 +18,7 @@ List<Param> P() => [
 Snapshot corner(Map<String, double> v) => Snapshot('va:pad', {0: v, 1: {}});
 
 /// The firmware source ($STRISO_FW_DIR or ../striso-control-firmware, see support/firmware.dart).
-File? firmwareSource() {
-  final d = firmwareDir();
-  return d == null ? null : File('${d.path}/synth_control.cpp');
-}
+File? firmwareSource() => firmwareDir() == null ? null : firmwareFile('synth_control.cpp');
 
 void main() {
   group('params', () {
@@ -262,9 +259,16 @@ void main() {
       final fn = body.substring(body.indexOf('float config_but('));
       final live = fn.split('\n').where((l) => !RegExp(r'^\s*//').hasMatch(l)).join('\n');
       final cases = {for (final m in RegExp(r'case \((\d+)\)').allMatches(live)) int.parse(m[1]!)}.toList()..sort();
-      expect(cases, settingsKeys.keys.toList()..sort());
+      // keys of engines this checkout predates (trumpet before its merge) are the only difference
+      final missing = settingsKeys.keys.toSet().difference(cases.toSet());
+      expect(missing.difference(newerVoiceKeys), isEmpty, reason: 'keys the app has and the firmware does not');
+      if (missing.isNotEmpty) {
+        // ignore: avoid_print
+        print('firmware (${firmwareLayout()}) has no voice key ${missing.join(', ')} yet (${[for (final k in missing) voiceKeys[k]!.$1].join(', ')}): checked against a firmware that has it');
+      }
+      expect(cases, (settingsKeys.keys.toSet().difference(missing).toList()..sort()));
       final voices = RegExp(r'case \((\d+)\): return config_voice\("(\w+)", (\d+), (\d+), (\d+)').allMatches(live).toList();
-      expect(voices.length, voiceKeys.length);
+      expect(voices.length, voiceKeys.length - missing.length);
       for (final m in voices) {
         final v = voiceKeys[int.parse(m[1]!)]!;
         expect([v.$1, ...v.$2], [m[2], int.parse(m[3]!), int.parse(m[4]!), int.parse(m[5]!)], reason: 'voice key ${m[1]}');

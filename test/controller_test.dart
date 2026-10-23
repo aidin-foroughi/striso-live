@@ -3,10 +3,12 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/material.dart' show Color;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:striso_core/striso_core.dart';
 import 'package:striso_live/src/controller.dart';
 import 'package:striso_live/src/store.dart';
+import 'package:striso_live/src/theme.dart';
 
 class _BusyTransport implements Transport {
   @override
@@ -100,7 +102,29 @@ void main() {
     expect(ctl.mode, ConnMode.usb);
     expect(ctl.status, 'Connected');
     expect(ctl.trace!.keys, containsAll(['connect', 'version', 'live']));
-    expect(ctl.voices.length, 56);
+    expect(ctl.voices.length, 65);
+    await finish(tester, ctl);
+  });
+
+  testWidgets('the trumpet: the eighth engine button in cyan, its hero knobs, the mutes lead with mute and wah', (tester) async {
+    final usb = FakeUsb();
+    final ctl = make(usb, intent: 'connected');
+    await pumpUntil(tester, ctl.start());
+    await waitFor(tester, () => ctl.dot == Dot.on && !ctl.listsLoading);
+    final row = ctl.engines();
+    expect(row.map((e) => e.engine).take(8), ['strisy', 'va', 'modal', 'bowed', 'wind', 'ep', 'brass', 'trumpet']);
+    expect(engineColor('trumpet'), const Color(0xFF2BB7C9));
+    expect(engineInfo('trumpet').label, 'Trumpet');
+    expect(engineInfo('trumpet').blurb, 'physical model, valves and mutes');
+    expect(settingsKeys[15]!.engine, 'trumpet');
+    expect(settingsKeys[15]!.switchable, isTrue);
+    ctl.selectEngine('trumpet');
+    await waitFor(tester, () => ctl.voiceName == 'trumpet:bb classical' && ctl.mainKnobs().isNotEmpty);
+    expect(ctl.mainKnobs().map((p) => p.name), ['brassy', 'bell', 'attack', 'p_loud', 'breath', 'vibrato', 'release', 'room']);
+    final cup = ctl.voices.firstWhere((v) => v.name == 'trumpet:cup mute');
+    await pumpUntil(tester, ctl.selectVoice(cup.index));
+    await waitFor(tester, () => ctl.voiceName == 'trumpet:cup mute' && ctl.mainKnobs().isNotEmpty);
+    expect(ctl.mainKnobs().map((p) => p.name).take(2), ['mute', 'wah']);
     await finish(tester, ctl);
   });
 

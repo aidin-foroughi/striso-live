@@ -136,7 +136,8 @@ void main() {
 
       final voices = await c.listVoices();
       expect(voices.length, dev.voiceCount);
-      expect(voices.length, 56);
+      expect(voices.length, 65); // with the 9 trumpet presets
+      expect(voices.where((x) => x.engine == 'trumpet').map((x) => x.name), contains('trumpet:cup mute'));
       expect(voices.any((x) => x.name == 'modal:wine glass'), isTrue);
       expect(voices.where((x) => x.current).length, 1);
 

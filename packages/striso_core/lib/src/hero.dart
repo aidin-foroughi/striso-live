@@ -12,6 +12,9 @@ const Map<String, List<String>> heroParams = {
   'wind': ['reed_open', 'attack', 'bright', 'breath', 'growl', 'vib', 'body', 'tongue'],
   'brass': ['brassiness', 'lip_loud', 'tone_hz', 'breath', 'mute', 'release', 'vibrato', 'pair'],
   'ep': ['hard', 'decay', 'bell', 'tick', 'drive', 'grit', 'tone', 'wobble'],
+  // voice_trumpet.h: brassiness (wave steepening), bell brightness, tonguing, the ff pressure,
+  // air, pedal vibrato, release, room
+  'trumpet': ['brassy', 'bell', 'attack', 'p_loud', 'breath', 'vibrato', 'release', 'room'],
 };
 
 /// Per preset (the voice name as the board lists it), when it differs from its engine's.
@@ -26,6 +29,13 @@ const Map<String, List<String>> heroPresetParams = {
   'brass:section': ['pair', 'detune', 'brassiness', 'lip_loud', 'tone_hz', 'breath', 'vibrato', 'release'],
   'ep:wurli': ['wurli', 'hard', 'decay', 'drive', 'grit', 'tone', 'wobble', 'dyn'],
   'wind:flute': ['jet', 'jet_off', 'breath', 'turb', 'bright', 'attack', 'vib', 'body'],
+  // trumpet: the jazz horn's effects; the mutes lead with the mute depth and wah (tilt to the
+  // mute / plunger)
+  'trumpet:bb jazz': ['brassy', 'bell', 'growl', 'fall', 'doit', 'shake', 'vibrato', 'breath'],
+  'trumpet:harmon': ['mute', 'wah', 'brassy', 'bell', 'attack', 'breath', 'vibrato', 'room'],
+  'trumpet:cup mute': ['mute', 'wah', 'brassy', 'bell', 'attack', 'breath', 'vibrato', 'room'],
+  'trumpet:straight': ['mute', 'wah', 'brassy', 'bell', 'attack', 'breath', 'vibrato', 'room'],
+  'trumpet:plunger': ['mute', 'wah', 'growl', 'brassy', 'bell', 'fall', 'vibrato', 'breath'],
 };
 
 /// The effect amounts on the Play tab (firmware fx.h names).

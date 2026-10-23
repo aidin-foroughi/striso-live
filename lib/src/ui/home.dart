@@ -57,6 +57,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     LogicalKeyboardKey.digit5,
     LogicalKeyboardKey.digit6,
     LogicalKeyboardKey.digit7,
+    LogicalKeyboardKey.digit8,
   ];
 
   bool _onKey(KeyEvent e) {

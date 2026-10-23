@@ -481,7 +481,7 @@ TextStyle monoStyle() => mono(12, color: Pal.text1);
 // the shortcut overlay (?)
 
 const shortcuts = [
-  ('1 – 7', 'Engines (voice keys)'),
+  ('1 – 8', 'Engines (voice keys)'),
   ('[  ]', 'Previous / next preset'),
   ('Ctrl+1 / 2 / 3', 'Play, Sound, Setup'),
   ('Ctrl+Z / Ctrl+Y', 'Undo / redo'),

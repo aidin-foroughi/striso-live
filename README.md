@@ -145,7 +145,7 @@ whose `INFO_UF2.TXT` names the Striso (and only when there is exactly one), back
 
 ### Keys
 
-`1`-`7` engines, `[` `]` previous/next preset, `Ctrl+1/2/3` tabs, `Ctrl+Z`/`Ctrl+Y` undo/redo,
+`1`-`8` engines, `[` `]` previous/next preset, `Ctrl+1/2/3` tabs, `Ctrl+Z`/`Ctrl+Y` undo/redo,
 `Ctrl+S` save the sound, `M` mutate, `B` (hold) A/B, `F`/`F11` stage, `` ` `` console, `S`
 settings keys, `?` all of these. Knobs: drag (Shift: fine), scroll, arrow keys; double-click
 resets; Alt+click locks against Mutate.
@@ -208,7 +208,11 @@ writer byte for byte with the firmware's `tools/striso.py` (through its `tools/.
 `tools/requirements.txt` there). They look for a
 [striso-control-firmware](https://github.com/aidin-foroughi/striso-control-firmware) checkout in
 `$STRISO_FW_DIR`, else in `../striso-control-firmware` next to this repository, and skip with a
-message when there is none. `STRISO_PYTHON` overrides the Python for the config test.
+message when there is none. Both firmware layouts work: the flat one (`voice_*.h`, `fx.h`,
+`synth_control.cpp` at the root) and the split one (`dsp/include/striso_dsp/`, `src/synth/`).
+An engine newer than the checkout (the trumpet before its merge) is skipped with a message; its
+voice key may be missing from the checkout's `synth_control.cpp`. `STRISO_PYTHON` overrides the
+Python for the config test.
 
 **CI.** `.github/workflows/striso-live-flutter.yml` runs the tests (with the audio engine's native
 self-test and package tests) and builds both platforms on

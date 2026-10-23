@@ -119,6 +119,43 @@ const List<_P> _reed = [
   ('growl', 'mod', 0.0, 1.0, 0, 0.0),
   ('vibrato', 'mod', 0.0, 1.0, 0, 0.25),
 ];
+/// voice_trumpet.h param_table (names, groups, ranges as the firmware's; plausible defaults).
+const List<_P> _trumpet = [
+  ('gain', 'level', 0.1, 4.0, 0, 1.0),
+  ('p_soft', 'level', 0.3, 8.0, 0, 1.6),
+  ('p_loud', 'level', 2.0, 20.0, 0, 9.0),
+  ('pres_ff', 'level', 0.2, 1.5, 0, 0.8),
+  ('resp_hz', 'level', 3.0, 100.0, 0, 30.0),
+  ('release', 'level', 0.005, 0.5, 0, 0.06),
+  ('lip_tune', 'lips', -300.0, 300.0, 0, 0.0),
+  ('lip_q', 'lips', 0.5, 400.0, 0, 40.0),
+  ('lip_mass', 'lips', 0.3, 3.0, 0, 1.0),
+  ('lip_open', 'lips', -0.6, 0.6, 0, 0.0),
+  ('lip_width', 'lips', 4.0, 14.0, 0, 8.0),
+  ('tilt_lip', 'lips', -1.0, 1.0, 0, 0.3),
+  ('cup', 'bore', 0.3, 2.0, 0, 1.0),
+  ('bore_loss', 'bore', 0.0, 1.0, 0, 0.4),
+  ('bell', 'bore', -6.0, 6.0, 0, 0.0),
+  ('brassy', 'bore', 0.0, 8.0, 0, 1.0),
+  ('breath', 'air', 0.0, 1.0, 0, 0.15),
+  ('t_noise', 'air', 0.0, 1.0, 0, 0.2),
+  ('attack', 'attack', 0.0, 2.0, 0, 1.0),
+  ('overshoot', 'attack', 0.0, 1.0, 0, 0.3),
+  ('vibrato', 'mod', 0.0, 1.0, 0, 0.1),
+  ('vib_hz', 'mod', 3.0, 8.0, 0, 5.5),
+  ('shake', 'mod', 0.0, 2.0, 0, 0.0),
+  ('growl', 'mod', 0.0, 1.0, 0, 0.0),
+  ('fall', 'bend', 0.0, 12.0, 0, 0.0),
+  ('doit', 'bend', 0.0, 12.0, 0, 0.0),
+  ('halfvalve', 'bend', 0.0, 1.0, 0, 0.0),
+  ('mute', 'mute', 0.0, 1.0, 0, 0.0),
+  ('wah', 'mute', -1.0, 1.0, 0, 0.0),
+  ('legato', 'play', 0, 2, 1, 1),
+  ('slur_thr', 'play', 0.0, 1.0, 0, 0.4),
+  ('valve_ms', 'play', 3.0, 60.0, 0, 15.0),
+  ('voices', 'play', 1, 4, 1, 1),
+  ('room', 'room', 0.0, 1.0, 0, 0.3),
+];
 const List<_P> _ep = [
   ('level', 'level', 0.1, 4.0, 0, 1.6),
   ('hammer', 'hammer', 0.0, 1.0, 0, 0.5),
@@ -187,6 +224,7 @@ const List<_Engine> _engines = [
     7600,
   ),
   _Engine('brass', ['trumpet', 'flugelhorn', 'trombone', 'horn', 'euphonium', 'tuba', 'harmon', 'plunger', 'section'], _reed, 9000),
+  _Engine('trumpet', ['bb classical', 'bb jazz', 'c trumpet', 'piccolo', 'cornet', 'harmon', 'cup mute', 'straight', 'plunger'], _trumpet, 9400),
 ];
 
 class _Entry {

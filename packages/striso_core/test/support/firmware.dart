@@ -4,6 +4,10 @@
 // voice_*.h / fx.h, the settings map in synth_control.cpp, the config writer in tools/striso.py)
 // look for it in $STRISO_FW_DIR, else in ../striso-control-firmware next to this repository,
 // and skip with a message saying so when it is not there.
+//
+// Two layouts are understood: the flat one (voice_*.h, fx.h, synth_control.cpp at the root) and
+// the split one (dsp/include/striso_dsp/ for the DSP headers, src/synth/ for synth_control.cpp);
+// tools/ is at the root in both.
 import 'dart:io';
 
 /// The striso-live repository root: the directory holding packages/striso_core.
@@ -22,10 +26,31 @@ String firmwarePath() {
   return Directory('${root.path}/../striso-control-firmware').absolute.path;
 }
 
-/// The firmware checkout, when it holds the firmware source (synth_control.cpp).
+/// Where a source file may live, relative to the checkout: flat, then the split layout.
+const firmwareSourceDirs = ['', 'dsp/include/striso_dsp', 'src/synth', 'src', 'dsp/include'];
+
+/// A firmware source file by its name (voice_trumpet.h, fx.h, synth_control.cpp) in either
+/// layout, or null when this checkout has none.
+File? firmwareFile(String name, {Directory? dir}) {
+  final d = dir ?? Directory(firmwarePath());
+  for (final sub in firmwareSourceDirs) {
+    final f = File(sub.isEmpty ? '${d.path}/$name' : '${d.path}/$sub/$name');
+    if (f.existsSync()) return f;
+  }
+  return null;
+}
+
+/// The firmware checkout, when it holds the firmware source (synth_control.cpp, in either layout).
 Directory? firmwareDir() {
   final d = Directory(firmwarePath());
-  return File('${d.path}/synth_control.cpp').existsSync() ? d : null;
+  return firmwareFile('synth_control.cpp', dir: d) != null ? d : null;
+}
+
+/// Which layout the checkout has (for the test log).
+String firmwareLayout() {
+  final d = firmwareDir();
+  if (d == null) return 'none';
+  return File('${d.path}/synth_control.cpp').existsSync() ? 'flat' : 'split (dsp/include/striso_dsp, src/synth)';
 }
 
 /// Skip reason for tests that need the firmware source.

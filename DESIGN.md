@@ -7,7 +7,7 @@ behaviour already exist in `controller.dart` and `striso_core`.
 ## 1. Direction
 
 A quiet instrument panel, not a dashboard. Near-black neutral ground, warm off-white type, one
-accent. Colour belongs to the music: the seven engine colours and the pressure heat on the board
+accent. Colour belongs to the music: the eight engine colours and the pressure heat on the board
 are the only saturated things on screen, so when a key lights up, it is the brightest thing in the
 window. Chrome recedes: no cards, no seams, no gradients, no glows on buttons. Hierarchy comes from
 spacing, type size and text colour; a hairline appears only where something is editable (an input)
@@ -38,14 +38,15 @@ index numbers on presets, the footer shortcut line, the stats line ("0 keys down
 | error | `#FF6B6B` | lost connection, destructive, failed save |
 | demo | `#7FB2FF` | demo dot and demo chip only |
 
-Engine colours (tuned to near-equal lightness, L* ≈ 68–74, on bg0):
+Engine colours (tuned to near-equal lightness, L* ≈ 68–74, on bg0; trumpet's cyan is ΔE ≥ 31 from
+modal, ≥ 54 from wind and ≥ 70 from the accent for normal, protan and deutan vision):
 
 | engine | value | | engine | value |
 |---|---|---|---|---|
 | strisy | `#B9B9C2` | | wind | `#5FD37A` |
 | va | `#FF8A3D` | | ep | `#B48CFF` |
 | modal | `#5CA8FF` | | brass | `#E9A23B` |
-| bowed | `#FF5A5A` | | | |
+| bowed | `#FF5A5A` | | trumpet | `#2BB7C9` |
 
 Rule: engine colours appear only on the engine selector, the current preset's dot, the current
 sound's name in headers, and the settings-key overlay. The accent is never placed in the same row
@@ -147,7 +148,7 @@ toggled with `` ` ``.
   220       24                      centre (fills)                         24      260
 ```
 
-Left column, 220 px: the engine row (seven 24 px round buttons, 8 px gaps, pinned), engine name
+Left column, 220 px: the engine row (eight 24 px round buttons, 8 px gaps, pinned), engine name
 (title) and blurb (small text3), this engine's presets as 28 px text rows, then `MY SOUNDS`
 (micro) with the user's sounds for this engine (hover `⋯`: Recall, Rename, Export, Delete) and a
 ghost "+ Save current" row. The list scrolls on its own.
@@ -299,7 +300,7 @@ value right-aligned in body tabular, 56 px wide.
 Engine button: 24 px circle, 1.5 px ring in the engine colour, transparent inside. Hover: ring
 2 px, tooltip with name and blurb. Selected: filled disc in the engine colour; strisy's grey
 disc gets an accentInk centre dot so it reads as "on". Missing from this firmware: ring @ 30% and
-a tooltip "not in this firmware". Keyboard `1`–`7`. Switching engine selects its remembered
+a tooltip "not in this firmware". Keyboard `1`–`8`. Switching engine selects its remembered
 preset (existing `voiceKeyAction`).
 
 Preset row: 28 px, body text2, hover bg2, current: text1 500 with a 6 px engine-colour dot at
@@ -400,7 +401,7 @@ The board reads as an instrument at rest and as light while playing, and the two
    left column, stepped with `PageDown`/`PageUp` (and shown in stage mode as "3/8 · glassy").
    Why: switching across engines mid-set in one keystroke. Implementation: an ordered list of
    voice names + optional user-sound names in the store; `recallPreset`/`selectVoice`.
-6. **Shortcut overlay** (`?`) and a tidy set: `1–7` engines, `[` `]` presets, `PgUp/PgDn` set
+6. **Shortcut overlay** (`?`) and a tidy set: `1–8` engines, `[` `]` presets, `PgUp/PgDn` set
    list, `Ctrl+S` save sound, `Ctrl+Z/Y` undo/redo, `M` mutate, `B` A/B, `F` stage, `` ` ``
    console, `Ctrl+1/2/3` tabs. Why: hands stay on the instrument. Implementation: extend
    `_onKey`, one overlay widget listing them in two columns.

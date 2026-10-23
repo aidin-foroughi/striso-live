@@ -92,6 +92,7 @@ const _engineInfo = {
   'reed': EngineInfo('Reed', 'blown reed', 100),
   'wind': EngineInfo('Wind', 'clarinets, saxes, flute', 130),
   'brass': EngineInfo('Brass', 'trumpet to tuba', 32),
+  'trumpet': EngineInfo('Trumpet', 'physical model, valves and mutes', 180),
   'ep': EngineInfo('Electric piano', 'tines and reeds', 260),
   'epiano': EngineInfo('Electric piano', 'tines and reeds', 260),
   'sine': EngineInfo('Sine', 'test voice', 220),
@@ -1722,7 +1723,7 @@ class AppController extends ChangeNotifier implements MorphHost {
     notifyListeners();
   }
 
-  /// The engine buttons: the seven of the Striso's voice keys in key order with their led
+  /// The engine buttons: the eight of the Striso's voice keys in key order with their led
   /// colours, then any other engine this firmware lists.
   List<EngineButton> engines() {
     final out = <EngineButton>[];

@@ -76,7 +76,12 @@ const Map<int, (String, List<int>)> voiceKeys = {
   26: ('wind', [0, 64, 0]),
   28: ('ep', [40, 0, 64]),
   13: ('brass', [64, 40, 0]),
+  15: ('trumpet', [0, 48, 48]),
 };
+
+/// Voice keys of engines newer than some firmware still in use: a firmware without the engine
+/// has no case for the key (the overlay then shows the key as missing from this firmware).
+const Set<int> newerVoiceKeys = {15};
 
 final Map<int, SettingsKey> settingsKeys = {
   0: const SettingsKey(SettingsGroup.midi, 'MPE', 'MPE MIDI mode', knob: 'number of MPE voices, 1 to 15', switchable: true),
