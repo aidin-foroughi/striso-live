@@ -683,6 +683,14 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
     });
     if (b.mode == Mode.striso) unawaited(_pollUsbAudio(c));
     _scheduleTuningPoll();
+    // the first time Virtual plays: every MIDI input there is plays it (the picker changes that)
+    final m = midi;
+    if (b.mode == Mode.virtual && m != null && store.raw('midi') == null) {
+      for (final d in m.devices) {
+        if (d.present && !d.isVirtual) m.select(d.id, true);
+      }
+      store.set('midi', m.toJson());
+    }
   }
 
   @override

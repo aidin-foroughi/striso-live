@@ -276,4 +276,39 @@ void main() {
     await run(tester, ctl.userDisconnect());
     await finish(tester, ctl);
   });
+
+  testWidgets('MIDI: bytes from a controller reach the virtual firmware’s own MIDI input unchanged (its MIDI monitor, StcM)', skip: noAudio, (
+    tester,
+  ) async {
+    final ctl = virtualApp();
+    expect(ctl.midi, isNotNull, reason: 'the audio library has the MIDI inputs');
+    await run(tester, ctl.start());
+    await run(tester, ctl.playVirtual());
+    await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+    expect(ctl.midi!.running, isTrue, reason: 'MIDI runs while Virtual is live');
+    final seen = <List<int>>[];
+    final c = ctl.client!;
+    final was = c.onStream!;
+    c.onStream = (src, id, v, n) {
+      if (src == Src.midi) seen.add([id, for (var i = 0; i < n; i++) v[i]]);
+      was(src, id, v, n);
+    };
+    await run(tester, c.raw(0x4D)); // StcM: the firmware reports every MIDI message it gets
+    // a controller (the library's test device: the same parser and sink as a real input)
+    const bytes = [0x91, 60, 100, 0xD1, 80, 0xB1, 74, 70, 0xE1, 0x00, 0x48, 74, 71, 0xF8, 0x81, 60, 30];
+    expect(ctl.midi!.backend.inject('test controller', bytes), greaterThanOrEqualTo(0));
+    await waitFor(tester, () => seen.length >= 6, ms: 4000);
+    // [channel, status nibble, data 1, data 2]: running status expanded, the clock (F8) dropped
+    expect(seen, [
+      [1, 0x9, 60, 100],
+      [1, 0xD, 80, 0],
+      [1, 0xB, 74, 70],
+      [1, 0xE, 0x00, 0x48],
+      [1, 0xE, 74, 71],
+      [1, 0x8, 60, 30],
+    ]);
+    await run(tester, ctl.userDisconnect());
+    expect(ctl.midi!.running, isFalse);
+    await finish(tester, ctl);
+  });
 }
