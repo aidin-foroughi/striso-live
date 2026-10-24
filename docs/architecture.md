@@ -49,6 +49,8 @@ own booleans.
 | `Board` / `StrisoBoard` / `VirtualStriso` | the active instrument (see above) |
 | `SoundRouting` | tells the audio engine what to do in each state; the virtual board's clock; MIDI inputs into the virtual firmware |
 | `BoardState` | the last `StcY` reply, the `StcX` layout, the tuning (`StcN`); refreshed when `Stcy` changes |
+| `ParamsModel` (`lib/src/params_model.dart`) | the live parameters with undo, A/B, Mutate, Reset and the read-back of the board's values |
+| `VirtualStrisoRuntime` (`lib/src/virtual_support.dart`) | the striso_virtual library chosen (loaded and unloaded at run time), the instrument, its flash kept on this computer |
 | `AppController` (Flutter) | the composition root and the UI's façade: widgets read it and call it, no logic in widgets |
 
 ### States

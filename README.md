@@ -51,7 +51,7 @@ is live about 0.3 s after it starts talking to the board.
 1. Unzip `StrisoLive-<version>-windows-x64.zip` anywhere and run `Striso Live\StrisoLive.exe`.
 2. The build is not signed, so SmartScreen may say *Windows protected your PC*: click
    **More info**, then **Run anyway**. Windows remembers it for this file.
-3. Plug in the Striso and click **Connect** (or **Try the demo** without a board).
+3. Plug in the Striso and click **Connect Striso**, or **Play Virtual Striso** without one.
 
 The installer (`StrisoLive-<version>-windows-setup.exe`) installs per user without admin rights
 and gets the same SmartScreen warning.
@@ -94,7 +94,7 @@ Firmware with USB audio (the board shows up as the input **Striso Synth**: UAC1,
 24 bit) plays its synth through the computer's speakers or interface, no DAW needed. The
 headphone jack keeps working at the same time.
 
-- **Through PC** (header, next to the connection; off until you turn it on, then remembered): the
+- **Through PC** (header, Striso mode only; off until you turn it on, then remembered): while the Striso is connected, its USB audio plays through the computer. Without a Striso session nothing is opened, whatever the toggle says. The
   Striso's input plays to the default output, or the one chosen in Setup › Audio. The pip next to
   the toggle is the input level (red at full scale, red when the input is gone, accent while it
   looks); a click opens Setup.
@@ -181,9 +181,8 @@ resets; Alt+click locks against Mutate.
 
 | flag | |
 |---|---|
-| `--demo` | start with the virtual Striso (Virtual) |
-| `--virtual-lib=<path>` | the firmware build Virtual and the audition run: a `striso_virtual.dll` / `.dylib` / `.so` built from any firmware branch (default: `$STRISO_VIRTUAL_LIB`, next to the app, or `../striso-control-firmware/build/host-virtual/virtual/`) |
-| `--audition` | play that build with the Striso as soon as it is connected |
+| `--demo` | start in Virtual mode |
+| `--virtual-lib=<path>` | the firmware build Virtual runs: a `striso_virtual.dll` / `.dylib` / `.so` built from any firmware branch (default: the one chosen in Setup, `$STRISO_VIRTUAL_LIB`, the newest in the firmware folder, or `../striso-control-firmware/build/host-virtual/virtual/`) |
 | `--mock-demo` | Virtual on the Dart mock board instead (no native library) |
 | `--no-usb` | never touch USB |
 | `--fake-save[=fail]` | Save to Striso runs every step except the drive (works in the demo) |
@@ -267,13 +266,20 @@ dart run bin/striso_probe.dart --lib path\to\libusb-1.0.dll connect 1
 
 ## Testing without the hardware
 
-**Virtual** (what Demo was) is the firmware's own code running on the PC: the firmware repository builds it as the `striso_virtual` library (its `virtual/`, `tools/virtual.sh`), the same `synth_control.cpp`, every voice engine and the effects, the USB console protocol and the config store as on the board, in virtual time. Striso Live talks to it over the same transport as to the USB board (`packages/striso_virtual`: `VirtualBoardTransport`), so the whole app runs unchanged on it: the lists, voices, live parameters, A/B, touch and key settings, StcK settings keys and tunings, Save to Striso (through the virtual board's own bootloader drive, into its flash). The header says **Virtual**; the board view plays it by hand. When the library does not load, Virtual falls back to the Dart mock and says so ("Demo (mock)"); the widget tests keep the mock.
+**Two modes.** **Striso**: the app manages and plays the hardware over its USB console (voices, parameters, settings, tunings, Save to Striso, Through PC). **Virtual**: a standalone soft instrument, the Striso firmware compiled for the computer (the firmware repository's `virtual/`, built as the `striso_virtual` library by `tools/virtual.sh`): the same `synth_control.cpp`, every voice engine and the effects, the console protocol and the config store. It holds no USB session with any Striso. The header's **Striso | Virtual** control switches; a switch is a full teardown of one mode, the same as Disconnect, then the start of the other. The architecture is in `docs/architecture.md`.
 
-**Auditioning a firmware build without flashing it.** With the Striso connected, **Play virtual** (header) plays the virtual board with the Striso as the controller: the board's key, control and motion stream (StcS) goes into the virtual board where its key scanner would send it, so the build's own `synth_message` path runs; the virtual board renders inside the output device's callback (`striso_audio`'s output-only source, `sa_set_source`, with `sv_audio_source`); the Striso's own synth is muted (its effects' output level, restored when the audition ends). Meanwhile live parameters, presets and settings keys act on the virtual board; the status says "Playing: virtual <version> with your Striso". **Stop virtual** gives the Striso back. Load a build with `--virtual-lib=<firmware checkout>/build/host-virtual/virtual/striso_virtual.dll` (add `--audition` to start at once).
+In Virtual the app talks to the firmware over the same console protocol as to the Striso (`packages/striso_virtual`: `VirtualBoardTransport`), so the lists, voices, live parameters, A/B, touch and key settings, the settings overlay and tunings all act on the virtual instrument. Save writes through its own bootloader drive into its flash, which is kept on this computer (`<data>/virtual/flash.bin`) and boots the next one.
+- **Sound**: Virtual plays to the computer's output (Setup › Audio: the output, its buffer (Auto), exclusive mode and gain), whatever Through PC says: it renders inside the output's callback (`sa_set_source` with `sv_audio_source`). Its clock never depends on the output. When the output does not open or stalls, it runs on its own real-time thread, and the status says "No sound: …".
+- **Input**: any MIDI or MPE controller the computer sees (the Striso through its USB MIDI port, a LinnStrument, a keyboard), chosen in the header's **Input** menu, and the on-screen board. The bytes go from the MIDI driver's thread (WinMM, CoreMIDI; `striso_audio`'s MIDI inputs) straight into the firmware's own USB-MIDI input (`sv_midi_write`) with no Dart on the path. The app maps nothing: the firmware's MIDI input handles them. The first time Virtual plays, every input there is chosen. Hot-plug: a chosen input that comes back is opened again.
+- **Firmware**: the app ships none. Setup › Virtual firmware lists the builds in the firmware folder (`%APPDATA%\Striso Live\firmware\<version>\striso_virtual.dll`, `~/Library/Application Support/Striso Live/firmware/<version>/libstriso_virtual.dylib`). **Load…** takes one from anywhere. A switch unloads the old library and starts Virtual on the new one without a restart. A library with another C API (`sv_api_version`) is refused with a clear message.
 
-Latency, key to sound, from its parts: the board's send thread (one message per 0.5 ms tick), the USB frame that flushes the bulk buffer (up to 1 ms), the bulk read and the app's event loop (about 1 ms), the wait for the next output callback (up to one buffer), the output (WASAPI exclusive at 3 ms: about two buffers) and the virtual board's 32-frame block: about 6 to 10 ms. The stream's key values are the wire's 14 bits, so presses past full scale stay at full scale on the virtual board (the board's own synth gets them unclipped).
+**The firmware is the source of truth.** The app shows what the board (real or virtual) reports and reads it again whenever the board's change counter moves (`Stcy`, every 250 ms while connected): the voice, every value, the tuning, the transposition. The settings overlay is the board's own list (`StcX`). A Striso without these commands gets one message: "This Striso needs a firmware update to work with Striso Live (found …)".
 
-Tests: `cd packages/striso_virtual && dart test` (the client on the virtual board, save, reset and reconnect, real audio, an engine-level render equal to its golden) and `flutter test test/virtual_board_test.dart` (the controller on it: as the USB Striso, as Virtual, the audition). They find the library through `$STRISO_VIRTUAL_LIB`, `$STRISO_FW_DIR` or `../striso-control-firmware` and skip without it; the audition test also needs `$STRISO_AUDIO_LIB` (a striso_audio build). CI: `.github/workflows/virtual-board.yml` builds the library from the firmware repository and runs both on Windows and macOS.
+**Disconnect** ends the whole session: the console, the stream, every poller, Through PC's devices, the virtual instrument, its output and the MIDI inputs. Nothing runs until Connect (or Play Virtual Striso) again, as the user left it. The status line says what plays and where, e.g. "Virtual Striso (a647e81) → Headphones · input: LinnStrument".
+
+Latency, MIDI key to sound (estimates, not measured): the controller's USB frame (up to 1 ms), the MIDI driver (WinMM about 1–2 ms with a few ms of jitter on the legacy stack; CoreMIDI about 0.5–1 ms), the firmware's MIDI input in its next 32-frame block, the wait for the next output callback (up to one buffer) and the output itself (WASAPI exclusive at 3 ms: about two buffers): roughly 7–12 ms on Windows exclusive, 6–10 ms on Core Audio at a small buffer. A Striso as the controller sends 7-bit channel pressure and CC74 tilt, and 14-bit pitch bend that carries its tuning and the sideways tilt. The native key stream it uses over its console has 14 bits for all of them.
+
+Tests: `cd packages/striso_virtual && dart test` (the client on the virtual board, save, reset and reconnect, real audio, an engine-level render equal to its golden, loading and unloading libraries) and `flutter test test/virtual_board_test.dart` (the controller on it: as the USB Striso, as Virtual, its sound on the null output with Through PC off, a dead output, MIDI bytes reaching the firmware, a firmware switch, the board changed behind the app's back). They find the library through `$STRISO_VIRTUAL_LIB`, `$STRISO_FW_DIR` or `../striso-control-firmware` and skip without it; the sound tests also need `$STRISO_AUDIO_LIB` (a striso_audio build). `test/disconnect_test.dart` checks with fake time that Disconnect leaves no transport, device, MIDI input or timer. CI: `.github/workflows/virtual-board.yml` builds the library from the firmware repository and runs both on Windows and macOS.
 
 ## Testing without the UI
 
