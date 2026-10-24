@@ -298,6 +298,13 @@ packages:
       relative: true
     source: path
     version: "1.0.0"
+  striso_virtual:
+    dependency: "direct main"
+    description:
+      path: "packages/striso_virtual"
+      relative: true
+    source: path
+    version: "1.0.0"
   term_glyph:
     dependency: transitive
     description:

@@ -353,9 +353,9 @@ class HoverReadout extends StatelessWidget {
                   if ((f.engine != null || f.switchable) && !ctl.canSend)
                     ctl.sendHint
                   else if (f.engine != null)
-                    'click to select${ctl.mode == ConnMode.demo ? ' (demo)' : ''}'
+                    'click to select${ctl.mode == ConnMode.demo ? (ctl.virtual.isVirtual ? ' (virtual)' : ' (demo)') : ''}'
                   else if (f.switchable)
-                    'click to switch${ctl.mode == ConnMode.demo ? ' (on the demo board)' : ''}'
+                    'click to switch${ctl.mode == ConnMode.demo ? (ctl.virtual.isVirtual ? ' (on the virtual board)' : ' (on the demo board)') : ''}'
                   else if (f.group == SettingsGroup.sens)
                     'set it under Sensitivity'
                   else if (!f.danger && f.knob != null)
@@ -466,12 +466,19 @@ class _SettingsInfoState extends State<SettingsInfo> {
               if ((f.engine != null || f.switchable) && !ctl.canSend)
                 Padding(
                   padding: const EdgeInsets.only(top: Space.xs),
-                  child: Text(ctl.sendHint, key: const Key('settings-send-hint'), style: ui(TypeSize.body, color: Pal.text3)),
+                  child: Text(
+                    ctl.sendHint,
+                    key: const Key('settings-send-hint'),
+                    style: ui(TypeSize.body, color: Pal.text3),
+                  ),
                 )
               else if ((f.engine != null || f.switchable) && ctl.mode == ConnMode.demo)
                 Padding(
                   padding: const EdgeInsets.only(top: Space.xs),
-                  child: Text('Acts on the demo board.', style: ui(TypeSize.small, color: Pal.demo)),
+                  child: Text(
+                    ctl.virtual.isVirtual ? 'Acts on the virtual board.' : 'Acts on the demo board.',
+                    style: ui(TypeSize.small, color: Pal.demo),
+                  ),
                 ),
               if (v != null) ...[
                 const SizedBox(height: Space.m),

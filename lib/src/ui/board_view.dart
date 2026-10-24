@@ -190,7 +190,7 @@ class _BoardViewState extends State<BoardView> with SingleTickerProviderStateMix
     if (e.kind == PointerDeviceKind.mouse && e.buttons != kPrimaryMouseButton) return;
     final h = _hit(e.localPosition);
     if (h?.key != null && ctl.boardSelect(h!.key!, overlays: widget.overlays)) return;
-    final board = ctl.demoBoard;
+    final board = ctl.playBoard;
     if (!ctl.playable || board == null || h == null) return;
     if (h.key != null) {
       _pointers[e.pointer] = _Pointer(key: h.key, t0: clockMs(), x: h.dx, y: h.dy);
@@ -203,7 +203,7 @@ class _BoardViewState extends State<BoardView> with SingleTickerProviderStateMix
 
   void _up(PointerEvent e) {
     final p = _pointers.remove(e.pointer);
-    final board = ctl.demoBoard;
+    final board = ctl.playBoard;
     if (p == null || board == null) return;
     if (p.key != null) {
       board.release(p.key!, 0.25);
@@ -214,7 +214,7 @@ class _BoardViewState extends State<BoardView> with SingleTickerProviderStateMix
 
   // held keys swell with time
   void _updatePlaying(double now) {
-    final board = ctl.demoBoard;
+    final board = ctl.playBoard;
     if (board == null) return;
     for (final p in _pointers.values) {
       if (p.key == null) continue;

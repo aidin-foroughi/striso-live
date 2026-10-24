@@ -9,6 +9,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'layout.dart';
+import 'playable.dart';
 import 'protocol.dart';
 import 'settings_map.dart';
 import 'transport.dart';
@@ -271,7 +272,7 @@ class MockConfig {
   const MockConfig(this.touch, this.keys);
 }
 
-class MockBoard {
+class MockBoard implements PlayableBoard {
   final String firmware;
   final _entries = <_Entry>[];
   late int voice;
@@ -732,6 +733,7 @@ class MockBoard {
 
   // manual playing (the board view in demo mode, tests) -------------------------------------------
 
+  @override
   void press(int id, {double pres = 0.5, double x = 0, double y = 0, double strike = 0}) {
     final k = keys.putIfAbsent(id, _Key.new);
     k.vpres = math.max(strike, (pres - k.pres) * 3);
@@ -741,6 +743,7 @@ class MockBoard {
     k.manual = true;
   }
 
+  @override
   void release(int id, [double lift = 0.3]) {
     final k = keys[id];
     if (k != null) {
@@ -749,6 +752,7 @@ class MockBoard {
     }
   }
 
+  @override
   void control(int id, bool down) {
     controlsDown[id] = down ? 1 : 0;
     _send(Src.control, id, [down ? 1 : 0]);

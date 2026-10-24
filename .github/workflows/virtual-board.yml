@@ -1,0 +1,56 @@
+# Striso Live against the virtual board: the firmware (striso-control-firmware, its virtual/)
+# builds striso_virtual on this runner, then the app's tests that run on it: packages/striso_virtual
+# (the client, save, reset, audio, the golden through Dart) and test/virtual_board_test.dart (the
+# app's controller on it: as the USB Striso, as Virtual, the audition when an audio engine with
+# sa_set_source is there). The firmware ref: the repository variable FIRMWARE_REF, else main.
+name: Striso Live (virtual board)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: "3.41.2"
+
+jobs:
+  virtual:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: the firmware next to the app
+        run: git clone --quiet --branch "${{ vars.FIRMWARE_REF || 'main' }}" https://github.com/aidin-foroughi/striso-control-firmware.git ../striso-control-firmware
+
+      - name: ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: striso_virtual (the firmware's tools/virtual.sh)
+        run: ../striso-control-firmware/tools/virtual.sh build
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: packages/striso_virtual (dart test)
+        working-directory: packages/striso_virtual
+        env:
+          STRISO_FW_DIR: ${{ github.workspace }}/../striso-control-firmware
+        run: dart pub get && dart test
+
+      - name: the app on the virtual board (flutter test)
+        env:
+          STRISO_FW_DIR: ${{ github.workspace }}/../striso-control-firmware
+        run: flutter pub get && flutter test test/virtual_board_test.dart

@@ -1,0 +1,16 @@
+name: striso_virtual
+description: The virtual Striso board for Striso Live and its tests - the firmware's own code (striso-control-firmware's striso_virtual library) through dart:ffi, behind the same Transport as the USB board.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  ffi: ^2.1.0
+  striso_core:
+    path: ../striso_core
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6

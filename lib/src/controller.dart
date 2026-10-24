@@ -16,6 +16,7 @@ import 'app_log.dart';
 import 'harmony_tracker.dart';
 import 'morph_model.dart';
 import 'store.dart';
+import 'virtual_support.dart';
 
 /// Milliseconds since the app started: the one clock for the live state and the animation.
 final Stopwatch _appClock = Stopwatch()..start();
@@ -143,13 +144,29 @@ class AppOptions {
   final bool demo, noUsb, noAudio;
   final String? fakeSave; // null, 'ok' or 'fail'
   final bool reducedMotion;
-  const AppOptions({this.demo = false, this.noUsb = false, this.noAudio = false, this.fakeSave, this.reducedMotion = false});
+
+  /// Virtual (what Demo was): a firmware build's striso_virtual (--virtual-lib=PATH, else
+  /// STRISO_VIRTUAL_LIB or the one found); --mock-demo: the Dart mock instead; --audition: play
+  /// that build with the Striso once it is connected.
+  final String? virtualLib;
+  final bool mockDemo, audition;
+  const AppOptions({
+    this.demo = false,
+    this.noUsb = false,
+    this.noAudio = false,
+    this.fakeSave,
+    this.reducedMotion = false,
+    this.virtualLib,
+    this.mockDemo = false,
+    this.audition = false,
+  });
 
   static AppOptions parse(List<String> args) {
-    String? fake;
+    String? fake, vlib;
     for (final a in args) {
       if (a == '--fake-save') fake = 'ok';
       if (a.startsWith('--fake-save=')) fake = a.substring(12);
+      if (a.startsWith('--virtual-lib=')) vlib = a.substring(14);
     }
     return AppOptions(
       demo: args.contains('--demo'),
@@ -157,6 +174,9 @@ class AppOptions {
       noAudio: args.contains('--no-audio'),
       fakeSave: fake,
       reducedMotion: args.contains('--reduced-motion'),
+      virtualLib: vlib,
+      mockDemo: args.contains('--mock-demo'),
+      audition: args.contains('--audition'),
     );
   }
 }
@@ -387,6 +407,7 @@ class AppController extends ChangeNotifier implements MorphHost {
   @override
   void dispose() {
     _disposed = true;
+    unawaited(virtual.dispose());
     _reconnectTimer?.cancel();
     _presenceTimer?.cancel();
     _syncTimer?.cancel();
@@ -522,7 +543,7 @@ class AppController extends ChangeNotifier implements MorphHost {
     _cancelReconnect();
     _trace('click', start: true);
     if (usb == null || options.noUsb) {
-      showBanner('USB is switched off in this run (--no-usb). Try the demo instead.');
+      showBanner('USB is switched off in this run (--no-usb). Try the virtual Striso instead.');
       return;
     }
     _setStatus(Dot.busy, 'Looking for the Striso');
@@ -561,17 +582,37 @@ class AppController extends ChangeNotifier implements MorphHost {
 
   Future<void> connectDemo() async {
     if (connecting) {
-      toast('Connecting to the Striso: the demo can wait', 'warn');
+      toast('Connecting to the Striso: the virtual Striso can wait', 'warn');
       return;
     }
+    if (virtual.auditioning) await virtual.stopAudition(reconnect: false);
     if (client != null && mode == ConnMode.usb) _setIntent('off'); // leaving the board on purpose
     _cancelReconnect();
-    await startSession(MockTransport(), ConnMode.demo);
+    await startSession(virtual.demoTransport(), ConnMode.demo);
   }
+
+  /// The virtual Striso (striso_virtual), Virtual's board and the audition (virtual_support.dart).
+  late final VirtualSupport virtual = VirtualSupport(
+    this,
+    libPath: options.virtualLib ?? Platform.environment['STRISO_VIRTUAL_LIB'],
+    mockOnly: options.mockDemo,
+  );
 
   MockBoard? get demoBoard {
     final t = _transport;
     return t is MockTransport ? t.board : null;
+  }
+
+  /// The board Virtual plays by hand: the virtual board, or the Dart mock.
+  PlayableBoard? get playBoard => demoBoard ?? (mode == ConnMode.demo ? virtual.player : null);
+
+  /// The audition takes the USB board's client (it keeps streaming to the virtual board); the
+  /// app's session is then the virtual board's.
+  StrisoClient? releaseClient() {
+    final c = client;
+    client = null;
+    _transport = null;
+    return c;
   }
 
   /// true when connected; 'busy' when another program holds the board (quiet: no banner).
@@ -580,7 +621,7 @@ class AppController extends ChangeNotifier implements MorphHost {
     if (client != null) await endSession(quiet: true);
     connecting = true;
     hideBanner();
-    _setStatus(Dot.busy, m == ConnMode.demo ? 'Starting the demo' : 'Connecting');
+    _setStatus(Dot.busy, m == ConnMode.demo ? 'Starting the virtual Striso' : 'Connecting');
     if (m == ConnMode.usb) {
       _setInvite(InviteState.connecting, 'Connecting to your Striso…');
       if (_traceClock == null || _traceClock!.elapsedMilliseconds > 60000) _trace('connect', start: true);
@@ -635,7 +676,8 @@ class AppController extends ChangeNotifier implements MorphHost {
     }
     connecting = false;
     if (!c.open) return false;
-    _setStatus(m == ConnMode.demo ? Dot.demo : Dot.on, m == ConnMode.demo ? 'Demo (simulated Striso)' : 'Connected');
+    _setStatus(m == ConnMode.demo ? Dot.demo : Dot.on, m == ConnMode.demo ? virtual.sessionLabel : 'Connected');
+    if (m == ConnMode.usb && options.audition && !virtual.auditioning && virtual.available) unawaited(Future(virtual.startAudition));
     waveT = clockMs();
     if (m == ConnMode.usb) {
       _setIntent('connected');
@@ -1309,8 +1351,12 @@ class AppController extends ChangeNotifier implements MorphHost {
 
   /// Demo: load one of the settings card's tunings on the simulated board, and the fine tune.
   void demoTuning(int n, {double? fineCents}) {
-    final b = demoBoard;
-    if (b == null) return;
+    final b = playBoard;
+    if (b is! MockBoard) {
+      // the virtual board: the settings card's tuning keys (12-TET, tunings 1..8)
+      if (b != null && n >= 0 && n < 9) unawaited(pressSettingsKey(const [34, 36, 38, 23, 25, 27, 29, 31, 33][n]));
+      return;
+    }
     b.loadTuning(n);
     if (fineCents != null) b.fineTune(fineCents);
     refreshTuning();
@@ -1475,7 +1521,8 @@ class AppController extends ChangeNotifier implements MorphHost {
 
   /// null when a save may start (the UI then asks for confirmation), else why not.
   String? canSave() {
-    if (client == null || (mode != ConnMode.usb && options.fakeSave == null)) {
+    final virtualSave = mode == ConnMode.demo && virtual.isVirtual && !virtual.auditioning;
+    if (client == null || (mode != ConnMode.usb && options.fakeSave == null && !virtualSave)) {
       toast(mode == ConnMode.demo ? 'The demo keeps its settings until you restart it' : 'Connect the Striso first', 'warn');
       return 'not connected';
     }
@@ -1507,11 +1554,19 @@ class AppController extends ChangeNotifier implements MorphHost {
     }
     await endSession(quiet: true);
     _setStatus(Dot.busy, 'Saving to the Striso');
-    final res = await saveTouch(values, backupDir: backupDir, progress: (t) => _setSaveStatus(t), fake: options.fakeSave);
+    final res = await saveTouch(
+      values,
+      backupDir: backupDir,
+      progress: (t) => _setSaveStatus(t),
+      fake: options.fakeSave,
+      roots: demo && virtual.isVirtual ? virtual.driveRoots : null,
+    );
     saving = false;
     log('save: ${res.ok ? 'ok' : 'failed'}: ${res.message}', res.ok ? LogKind.info : LogKind.err);
     _setSaveStatus(res.ok ? 'Saved. Reconnecting…' : 'Saving failed. Reconnecting…', res.ok ? '' : 'err');
-    final back = demo
+    final back = demo && virtual.isVirtual
+        ? await virtual.reconnect()
+        : demo
         ? (await startSession(MockTransport(board: MockBoard(config: _fakeConfig(values))), ConnMode.demo)) == true
         : await _reconnectAfterSave();
     if (!res.ok) {
@@ -1930,5 +1985,5 @@ class AppController extends ChangeNotifier implements MorphHost {
 
   // demo play -------------------------------------------------------------------------------------
 
-  bool get playable => mode == ConnMode.demo && demoBoard != null;
+  bool get playable => mode == ConnMode.demo && playBoard != null;
 }

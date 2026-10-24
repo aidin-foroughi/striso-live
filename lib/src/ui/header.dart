@@ -27,7 +27,14 @@ class TopBar extends StatelessWidget {
           // right half after the centred tabs, so the two never meet
           final throughLabel = box.maxWidth >= 1280;
           final rightRoom = box.maxWidth / 2 - 110 - Space.gutter;
-          final others = (ctl.connected ? 56 + Space.s + 32 + Space.xl : 0) + (throughLabel ? 118 : 46) + Space.l + (ctl.audio.recording ? 60 : 0) + 16 + Space.m + 104;
+          final others =
+              (ctl.connected ? 56 + Space.s + 32 + Space.xl : 0) +
+              (throughLabel ? 118 : 46) +
+              Space.l +
+              (ctl.audio.recording ? 60 : 0) +
+              16 +
+              Space.m +
+              104;
           final statusMax = (rightRoom - others).clamp(72.0, narrow ? 140.0 : 280.0);
           return Container(
             height: Sizes.header,
@@ -51,6 +58,20 @@ class TopBar extends StatelessWidget {
                     const SizedBox(width: Space.l),
                     ConnectionStatus(ctl, maxWidth: statusMax),
                     const SizedBox(width: Space.m),
+                    if (ctl.virtual.canAudition || ctl.virtual.auditioning) ...[
+                      Tooltip(
+                        message: ctl.virtual.auditioning
+                            ? 'Playing the virtual board (${ctl.virtual.version ?? ''}) with your Striso; its own synth is muted. Click to go back to it.'
+                            : 'Play the virtual board (${ctl.virtual.version ?? 'striso_virtual'}) with your Striso as the controller: hear a firmware build without flashing it. The Striso\'s own synth is muted meanwhile.',
+                        child: Btn(
+                          ctl.virtual.auditioning ? 'Stop virtual' : 'Play virtual',
+                          key: const Key('btn-audition'),
+                          kind: BtnKind.ghost,
+                          onPressed: ctl.connecting ? null : () => ctl.virtual.auditioning ? ctl.virtual.stopAudition() : ctl.virtual.startAudition(),
+                        ),
+                      ),
+                      const SizedBox(width: Space.m),
+                    ],
                     Btn(
                       ctl.connectLabel,
                       key: const Key('btn-connect'),
@@ -102,7 +123,7 @@ class ConnectionStatus extends StatelessWidget {
                   ConstrainedBox(
                     constraints: BoxConstraints(maxWidth: maxWidth),
                     child: Text(
-                      ctl.saving ? 'Saving to the Striso…' : (ctl.mode == ConnMode.demo && ctl.connected ? 'Demo' : ctl.status),
+                      ctl.saving ? 'Saving to the Striso…' : (ctl.mode == ConnMode.demo && ctl.connected ? ctl.virtual.pill : ctl.status),
                       key: const Key('status'),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,

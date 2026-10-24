@@ -228,7 +228,7 @@ class InviteCard extends StatelessWidget {
                     onPressed: busy ? null : ctl.userConnect,
                   ),
                   const SizedBox(width: Space.s),
-                  Btn('Try the demo', key: const Key('btn-demo'), kind: BtnKind.ghost, onPressed: busy ? null : ctl.connectDemo),
+                  Btn('Try the virtual Striso', key: const Key('btn-demo'), kind: BtnKind.ghost, onPressed: busy ? null : ctl.connectDemo),
                 ],
               ),
               if (ctl.inviteText.isNotEmpty) ...[const SizedBox(height: Space.m), Text(ctl.inviteText, style: ui(TypeSize.small, color: Pal.accent))],
