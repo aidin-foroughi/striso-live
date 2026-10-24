@@ -373,6 +373,15 @@ class StrisoAudioLib {
   late final getStatus = lib.lookupFunction<Void Function(Pointer<SaStatus>), void Function(Pointer<SaStatus>)>('sa_get_status');
   late final documentsDir = lib.lookupFunction<Int32 Function(Pointer<Uint8>, Int32), int Function(Pointer<Uint8>, int)>('sa_documents_dir');
   late final requestMic = lib.lookupFunction<Void Function(), void Function()>('sa_request_mic');
+
+  /// sa_set_source (API 3 with the in-flight guard: returns 0, or SA_ERR_BUSY); null when absent.
+  late final int Function(Pointer<Void>, Pointer<Void>)? setSource = () {
+    try {
+      return lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Void>), int Function(Pointer<Void>, Pointer<Void>)>('sa_set_source');
+    } catch (_) {
+      return null;
+    }
+  }();
   late final selftest = lib
       .lookupFunction<Int32 Function(Pointer<Utf8>, Pointer<Uint8>, Int32), int Function(Pointer<Utf8>, Pointer<Uint8>, int)>('sa_selftest');
 
@@ -697,4 +706,14 @@ class NativeAudioBackend implements AudioBackend {
 
   @override
   void requestMic() => _l.requestMic();
+
+  @override
+  int setSource(int fn, int user) {
+    final f = _l.setSource;
+    if (f == null) return -1;
+    return f(Pointer.fromAddress(fn), Pointer.fromAddress(user));
+  }
+
+  /// The library this backend runs on (for the MIDI binding and the virtual board's source).
+  StrisoAudioLib get library => _l;
 }

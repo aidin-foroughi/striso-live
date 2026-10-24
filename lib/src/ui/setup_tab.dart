@@ -582,7 +582,7 @@ class SaveBox extends StatelessWidget {
     final st = ctl.saveStatus;
     final reason = !ctl.connected
         ? 'Connect the Striso first'
-        : (ctl.mode == ConnMode.demo && ctl.options.fakeSave == null && !ctl.virtual.isVirtual)
+        : (ctl.isVirtual && ctl.options.fakeSave == null && ctl.virtual.isMock)
         ? 'The demo keeps its settings until you restart it'
         : (ctl.params[2]!.params.isEmpty && ctl.params[3]!.params.isEmpty)
         ? 'This firmware has no touch settings to save'

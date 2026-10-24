@@ -1,46 +1,117 @@
-// The virtual Striso in the app (striso_virtual: the firmware's own code on the PC):
-//   Virtual: what Demo was. The virtual board behind the same Transport as the USB board, played
-//     by hand on the board view; it saves to its own flash through its bootloader's drive. The
-//     Dart mock stands in only when the native library does not load (labelled so).
-//   Audition: a firmware build played live with the real Striso as the controller, without
-//     flashing it. The real board's stream (StcS) goes into the virtual board's key injection, the
-//     virtual board renders in the output's callback (the audio engine's output-only source), the
-//     real board's own synth is muted (its effects' output level) until the audition ends. The app
-//     then talks to the virtual board: live parameters, presets and settings keys act on it.
-// A build: --virtual-lib=PATH (striso_virtual.dll, .dylib or .so) or $STRISO_VIRTUAL_LIB.
+// The virtual Striso: the firmware compiled for the computer (the striso_virtual library, loaded
+// at run time: the app ships no firmware), a standalone soft instrument. It holds no USB session
+// with any board. Its console is a Board like the Striso's; its sound renders in the output's
+// callback (SoundRouting); MIDI controllers play it through its own USB-MIDI input
+// (sv_midi_write). Its config flash is kept on this computer and boots the next one.
+// Widget tests without a library run the Dart mock instead (labelled so).
 
 import 'dart:async';
-import 'dart:ffi';
 import 'dart:io';
+import 'dart:typed_data';
 
-import 'package:striso_audio/striso_audio.dart';
 import 'package:striso_core/striso_core.dart';
 import 'package:striso_virtual/striso_virtual.dart';
 
-import 'controller.dart';
+import 'session/board.dart';
+import 'session/session.dart';
+import 'session/session_machine.dart';
 
-class VirtualSupport {
-  final AppController ctl;
+/// What SoundRouting needs of the instrument: its clock and its render callback.
+abstract class VirtualSound {
+  bool get realtime;
+  void startRealtime();
+  void stopRealtime();
+  int get timeFrames;
+
+  /// sv_audio_source and its board, as addresses for sa_set_source.
+  int get sourceFn;
+  int get sourceUser;
+
+  /// sv_midi_write and its board, as addresses for the MIDI sink.
+  int get midiFn;
+  int get midiUser;
+  bool get alive;
+}
+
+class VirtualInstrument implements VirtualSound {
+  final VirtualBoard board;
+  final VirtualPlayer player;
+  VirtualInstrument(this.board) : player = VirtualPlayer(board);
+
+  @override
+  bool get realtime => board.realtime;
+  @override
+  void startRealtime() {
+    if (!board.disposed && !board.realtime) board.startRealtime();
+  }
+
+  @override
+  void stopRealtime() {
+    if (!board.disposed && board.realtime) board.stopRealtime();
+  }
+
+  @override
+  int get timeFrames => board.disposed ? 0 : board.timeFrames;
+  @override
+  int get sourceFn => board.lib.audioSource.address;
+  @override
+  int get sourceUser => board.handle.address;
+  @override
+  int get midiFn => board.lib.midiSink.address;
+  @override
+  int get midiUser => board.handle.address;
+  @override
+  bool get alive => !board.disposed;
+}
+
+class _VirtualBoardHandle extends Board {
+  final VirtualInstrument inst;
+  @override
+  final String label;
+  @override
+  final StrisoClient client;
+  _VirtualBoardHandle(this.inst, this.label) : client = StrisoClient(VirtualBoardTransport(inst.board));
+
+  @override
+  Mode get mode => Mode.virtual;
+  @override
+  PlayableBoard? get hand => inst.player;
+  @override
+  List<String>? get saveRoots {
+    final p = inst.board.drivePath;
+    return p == null ? const [] : [p];
+  }
+
+  @override
+  Future<void> close() async {
+    inst.player.releaseAll();
+    try {
+      await client.disconnect().timeout(const Duration(seconds: 2));
+    } catch (_) {}
+  }
+}
+
+class VirtualStrisoRuntime implements VirtualRuntime {
+  /// The library chosen (a path), or null for the first one found.
   String? libPath;
   final bool mockOnly;
 
-  VirtualBoard? board;
-  VirtualPlayer? player;
-  String? loadError;
+  /// Where the instrument's config flash is kept (null: not kept, tests).
+  final String? flashFile;
+  final void Function(String) log;
+
   StrisoVirtualLib? _lib;
+  String? loadError;
+  VirtualInstrument? instrument;
+  MockBoard? mock;
 
-  // the audition
-  StrisoClient? _real;
-  RealBoardMute? _mute;
-  AuditionOutput? _out;
-  bool _throughWas = false;
-  bool auditioning = false;
+  /// The instrument changed (started, stopped): SoundRouting attaches or detaches it.
+  final void Function()? onChanged;
 
-  /// Widget tests keep the Dart mock unless they name a build.
-  VirtualSupport(this.ctl, {this.libPath, bool mockOnly = false})
-    : mockOnly = mockOnly || (libPath == null && Platform.environment['FLUTTER_TEST'] == 'true');
+  VirtualStrisoRuntime({this.libPath, bool mockOnly = false, this.flashFile, required this.log, this.onChanged})
+    : mockOnly = mockOnly || (libPath == null && Platform.environment['FLUTTER_TEST'] == 'true' && Platform.environment['STRISO_VIRTUAL_LIB'] == null);
 
-  /// The library (the build given, or the one found), loaded once; null with [loadError].
+  /// The library, loaded once; null with [loadError].
   StrisoVirtualLib? get lib {
     if (_lib != null || mockOnly) return _lib;
     try {
@@ -54,152 +125,87 @@ class VirtualSupport {
 
   bool get available => lib != null;
 
-  /// The firmware build the virtual board runs (date, git describe, _all).
+  /// The firmware the library runs (sv_firmware_version: what StcV says first).
   String? get version => _lib?.firmwareVersion;
+  bool get isMock => instrument == null && mock != null;
+  VirtualSound? get sound => instrument;
 
-  /// The virtual board session runs (not the Dart mock).
-  bool get isVirtual => board != null && !board!.disposed;
+  String get label => isMock ? 'Demo (mock)' : 'Virtual Striso${version != null ? ' (${shortVersion(version!)})' : ''}';
 
-  /// The header and status texts.
-  String get pill => auditioning ? 'Virtual' : (isVirtual ? 'Virtual' : 'Demo (mock)');
-  String get sessionLabel => auditioning
-      ? 'Playing: virtual ${version ?? ''} with your Striso'
-      : (isVirtual ? 'Virtual Striso${version != null ? ' ($version)' : ''}' : 'Demo (the Dart mock: the virtual board did not load)');
-
-  /// The Virtual session's transport: the virtual board (booted on first use, in real time), or
-  /// the Dart mock when the library is not there.
-  Transport demoTransport() {
-    if (lib == null) {
-      ctl.log('virtual board: ${loadError ?? 'off (--mock-demo)'}; the Dart mock instead');
-      return MockTransport();
+  @override
+  Future<Board> open() async {
+    if (mockOnly) {
+      mock ??= MockBoard();
+      return TransportBoard(Mode.virtual, MockTransport(board: mock), label: 'Demo (mock)', hand: mock);
     }
-    if (board == null || board!.disposed) {
-      board = VirtualBoard(libPath: _lib!.path)..startRealtime();
-      player = VirtualPlayer(board!);
-      ctl.log('virtual board: ${_lib!.path}, firmware $version');
-    } else if (!board!.realtime) {
-      board!.startRealtime();
+    final l = lib;
+    if (l == null) throw VirtualError('The virtual Striso did not load: ${loadError ?? 'no striso_virtual library'}');
+    var inst = instrument;
+    if (inst == null || !inst.alive) {
+      final flash = _readFlash();
+      final b = VirtualBoard(libPath: l.path, flash: flash);
+      b.startRealtime(); // its own clock until the output takes it over
+      inst = instrument = VirtualInstrument(b);
+      log('virtual: ${l.path}, firmware ${l.firmwareVersion}${flash != null ? ', its settings from $flashFile' : ''}');
+      onChanged?.call();
+      if (!await waitBack()) throw const VirtualError('The virtual Striso did not start.');
     }
-    return VirtualBoardTransport(board!);
+    return _VirtualBoardHandle(inst, label);
   }
 
-  /// The bootloader's drive of the virtual board (Save to Striso).
-  List<String> driveRoots() {
-    final p = board?.drivePath;
-    return p == null ? const [] : [p];
-  }
-
-  /// After a save or a reset: the virtual board back on its USB, a new session.
-  Future<bool> reconnect() async {
-    final b = board;
-    if (b == null) return false;
+  @override
+  Future<bool> waitBack() async {
+    final b = instrument?.board;
+    if (b == null) return mock != null;
     final sw = Stopwatch()..start();
-    while (!b.attached && sw.elapsed < const Duration(seconds: 20)) {
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+    while (!b.disposed && !b.attached && sw.elapsed < const Duration(seconds: 20)) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
     }
-    if (!b.attached) return false;
-    return (await ctl.startSession(VirtualBoardTransport(b), ConnMode.demo)) == true;
+    return !b.disposed && b.attached;
   }
 
-  // --- the audition -----------------------------------------------------------------------------
-
-  /// A Striso on USB and a build to play.
-  bool get canAudition => !auditioning && ctl.mode == ConnMode.usb && ctl.client != null && available && ctl.audio.backend != null;
-
-  /// Plays the virtual board (the build at [path], else the one loaded) with the real Striso.
-  Future<bool> startAudition({String? path}) async {
-    if (auditioning) return true;
-    if (path != null && path != libPath) {
-      await stopBoard();
-      libPath = path;
-      _lib = null;
-    }
-    final real = ctl.client;
-    final backend = ctl.audio.backend;
-    if (real == null || ctl.mode != ConnMode.usb || backend == null || lib == null) {
-      ctl.toast(lib == null ? 'The virtual board did not load: ${loadError ?? ''}' : 'Connect the Striso first', 'warn');
-      return false;
-    }
-    final audioLib = _audioLibrary();
-    _out = audioLib == null ? null : AuditionOutput.of(audioLib);
-    if (_out == null) {
-      ctl.toast('This audio engine has no output source (sa_set_source): the audition needs it', 'warn');
-      return false;
-    }
-    // the real board: muted, streaming into the virtual one, out of the controller's hands
-    _mute = RealBoardMute(real);
-    if (!await _mute!.mute()) ctl.log('audition: the board has no effects level to mute it with');
-    await stopBoard();
-    board = VirtualBoard(libPath: _lib!.path, serial: 2);
-    player = VirtualPlayer(board!);
-    final feed = AuditionFeed(board!);
-    _real = ctl.releaseClient();
-    _real!.onStream = (src, id, v, n) {
-      feed.onStream(src, id, v, n);
-      ctl.live.apply(src, id, v, n, clockMs());
-    };
-    _real!.closed.listen((_) => stopAudition(reconnect: false));
-    if (!_real!.streaming) unawaited(_real!.startStream());
-    // the output alone, the virtual board rendering in its callback
-    _throughWas = ctl.audio.through;
-    if (_throughWas) ctl.audio.setThrough(false);
-    await Future<void>.delayed(const Duration(milliseconds: 300)); // Through PC lets go of the devices
-    // (sa_init starts the engine afresh: the source goes on after it)
-    if (!backend.init()) {
-      ctl.toast('The computer’s audio system did not start: the audition has no sound', 'warn');
-    }
-    _out!.attach(board!);
-    _out!.open(output: ctl.audio.prefs.output ?? '', period: 144, exclusive: Platform.isWindows);
-    auditioning = true;
-    ctl.log('audition: ${_lib!.path} (firmware $version); the board is muted');
-    final ok = (await ctl.startSession(VirtualBoardTransport(board!), ConnMode.demo)) == true;
-    if (!ok) {
-      await stopAudition();
-      return false;
-    }
-    return true;
+  @override
+  Future<void> stop() async {
+    mock = null;
+    final inst = instrument;
+    if (inst == null) return;
+    instrument = null;
+    onChanged?.call(); // SoundRouting detaches the source (it waits for the callback to leave it)
+    keepFlash(inst);
+    inst.player.dispose();
+    inst.board.dispose();
+    log('virtual: stopped');
   }
 
-  /// Back to the real Striso: its synth unmuted, the app connected to it again.
-  Future<void> stopAudition({bool reconnect = true}) async {
-    if (!auditioning) return;
-    auditioning = false;
-    await ctl.endSession(quiet: true);
-    _out?.open(run: false);
-    _out?.detach();
-    _out = null;
-    if (_throughWas) ctl.audio.setThrough(true);
-    final real = _real;
-    _real = null;
-    if (real != null) {
-      await _mute?.restore();
-      await real.disconnect();
+  Uint8List? _readFlash() {
+    final f = flashFile;
+    if (f == null) return null;
+    try {
+      final file = File(f);
+      return file.existsSync() ? file.readAsBytesSync() : null;
+    } catch (e) {
+      log('virtual: could not read $f: $e');
+      return null;
     }
-    _mute = null;
-    await stopBoard();
-    ctl.log('audition ended');
-    if (reconnect) unawaited(ctl.userConnect());
   }
 
-  Future<void> stopBoard() async {
-    player?.dispose();
-    player = null;
-    board?.dispose();
-    board = null;
-  }
-
-  DynamicLibrary? _audioLibrary() {
-    for (final p in strisoAudioCandidates()) {
-      try {
-        if ((p.contains('/') || p.contains(Platform.pathSeparator)) && !File(p).existsSync()) continue;
-        return DynamicLibrary.open(p);
-      } catch (_) {}
+  /// The instrument's config flash to disk (after Save, and when it stops).
+  void keepFlash([VirtualInstrument? inst]) {
+    final f = flashFile, b = (inst ?? instrument)?.board;
+    if (f == null || b == null || b.disposed) return;
+    try {
+      File(f).parent.createSync(recursive: true);
+      File(f).writeAsBytesSync(b.flash, flush: true);
+    } catch (e) {
+      log('virtual: could not keep its settings in $f: $e');
     }
-    return null;
   }
+}
 
-  Future<void> dispose() async {
-    if (auditioning) await stopAudition(reconnect: false);
-    await stopBoard();
-  }
+/// "2026-10-24 v2.2.4-80-ga647e81" -> "a647e81" (the commit), else the version as it is.
+String shortVersion(String v) {
+  final m = RegExp(r'-g([0-9a-f]{7,})').firstMatch(v);
+  if (m != null) return m.group(1)!;
+  final parts = v.trim().split(RegExp(r'\s+'));
+  return parts.length > 1 ? parts[1] : v;
 }

@@ -18,7 +18,6 @@ export 'src/bindings.dart'
         svTestFxInit,
         svTestMotionOff,
         svFlashSize;
-export 'src/audition.dart';
 export 'src/board.dart';
 export 'src/player.dart';
 export 'src/transport.dart';

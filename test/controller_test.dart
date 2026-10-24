@@ -99,7 +99,7 @@ void main() {
     final ctl = make(usb, intent: 'connected');
     await pumpUntil(tester, ctl.start());
     await waitFor(tester, () => ctl.dot == Dot.on && !ctl.listsLoading);
-    expect(ctl.mode, ConnMode.usb);
+    expect(ctl.mode, Mode.striso);
     expect(ctl.status, 'Connected');
     expect(ctl.trace!.keys, containsAll(['connect', 'version', 'live']));
     expect(ctl.voices.length, 65);

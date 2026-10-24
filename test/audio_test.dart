@@ -1,6 +1,7 @@
-// Through PC in the app, against the fake audio backend (no audio device, no window): the
-// choices survive a restart through settings.json, the header toggle and pip, Setup › Audio,
-// recording with its time and Show in folder, and the header at the narrowest window.
+// Through PC in the app, against the fake audio backend (no audio device, no window): it plays
+// only while the Striso is connected (the session's route), the choices survive a restart through
+// settings.json, the header toggle and pip, Setup › Audio, recording with its time and Show in
+// folder, and the header at the narrowest window.
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -11,19 +12,46 @@ import 'package:striso_live/src/controller.dart';
 import 'package:striso_live/src/store.dart';
 import 'package:striso_live/src/theme.dart';
 
-Future<AppController> boot(WidgetTester tester, FakeAudioBackend fake, {Store? store, Size size = const Size(1600, 1500)}) async {
+import 'controller_test.dart' show FakeUsb;
+
+Future<AppController> boot(WidgetTester tester, FakeAudioBackend? fake, {Store? store, Size size = const Size(1600, 1500)}) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   final ctl = AppController(
-    options: const AppOptions(noUsb: true),
+    options: const AppOptions(),
     store: store ?? Store.memory(),
+    usb: FakeUsb(),
     audioBackend: fake,
     backupDir: '${Directory.systemTemp.path}/striso_live_test_backups',
   );
   await tester.pumpWidget(StrisoLiveApp(ctl));
   await tester.pump();
   return ctl;
+}
+
+/// Connects the Striso (the fake USB's demo board) and waits for the lists.
+Future<void> connect(WidgetTester tester, AppController ctl) async {
+  var done = false;
+  ctl.userConnect().then((_) => done = true);
+  for (var i = 0; i < 300 && !(done && !ctl.listsLoading); i++) {
+    await tester.pump(const Duration(milliseconds: 20));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 2)));
+  }
+  expect(ctl.state, isA<Live>());
+}
+
+/// Ends the session and lets its timers run out.
+Future<void> end(WidgetTester tester, AppController ctl) async {
+  var done = false;
+  ctl.endSession().then((_) => done = true);
+  for (var i = 0; i < 200 && !done; i++) {
+    await tester.pump(const Duration(milliseconds: 20));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
+  }
+  for (var t = 0; t < 7000; t += 50) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
 }
 
 /// Ticks Through PC like its timer would, then lets the widgets catch up.
@@ -53,7 +81,7 @@ void main() {
     a.audio.setExclusive(false);
     a.audio.setExclusiveOutput(true);
     a.dispose();
-    expect(fake.shutdownCalled, isTrue);
+    expect(fake.inited, isFalse, reason: 'no session: the audio engine never started');
 
     final fake2 = FakeAudioBackend();
     final b = AppController(options: const AppOptions(noUsb: true), store: Store(path), audioBackend: fake2);
@@ -61,6 +89,12 @@ void main() {
       b.audio.prefs,
       const AudioPrefs(through: true, gainDb: -12, output: 'Headphones (USB)', period: 64, exclusive: false, exclusiveOutput: true),
     );
+    for (var i = 0; i < 4; i++) {
+      b.audio.tick();
+    }
+    expect(fake2.last.run, isFalse, reason: 'Through PC on, but no Striso session: nothing opens');
+    expect(fake2.anyOpen, isFalse);
+    b.audio.setRoute(AudioRoute.input); // what a Striso session does
     for (var i = 0; i < 4; i++) {
       b.audio.tick();
     }
@@ -83,6 +117,8 @@ void main() {
   testWidgets('header: the Through PC toggle plays the Striso, the pip follows the level', (tester) async {
     final fake = FakeAudioBackend();
     final ctl = await boot(tester, fake);
+    expect(find.text('Through PC'), findsNothing, reason: 'only in Striso mode');
+    await connect(tester, ctl);
     expect(find.text('Through PC'), findsOneWidget);
     final pip = find.byKey(const Key('through-pip'));
     expect((tester.widget<Pip>(pip)).hollow, isTrue);
@@ -100,15 +136,17 @@ void main() {
     fake.unplug();
     await ticks(tester, ctl, 2);
     expect(tester.widget<Pip>(pip).color, Pal.error, reason: 'the input is gone');
+    await end(tester, ctl);
     ctl.dispose();
   });
 
   testWidgets('Setup › Audio: devices, buffer, latency, status, Record and Show in folder', (tester) async {
     final fake = FakeAudioBackend();
     final ctl = await boot(tester, fake);
+    await connect(tester, ctl);
     ctl.setTab(AppTab.setup);
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('The Striso’s synth comes over USB; the headphone jack keeps working.'), findsOneWidget);
+    expect(find.textContaining('the Striso’s synth comes over USB to this computer while it is connected'), findsOneWidget);
     await ticks(tester, ctl);
     expect(fake.enumerations, greaterThan(0), reason: 'the pickers ask for the devices');
     expect(find.text('Automatic: Striso Synth (Striso Synth)'), findsOneWidget);
@@ -158,31 +196,32 @@ void main() {
     expect(find.byKey(const Key('rec-indicator')), findsNothing);
     expect(find.byKey(const Key('audio-reveal')), findsOneWidget);
     expect(find.textContaining('.wav'), findsOneWidget);
+    await end(tester, ctl);
     ctl.dispose();
   });
 
   testWidgets('a Bluetooth output: a one-line note under the output', (tester) async {
     final fake = FakeAudioBackend(outputs: [const AudioDevice('Speakers (EDIFIER MR5)', id: 'bt', transport: AudioTransport.bluetooth, isDefault: true)]);
     final ctl = await boot(tester, fake);
+    await connect(tester, ctl);
     ctl.setTab(AppTab.setup);
     await tester.pump(const Duration(milliseconds: 300));
     ctl.audio.setThrough(true);
     await ticks(tester, ctl);
     expect(find.text('Bluetooth adds ~150–250 ms. Use a wired output for playing.'), findsOneWidget);
     expect(fake.last.exclusiveOutput, isFalse);
+    await end(tester, ctl);
     ctl.dispose();
   });
 
   testWidgets('no audio library: the toggle is there but disabled, Setup says why', (tester) async {
-    tester.view.physicalSize = const Size(1600, 1500);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    final ctl = AppController(options: const AppOptions(noUsb: true), store: Store.memory());
-    await tester.pumpWidget(StrisoLiveApp(ctl));
+    final ctl = await boot(tester, null);
+    await connect(tester, ctl);
     ctl.setTab(AppTab.setup);
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.byKey(const Key('through-toggle')), findsOneWidget);
     expect(find.textContaining('missing from this build'), findsWidgets);
+    await end(tester, ctl);
     ctl.dispose();
   });
 
@@ -190,14 +229,9 @@ void main() {
     final fake = FakeAudioBackend();
     final ctl = await boot(tester, fake, size: const Size(1000, 760));
     fake.documents = tmp.path;
+    await connect(tester, ctl);
     ctl.audio.setThrough(true);
     ctl.audio.startRecording();
-    await ticks(tester, ctl);
-    await tester.tap(find.byKey(const Key('btn-demo')));
-    for (var i = 0; i < 40 && !ctl.connected; i++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
-      await tester.pump(const Duration(milliseconds: 50));
-    }
     await ticks(tester, ctl);
     expect(ctl.audio.recording, isTrue);
     expect(find.text('Through PC'), findsNothing, reason: 'the label folds away when narrow');
@@ -210,16 +244,7 @@ void main() {
     expect(find.byKey(const Key('rec-indicator')), findsOneWidget);
     ctl.audio.stopRecording();
     await ticks(tester, ctl);
-    // end the demo session and let its timers run out
-    var done = false;
-    ctl.endSession().then((_) => done = true);
-    for (var i = 0; i < 200 && !done; i++) {
-      await tester.pump(const Duration(milliseconds: 20));
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
-    }
-    for (var t = 0; t < 7000; t += 50) {
-      await tester.pump(const Duration(milliseconds: 50));
-    }
+    await end(tester, ctl);
     await tester.pumpWidget(const SizedBox());
     ctl.dispose();
   });

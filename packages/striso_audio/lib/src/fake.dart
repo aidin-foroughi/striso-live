@@ -119,7 +119,15 @@ class FakeAudioBackend implements AudioBackend {
     final c = _pending;
     var cap = DevState.closed, play = DevState.closed;
     var ce = AudioErr.ok, pe = AudioErr.ok;
-    if (c.run) {
+    if (c.run && c.outputOnly) {
+      final outThere = c.output.isEmpty || outputs.any((d) => d.name == c.output);
+      if (failOutput || !outThere) {
+        play = DevState.failed;
+        pe = outThere ? AudioErr.openPlayback : AudioErr.notFound;
+      } else {
+        play = DevState.running;
+      }
+    } else if (c.run) {
       final there = inputs.any((d) => d.name == c.input);
       if (!there) {
         cap = DevState.failed;
@@ -249,6 +257,20 @@ class FakeAudioBackend implements AudioBackend {
 
   @override
   void requestMic() => micRequested = true;
+
+  /// The attached source (sa_set_source), 0 when none; how often it was set.
+  int sourceFn = 0, sourceUser = 0, sourceSets = 0;
+
+  @override
+  int setSource(int fn, int user) {
+    sourceFn = fn;
+    sourceUser = user;
+    sourceSets++;
+    return 0;
+  }
+
+  /// A device is open (the last configure runs one).
+  bool get anyOpen => _st.capture == DevState.running || _st.playback == DevState.running;
 
   AudioStatus _copy({
     bool? initialised,

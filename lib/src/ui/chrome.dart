@@ -197,7 +197,8 @@ class ToastLayer extends StatelessWidget {
   }
 }
 
-/// On the board while disconnected (no card): title, one sentence, Connect and Try the demo.
+/// On the board while disconnected (no card): title, one sentence, Connect Striso and Play Virtual
+/// Striso (the two modes).
 class InviteCard extends StatelessWidget {
   final AppController ctl;
   const InviteCard(this.ctl, {super.key});
@@ -216,19 +217,26 @@ class InviteCard extends StatelessWidget {
             children: [
               Text('Plug in your Striso', style: ui(TypeSize.title, weight: FontWeight.w600)),
               const SizedBox(height: Space.s),
-              Text('Striso Live talks to the board directly over USB. Plug it in and switch it on.', style: ui(TypeSize.body, color: Pal.text2)),
+              Text('Connect your Striso over USB, or play the virtual Striso on this computer.', style: ui(TypeSize.body, color: Pal.text2)),
               const SizedBox(height: Space.l),
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Btn(
-                    ctl.invite == InviteState.reconnect ? 'Connect now' : 'Connect',
+                    ctl.invite == InviteState.reconnect ? 'Connect Striso now' : 'Connect Striso',
                     key: const Key('btn-connect-2'),
                     kind: BtnKind.primary,
+                    tooltip: 'Your Striso over USB: its own sound, voices and settings',
                     onPressed: busy ? null : ctl.userConnect,
                   ),
                   const SizedBox(width: Space.s),
-                  Btn('Try the virtual Striso', key: const Key('btn-demo'), kind: BtnKind.ghost, onPressed: busy ? null : ctl.connectDemo),
+                  Btn(
+                    'Play Virtual Striso',
+                    key: const Key('btn-demo'),
+                    kind: BtnKind.ghost,
+                    tooltip: 'The firmware as a soft instrument on this computer: play it from MIDI controllers or the screen, no Striso needed',
+                    onPressed: busy ? null : ctl.playVirtual,
+                  ),
                 ],
               ),
               if (ctl.inviteText.isNotEmpty) ...[const SizedBox(height: Space.m), Text(ctl.inviteText, style: ui(TypeSize.small, color: Pal.accent))],

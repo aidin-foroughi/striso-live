@@ -176,6 +176,10 @@ class StrisoVirtualLib {
   /// The address of sv_audio_source: an audio callback for striso_audio's sa_set_source.
   Pointer<Void> get audioSource => _l.lookup<Void>('sv_audio_source');
 
+  /// The address of sv_midi_write (the board's USB-MIDI input): a sink for striso_audio's MIDI
+  /// inputs (sa_midi_set_sink), the board as its user pointer.
+  Pointer<Void> get midiSink => _l.lookup<Void>('sv_midi_write');
+
   /// The library, or throws (the candidates tried in the message). With [explicit], that file
   /// only (a candidate firmware build's striso_virtual); else the first one found, once per isolate.
   static StrisoVirtualLib load({String? explicit}) {

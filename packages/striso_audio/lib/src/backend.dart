@@ -390,4 +390,10 @@ abstract class AudioBackend {
 
   /// macOS: the audio input permission prompt.
   void requestMic();
+
+  /// The output's own source for the output alone (sa_set_source): an sa_source_fn and its user
+  /// pointer as addresses, 0 and 0 to detach. Returns 0 once the output callback is no longer in
+  /// the previous source, < 0 when it could not be set (no such function in this build, or the
+  /// callback did not leave it in time).
+  int setSource(int fn, int user);
 }

@@ -90,7 +90,7 @@ void main() {
       expect(v!.line, startsWith(b.firmwareVersion));
       expect(v.line, contains('virtual'));
       final voices = await c.listVoices();
-      expect(voices.length, 56);
+      expect(voices.length, b.state.voices);
       expect(voices.first.name, 'strisy');
       expect(voices.where((x) => x.current).single.name, 'va:classic');
       for (final t in [Target.voice, Target.fx, Target.touch, Target.keys]) {

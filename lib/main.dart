@@ -101,7 +101,7 @@ void main(List<String> args) {
     if (smoke != null) {
       Timer(Duration(milliseconds: (smoke * 1000).round()), () async {
         appLog.info(
-          'smoke: ok after ${smoke}s, ${ctl.connected ? 'connected (${ctl.mode.name})' : 'not connected'}, ${ctl.voices.length} voices, '
+          'smoke: ok after ${smoke}s, ${ctl.connected ? 'connected (${ctl.mode?.name})' : 'not connected'}, ${ctl.voices.length} voices, '
           'audio ${ctl.audio.state.name}',
         );
         // the same way out as closing the window: the exit handler lets go of the board

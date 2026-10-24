@@ -673,7 +673,7 @@ class TuningChip extends StatelessWidget {
             ),
           if (ctl.playable) ...[
             const PopupMenuDivider(),
-            PopupMenuItem(enabled: false, height: Sizes.row, child: Text(ctl.virtual.isVirtual ? 'Virtual board tuning' : 'Demo board tuning', style: microStyle())),
+            PopupMenuItem(enabled: false, height: Sizes.row, child: Text(!ctl.virtual.isMock ? 'Virtual board tuning' : 'Demo board tuning', style: microStyle())),
             for (final (n, l) in demoTunings)
               PopupMenuItem(
                 value: 'demo:$n',
@@ -747,10 +747,10 @@ class SoundName extends StatelessWidget {
           Row(
             children: [
               if (engine.isNotEmpty) Text(engineInfo(engine).label.toLowerCase(), style: ui(TypeSize.small, color: engineColor(engine))),
-              if (ctl.mode == ConnMode.demo && ctl.connected) ...[
+              if (ctl.isVirtual && ctl.connected) ...[
                 const SizedBox(width: Space.s),
                 Text(
-                  ctl.virtual.isVirtual ? 'VIRTUAL' : 'DEMO',
+                  !ctl.virtual.isMock ? 'VIRTUAL' : 'DEMO',
                   key: const Key('demo-chip'),
                   style: microStyle(color: Pal.demo),
                 ),
@@ -780,10 +780,10 @@ class SoundName extends StatelessWidget {
             child: Text(engineInfo(engine).label.toLowerCase(), maxLines: 1, overflow: TextOverflow.ellipsis, style: ui(TypeSize.small, color: engineColor(engine))),
           ),
         ],
-        if (ctl.mode == ConnMode.demo && ctl.connected) ...[
+        if (ctl.isVirtual && ctl.connected) ...[
           const SizedBox(width: Space.s),
           Text(
-            ctl.virtual.isVirtual ? 'VIRTUAL' : 'DEMO',
+            !ctl.virtual.isMock ? 'VIRTUAL' : 'DEMO',
             key: const Key('demo-chip'),
             style: microStyle(color: Pal.demo),
           ),

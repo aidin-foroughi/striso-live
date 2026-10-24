@@ -233,6 +233,8 @@ class _AudioSectionState extends State<AudioSection> {
           if (p.output != null && !a.outputs.any((d) => d.name == p.output)) (p.output!, '${p.output} (not connected)'),
         ];
         final rec = a.recording;
+        // Virtual: the output alone (its source is the virtual Striso); Through PC is the Striso's
+        final virtual = widget.ctl.isVirtual;
         final body = Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -240,13 +242,18 @@ class _AudioSectionState extends State<AudioSection> {
               children: [
                 const Micro('Audio'),
                 const Spacer(),
-                Toggle(key: const Key('audio-through'), value: p.through, onChanged: a.setThrough, label: 'Through PC'),
+                if (!virtual) Toggle(key: const Key('audio-through'), value: p.through, onChanged: a.setThrough, label: 'Through PC'),
               ],
             ),
             const SizedBox(height: Space.xs),
-            Text('The Striso’s synth comes over USB; the headphone jack keeps working.', style: ui(TypeSize.small, color: Pal.text3)),
+            Text(
+              virtual
+                  ? 'The virtual Striso plays to this output.'
+                  : 'Through PC: the Striso’s synth comes over USB to this computer while it is connected; the headphone jack keeps working.',
+              style: ui(TypeSize.small, color: Pal.text3),
+            ),
             const SizedBox(height: Space.s),
-            _row(
+            if (!virtual) _row(
               'Input',
               LayoutBuilder(
                 builder: (context, box) => SmallSelect<String>(
@@ -309,7 +316,7 @@ class _AudioSectionState extends State<AudioSection> {
               tip: 'What the system granted for the input and the output, whatever the toggles ask',
             ),
             _rowTall('Dropouts', _Dropouts(widget.ctl)),
-            if (a.boardTargetSupported == true) ...[
+            if (a.boardTargetSupported == true && !virtual) ...[
               _row(
                 'Striso buffer',
                 FittedBox(
@@ -330,7 +337,7 @@ class _AudioSectionState extends State<AudioSection> {
               ),
               _BoardLine(widget.ctl),
             ],
-            if (Platform.isWindows)
+            if (Platform.isWindows && !virtual)
               _row(
                 '',
                 FittedBox(
@@ -356,11 +363,10 @@ class _AudioSectionState extends State<AudioSection> {
                     'Bluetooth outputs always play shared.',
               ),
             _row('Gain', _Gain(a)),
-            _row('Level', _LevelBars(widget.ctl)),
+            if (!virtual) _row('Level', _LevelBars(widget.ctl)),
             const SizedBox(height: Space.xs),
             _StatusLine(widget.ctl),
-            const SizedBox(height: Space.m),
-            _RecordRow(widget.ctl),
+            if (!virtual) ...[const SizedBox(height: Space.m), _RecordRow(widget.ctl)],
           ],
         );
         return Opacity(

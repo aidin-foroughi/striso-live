@@ -1,6 +1,7 @@
-// The header (DESIGN.md 3): brand and name, the tabs centred, the CPU sparkline, Through PC (a
-// toggle and a level pip; the recording time while recording), the connection (a click opens the
-// console) and Connect / Disconnect. In stage mode it shrinks to a 24 px strip.
+// The header (DESIGN.md 3): brand and name, the mode (Striso | Virtual), the tabs centred, the CPU
+// sparkline, Through PC in Striso mode (a toggle and a level pip; the recording time while
+// recording) or the MIDI input in Virtual, the status line (a click opens the console) and
+// Connect / Disconnect. In stage mode it shrinks to a 24 px strip.
 
 import 'dart:math' as math;
 
@@ -8,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:striso_core/striso_core.dart';
 
 import '../controller.dart';
+import 'midi_picker.dart';
 import '../theme.dart';
 import 'audio.dart';
 import 'chrome.dart';
@@ -28,7 +30,8 @@ class TopBar extends StatelessWidget {
           final throughLabel = box.maxWidth >= 1280;
           final rightRoom = box.maxWidth / 2 - 110 - Space.gutter;
           final others =
-              (ctl.connected ? 56 + Space.s + 32 + Space.xl : 0) +
+              (ctl.connected && box.maxWidth >= 1000 ? 56 + Space.s + 32 + Space.xl : 0) +
+              150 +
               (throughLabel ? 118 : 46) +
               Space.l +
               (ctl.audio.recording ? 60 : 0) +
@@ -51,32 +54,23 @@ class TopBar extends StatelessWidget {
                       Text('Striso', style: ui(TypeSize.title, weight: FontWeight.w600)),
                       Text(' Live', style: ui(TypeSize.title, color: Pal.text2)),
                     ],
+                    const SizedBox(width: Space.l),
+                    ModeControl(ctl),
                     const Spacer(),
-                    if (ctl.connected) ...[CpuIndicator(ctl), const SizedBox(width: Space.xl)],
-                    ThroughToggle(ctl, label: throughLabel),
+                    if (ctl.connected && box.maxWidth >= 1000) ...[CpuIndicator(ctl), const SizedBox(width: Space.xl)],
+                    if (ctl.mode == Mode.virtual) InputPicker(ctl, label: throughLabel) else if (ctl.mode == Mode.striso) ThroughToggle(ctl, label: throughLabel),
                     RecIndicator(ctl),
                     const SizedBox(width: Space.l),
                     ConnectionStatus(ctl, maxWidth: statusMax),
                     const SizedBox(width: Space.m),
-                    if (ctl.virtual.canAudition || ctl.virtual.auditioning) ...[
-                      Tooltip(
-                        message: ctl.virtual.auditioning
-                            ? 'Playing the virtual board (${ctl.virtual.version ?? ''}) with your Striso; its own synth is muted. Click to go back to it.'
-                            : 'Play the virtual board (${ctl.virtual.version ?? 'striso_virtual'}) with your Striso as the controller: hear a firmware build without flashing it. The Striso\'s own synth is muted meanwhile.',
-                        child: Btn(
-                          ctl.virtual.auditioning ? 'Stop virtual' : 'Play virtual',
-                          key: const Key('btn-audition'),
-                          kind: BtnKind.ghost,
-                          onPressed: ctl.connecting ? null : () => ctl.virtual.auditioning ? ctl.virtual.stopAudition() : ctl.virtual.startAudition(),
-                        ),
-                      ),
-                      const SizedBox(width: Space.m),
-                    ],
                     Btn(
                       ctl.connectLabel,
                       key: const Key('btn-connect'),
                       kind: !ctl.connected && ctl.boardPresent && !ctl.reconnectPending ? BtnKind.primary : BtnKind.secondary,
-                      onPressed: ctl.connecting ? null : ctl.connectButton,
+                      tooltip: ctl.connectLabel == 'Disconnect'
+                          ? 'End the session: the board, its sound, Through PC and MIDI all stop'
+                          : (ctl.connectLabel == 'Cancel' ? 'Do not reconnect' : 'Connect the Striso over USB'),
+                      onPressed: ctl.connecting && !ctl.isVirtual ? null : ctl.connectButton,
                     ),
                   ],
                 ),
@@ -101,11 +95,14 @@ class ConnectionStatus extends StatelessWidget {
   Widget build(BuildContext context) {
     final v = ctl.version;
     return ListenableBuilder(
-      listenable: ctl.stats,
+      listenable: Listenable.merge([ctl.stats, ctl.audioState]),
       builder: (context, _) {
+        final line = ctl.saving ? 'Saving to the Striso…' : ctl.statusLine;
         final tip = [
           ctl.status,
+          if (ctl.soundLine.isNotEmpty) ctl.soundLine,
           if (v != null) 'Firmware ${v.fw}',
+          'Running: ${ctl.session.resources}',
           if (ctl.connected) '${ctl.live.activeCount()} keys down, ${ctl.live.rate.round()} messages/s${ctl.streamStalled ? ' (stream silent)' : ''}',
           'Click for the console',
         ].join('\n');
@@ -123,7 +120,7 @@ class ConnectionStatus extends StatelessWidget {
                   ConstrainedBox(
                     constraints: BoxConstraints(maxWidth: maxWidth),
                     child: Text(
-                      ctl.saving ? 'Saving to the Striso…' : (ctl.mode == ConnMode.demo && ctl.connected ? ctl.virtual.pill : ctl.status),
+                      line,
                       key: const Key('status'),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -277,4 +274,37 @@ class LoadSparkline extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant LoadSparkline old) => true;
+}
+
+/// Striso | Virtual: the two modes. A click on the other one ends this session completely and
+/// starts that one; nothing is selected while idle.
+class ModeControl extends StatelessWidget {
+  final AppController ctl;
+  const ModeControl(this.ctl, {super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final busy = ctl.saving;
+    return Opacity(
+      opacity: busy ? 0.35 : 1,
+      child: IgnorePointer(
+        ignoring: busy,
+        child: Seg<Mode?>(
+          keys: const {Mode.striso: Key('mode-striso'), Mode.virtual: Key('mode-virtual')},
+          items: [
+            (Mode.striso, 'Striso', 'Your Striso over USB: its own sound (and Through PC), its voices and settings'),
+            (
+              Mode.virtual,
+              'Virtual',
+              'The virtual Striso: the firmware as a soft instrument on this computer, played from MIDI controllers or the screen${ctl.virtual.version != null ? ' (${ctl.virtual.version})' : ''}',
+            ),
+          ],
+          value: ctl.mode,
+          onChanged: (m) {
+            if (m != null && m != ctl.mode) ctl.setMode(m);
+          },
+        ),
+      ),
+    );
+  }
 }

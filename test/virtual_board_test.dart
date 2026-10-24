@@ -2,7 +2,7 @@
 // as the USB board (a fake USB backend whose transport is a virtual board) and as Virtual (what
 // Demo was): connect, the lists, voice switch, a live parameter and its undo, A/B, touch and key
 // parameters, StcK tunings and the quarter-tone labels, the settings overlay's clicks, Save to
-// Striso through the virtual board's bootloader drive, a reset and the reconnect, the audition.
+// Striso through the virtual board's bootloader drive, a reset and the reconnect; Virtual's sound.
 // Needs the library (cmake --build --preset host-virtual in the firmware checkout; found as the
 // striso_virtual package finds it); skips with the reason otherwise.
 import 'dart:io';
@@ -83,9 +83,9 @@ void main() {
     final ctl = AppController(options: const AppOptions(), store: Store.memory()..set('usbIntent', 'connected'), usb: VirtualUsb(b));
     await run(tester, ctl.start());
     await waitFor(tester, () => ctl.dot == Dot.on && !ctl.listsLoading);
-    expect(ctl.mode, ConnMode.usb);
+    expect(ctl.mode, Mode.striso);
     expect(ctl.version!.line, startsWith(b.firmwareVersion));
-    expect(ctl.voices.length, 56);
+    expect(ctl.voices.length, b.state.voices);
     expect(ctl.voiceName, 'va:classic');
 
     // voice switch
@@ -159,13 +159,12 @@ void main() {
       store: Store.memory(),
       backupDir: dir!.path,
     );
-    await run(tester, ctl.connectDemo());
+    await run(tester, ctl.playVirtual());
     await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
-    expect(ctl.virtual.isVirtual, isTrue);
-    expect(ctl.virtual.pill, 'Virtual');
+    expect(ctl.virtual.isMock, isFalse);
     expect(ctl.status, startsWith('Virtual Striso'));
     expect(ctl.playable, isTrue);
-    expect(ctl.voices.length, 56);
+    expect(ctl.voices.length, ctl.virtual.instrument!.board.state.voices);
     // playing it by hand: the stream shows the key
     ctl.playBoard!.press(30, pres: 0.5, strike: 0.6);
     await waitFor(tester, () => ctl.live.activeCount() > 0);
@@ -183,50 +182,98 @@ void main() {
     await tester.runAsync(() async => dir.deleteSync(recursive: true));
   });
 
-  final audio = Platform.environment['STRISO_AUDIO_LIB'];
-  testWidgets(
-    'the audition: the Striso plays the virtual board through the output source; muted, then restored',
-    skip: skip != null || audio == null,
-    (tester) async {
-      late VirtualBoard real;
-      await tester.runAsync(() async => real = VirtualBoard(libPath: lib, serial: 7)..startRealtime());
-      final backend = NativeAudioBackend.tryLoad(explicit: audio, backend: backendNull);
-      final ctl = AppController(
-        options: AppOptions(virtualLib: lib),
-        store: Store.memory()..set('usbIntent', 'connected'),
-        usb: VirtualUsb(real),
-        audioBackend: backend,
-      );
-      await run(tester, ctl.start());
-      await waitFor(tester, () => ctl.dot == Dot.on && !ctl.listsLoading);
-      final level = ctl.findParam(1, 'level')!.value;
-      expect(ctl.virtual.canAudition, isTrue);
-      expect(await run(tester, ctl.virtual.startAudition()), isTrue);
-      await waitFor(tester, () => ctl.virtual.auditioning && ctl.dot == Dot.demo && !ctl.listsLoading);
-      expect(ctl.status, startsWith('Playing: virtual'));
-      // the real board is muted; the virtual one runs in the output's callback
-      final c = StrisoClient(VirtualBoardTransport(real));
-      final t0 = ctl.virtual.board!.timeFrames;
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 600))); // real time: the device runs
-      final st = backend!.status();
-      expect(
-        ctl.virtual.board!.timeFrames - t0,
-        greaterThan(4800),
-        reason: 'output: ${st.playback} err ${st.playbackError} cb ${st.playbackCallbacks} init ${st.initialised}',
-      );
-      // a key on the real board reaches the virtual board
-      final pl = VirtualPlayer(real)..press(30, pres: 0.5, strike: 0.5);
-      await waitFor(tester, () => ctl.virtual.board!.state.controls.any((v) => v[1] > 0));
-      pl.release(30);
-      pl.dispose();
-      await run(tester, ctl.virtual.stopAudition());
-      await waitFor(tester, () => ctl.mode == ConnMode.usb && ctl.dot == Dot.on && !ctl.listsLoading, ms: 15000);
-      expect(ctl.findParam(1, 'level')!.value, level);
-      await finish(tester, ctl);
-      await tester.runAsync(() async {
-        await c.disconnect();
-        real.dispose();
-      });
-    },
-  );
+
+  // --- the user's reports: Virtual silent without Through PC; sound changes "locked" -------------
+  final audioLib = Platform.environment['STRISO_AUDIO_LIB'];
+  final noAudio = skip != null || audioLib == null;
+
+  AppController virtualApp({bool through = false, String? output}) {
+    final backend = NativeAudioBackend.tryLoad(explicit: audioLib, backend: backendNull);
+    final ctl = AppController(options: AppOptions(virtualLib: lib, noUsb: true), store: Store.memory(), audioBackend: backend);
+    if (through) ctl.audio.setThrough(true);
+    if (output != null) ctl.audio.setOutput(output);
+    return ctl;
+  }
+
+  Future<int> framesIn(WidgetTester tester, VirtualBoard b, {int ms = 500}) async {
+    final t0 = b.timeFrames;
+    await settle(tester, ms: ms);
+    return b.timeFrames - t0;
+  }
+
+  testWidgets('Virtual with Through PC off: the output plays the virtual board; voices, presets and settings keys change what plays', skip: noAudio, (
+    tester,
+  ) async {
+    final ctl = virtualApp();
+    await run(tester, ctl.start());
+    expect(ctl.audio.through, isFalse);
+    await run(tester, ctl.playVirtual());
+    await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+    final b = ctl.virtual.instrument!.board;
+    await waitFor(tester, () => ctl.routing.heard, ms: 4000);
+    expect(b.realtime, isFalse, reason: 'clocked by the output');
+    expect(await framesIn(tester, b), greaterThan(4800), reason: 'the output renders the virtual board');
+    expect(ctl.soundLine, contains('Virtual Striso'));
+    expect(ctl.soundLine, contains('→'));
+    expect(ctl.audio.route, AudioRoute.source);
+    // voice, then a preset of it, from the app: the board's synth follows, every time
+    for (final engine in ['bowed', 'ep', 'va']) {
+      final vs = ctl.voices.where((x) => x.engine == engine).take(2).toList();
+      for (final v in vs) {
+        await run(tester, ctl.selectVoice(v.index));
+        await waitFor(tester, () => ctl.voiceName == v.name);
+        expect(b.state.voice, v.index, reason: v.name);
+      }
+    }
+    // a settings key (the overlay): the voice key for bowed (24)
+    ctl.toggleSettings(true);
+    expect(ctl.settingsClick(24), isTrue);
+    await waitFor(tester, () => ctl.voiceName.startsWith('bowed:'));
+    expect(ctl.voices[b.state.voice].name, startsWith('bowed:'));
+    // Settings + the ep key (28) on the instrument (the on-screen board plays its keys): the
+    // firmware switches, the app follows
+    final pl = ctl.playBoard!;
+    pl.control(Idc.alt, true);
+    await settle(tester, ms: 60);
+    pl.press(28, pres: 0.4);
+    await settle(tester, ms: 60);
+    pl.release(28);
+    pl.control(Idc.alt, false);
+    await waitFor(tester, () => ctl.voices[b.state.voice].name.startsWith('ep:'));
+    await waitFor(tester, () => ctl.voiceName.startsWith('ep:'));
+    await run(tester, ctl.userDisconnect());
+    expect(ctl.audio.route, AudioRoute.off);
+    expect(ctl.virtual.instrument, isNull, reason: 'Disconnect stops the virtual Striso');
+    await finish(tester, ctl);
+  });
+
+  testWidgets('Virtual with Through PC on: Through PC is the Striso\'s: Virtual plays its own output, Through PC stays as chosen', skip: noAudio, (
+    tester,
+  ) async {
+    final ctl = virtualApp(through: true);
+    await run(tester, ctl.start());
+    await run(tester, ctl.playVirtual());
+    await waitFor(tester, () => ctl.routing.heard, ms: 4000);
+    expect(ctl.audio.route, AudioRoute.source, reason: 'no Striso input in Virtual');
+    expect(ctl.audio.through, isTrue);
+    await run(tester, ctl.userDisconnect());
+    expect(ctl.audio.through, isTrue);
+    await finish(tester, ctl);
+  });
+
+  testWidgets('a dead output never freezes the virtual board: no sound, said so, and voice changes still land', skip: noAudio, (tester) async {
+    final ctl = virtualApp(output: 'no such output');
+    await run(tester, ctl.start());
+    await run(tester, ctl.playVirtual());
+    await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+    final b = ctl.virtual.instrument!.board;
+    await settle(tester, ms: 600);
+    expect(await framesIn(tester, b), greaterThan(4800), reason: 'the board runs on its own clock');
+    final violin = ctl.voices.firstWhere((x) => x.engine == 'bowed');
+    await run(tester, ctl.selectVoice(violin.index));
+    await waitFor(tester, () => ctl.voiceName == violin.name);
+    expect(b.state.voice, violin.index);
+    await run(tester, ctl.userDisconnect());
+    await finish(tester, ctl);
+  });
 }

@@ -49,6 +49,18 @@ enum ThroughState {
   failed,
 }
 
+/// What the audio engine is for (the app's session decides; docs/architecture.md).
+enum AudioRoute {
+  /// Nothing: no device open, no timer.
+  off,
+
+  /// The Striso's USB audio input: Through PC (to the output when on) and Record.
+  input,
+
+  /// The output alone, playing the attached native source (the virtual Striso).
+  source,
+}
+
 /// The persisted choices.
 class AudioPrefs {
   final bool through;
@@ -293,6 +305,7 @@ class ThroughPc {
   bool? boardTargetSupported;
 
   AudioPrefs _prefs;
+  AudioRoute _route;
   ThroughState state = ThroughState.off;
   String message = '';
   Tone tone = Tone.quiet;
@@ -345,7 +358,9 @@ class ThroughPc {
     this.tickEvery = const Duration(milliseconds: 50),
     bool? windows,
     AutoTiming autoTiming = const AutoTiming(),
+    AudioRoute route = AudioRoute.input,
   }) : _prefs = prefs,
+       _route = route,
        boardOnUsb = boardOnUsb ?? (() => false),
        _now = clock ?? DateTime.now,
        windows = windows ?? Platform.isWindows,
@@ -362,8 +377,79 @@ class ThroughPc {
   /// Seconds recorded so far.
   double get recordSeconds => st.recordFrames / (st.captureRate > 0 ? st.captureRate : 48000);
 
-  /// The input is open and the output plays it.
-  bool get playing => state == ThroughState.running && _prefs.through && st.playback == DevState.running;
+  /// The output plays: the input through it (Through PC), or the source.
+  bool get playing =>
+      state == ThroughState.running && st.playback == DevState.running && (_route == AudioRoute.source || _prefs.through);
+
+  AudioRoute get route => _route;
+
+  /// What the engine is for. Off closes every device (a recording ends) and lets the timer stop.
+  void setRoute(AudioRoute r) {
+    if (r == _route) return;
+    _route = r;
+    if (r != AudioRoute.input) {
+      _recWanted = false;
+      if (recording && !_recStopping) {
+        _recStopping = true;
+        backend?.recordStop();
+      }
+    }
+    _log('audio: route ${r.name}');
+    _notify();
+    tick();
+    _ensureTimer();
+  }
+
+  /// The native source the output plays in the source route (sa_set_source: [fn] and its [user]
+  /// pointer as addresses; 0, 0 detaches). Returns once the output callback has left the previous
+  /// source, so its owner may go right after. False when it cannot be set (no engine).
+  bool setSource(int fn, int user) {
+    final b = backend;
+    if (b == null || !_ensureInit()) return false;
+    return b.setSource(fn, user) == 0;
+  }
+
+  bool _ensureInit() {
+    final b = backend;
+    if (b == null || _initFailed) return false;
+    if (_inited) return true;
+    _inited = b.init();
+    if (!_inited) {
+      _initFailed = true;
+      _log('audio: the audio system did not start (${b.description})');
+      _setState(ThroughState.unavailable, msg: 'The computer’s audio system did not start.');
+      return false;
+    }
+    _log('audio: ${b.description}');
+    return true;
+  }
+
+  /// Something needs the tick: a route with work, a picker watching devices, a recording, or
+  /// devices still to close.
+  bool get _needsTicks => _wanted || _watchDevices || recording || _sent.run;
+
+  bool get _wanted => switch (_route) {
+    AudioRoute.off => false,
+    AudioRoute.input => _prefs.through || _recWanted || recording,
+    AudioRoute.source => true,
+  };
+
+  /// The timer runs only while something needs it (after [start]).
+  void _ensureTimer() {
+    if (!_started || _disposed || backend == null) return;
+    if (_needsTicks) {
+      _timer ??= Timer.periodic(tickEvery, (_) => tick());
+    } else {
+      _timer?.cancel();
+      _timer = null;
+    }
+  }
+
+  /// The tick timer runs (tests).
+  bool get ticking => _timer != null;
+
+  /// A device is open (or asked to be).
+  bool get devicesOpen => _sent.run;
 
   /// Input peak 0..1 (both channels).
   double get level => math.max(st.levelL, st.levelR);
@@ -386,10 +472,13 @@ class ThroughPc {
 
   /// Starts ticking (the app; tests call [tick] themselves).
   void start() {
-    if (backend == null || _timer != null) return;
-    _timer = Timer.periodic(tickEvery, (_) => tick());
+    if (backend == null || _started) return;
+    _started = true;
     tick();
+    _ensureTimer();
   }
+
+  bool _started = false;
 
   void dispose() {
     if (_disposed) return;
@@ -412,6 +501,7 @@ class ThroughPc {
     onPrefs?.call(p);
     _notify();
     tick();
+    _ensureTimer();
   }
 
   void setThrough(bool on) => _setPrefs(_prefs.copyWith(through: on));
@@ -429,14 +519,21 @@ class ThroughPc {
   void watchDevices(bool on) {
     _watchDevices = on;
     if (on) _enumAskedAt = DateTime(0);
+    _ensureTimer();
   }
 
   void startRecording() {
     if (recording || _recWanted || backend == null) return;
+    if (_route != AudioRoute.input) {
+      recordNote = 'Record takes the Striso’s own sound: connect the Striso.';
+      _notify();
+      return;
+    }
     _recWanted = true;
     recordNote = null;
     _notify();
     tick();
+    _ensureTimer();
   }
 
   void stopRecording() {
@@ -479,22 +576,13 @@ class ThroughPc {
     final b = backend;
     if (b == null) return;
     final t = _now();
-    final want = _prefs.through || _recWanted || recording;
+    final want = _wanted;
     if (!want && !_watchDevices && !_inited) {
       _setState(ThroughState.off);
+      _ensureTimer();
       return;
     }
-    if (!_inited) {
-      if (_initFailed) return;
-      _inited = b.init();
-      if (!_inited) {
-        _initFailed = true;
-        _log('audio: the audio system did not start (${b.description})');
-        _setState(ThroughState.unavailable, msg: 'The computer’s audio system did not start.');
-        return;
-      }
-      _log('audio: ${b.description}');
-    }
+    if (!_ensureInit()) return;
     st = b.status();
     final devicesChanged = _devicesTick(t, want);
     _eventsTick(t);
@@ -510,10 +598,21 @@ class ThroughPc {
       _setState(ThroughState.off);
       if (devicesChanged) _notify();
       _pingLevels();
+      _recordTick(t); // a recording the route stopped ends here
+      _ensureTimer();
       return;
     }
 
     final applied = st.configGen - _gen >= 0 && _sent.run;
+    if (_route == AudioRoute.source) {
+      if (_prefs.isAuto && _haveDevices) _autoTick(t, applied);
+      _keepSource(t, applied);
+      _describe(applied);
+      _summaryTick(t);
+      if (devicesChanged) _notify();
+      _pingLevels();
+      return;
+    }
     // the input: open it, or keep looking
     final running = applied && st.capture == DevState.running;
     if (_prefs.isAuto && _haveDevices) _autoTick(t, applied);
@@ -537,7 +636,7 @@ class ThroughPc {
     final key = outputKey;
     final mem = _prefs.autoMemory[key] ?? AutoMemory.none;
     final before = autoBuffer.current;
-    final playingNow = applied && _sent.period == autoBuffer.current && playing && st.streaming;
+    final playingNow = applied && _sent.period == autoBuffer.current && playing && (_route == AudioRoute.source || st.streaming);
     final s = autoBuffer.step(
       now: t,
       key: key,
@@ -577,7 +676,8 @@ class ThroughPc {
       _devGenSeen = st.devicesGen;
       _enumPending = false;
     }
-    final looking = want && !(st.capture == DevState.running && st.configGen - _gen >= 0);
+    final looking =
+        want && !((_route == AudioRoute.source ? st.playback : st.capture) == DevState.running && st.configGen - _gen >= 0);
     final every = looking ? const Duration(milliseconds: 1500) : const Duration(seconds: 3);
     if (_enumPending && t.difference(_enumAskedAt) > const Duration(seconds: 3)) _enumPending = false;
     if (!_enumPending && (looking || _watchDevices || !_haveDevices) && t.difference(_enumAskedAt) >= every) {
@@ -809,6 +909,32 @@ class ThroughPc {
     }
   }
 
+  AudioConfig _sourceConfig() =>
+      AudioConfig(run: true, output: _outputName(), period: period, exclusive: false, exclusiveOutput: wantExclusiveOutput, outputOnly: true);
+
+  /// The source route: the output alone; open it, follow the choices, retry it when it fails.
+  void _keepSource(DateTime t, bool applied) {
+    final c = _sourceConfig();
+    if (c != _sent) {
+      _send(c, t);
+      _setState(ThroughState.starting);
+      return;
+    }
+    if (!applied) {
+      _setState(ThroughState.starting);
+      return;
+    }
+    if (st.playback == DevState.running) {
+      _everRan = true;
+      _setState(ThroughState.running);
+    } else if (st.playback == DevState.failed || st.playback == DevState.lost) {
+      _setState(ThroughState.failed);
+      if (t.difference(_sentAt) > const Duration(seconds: 2)) _send(c, t);
+    } else {
+      _setState(ThroughState.starting);
+    }
+  }
+
   /// With the input running: follow output choices, retry an output that failed or went away.
   void _keepOutput(DateTime t) {
     final c = _config(_sent.input);
@@ -914,12 +1040,38 @@ class ThroughPc {
     Tone tn;
     String? out, hint;
     final custom = _prefs.input;
+    if (_route == AudioRoute.source && state != ThroughState.unavailable) {
+      switch (state) {
+        case ThroughState.running:
+          m = 'Playing the virtual Striso · ${st.playbackExclusive ? 'exclusive' : 'shared'} output';
+          tn = Tone.ok;
+          if (_sent.exclusiveOutput && !st.playbackExclusive) {
+            hint = st.playbackExclResult == _maBusy
+                ? 'Shared output: another program holds it exclusively.'
+                : 'Shared output: it would not open exclusively.';
+          }
+        case ThroughState.failed:
+          m = st.playback == DevState.lost ? 'The output went away: trying again.' : 'The output would not open: trying again.';
+          out = m;
+          tn = Tone.problem;
+        default:
+          m = 'Opening the output…';
+          tn = Tone.busy;
+      }
+      final o = _prefs.output;
+      if (o != null && _haveDevices && !outputs.any((d) => d.name == o)) out ??= '“$o” is not connected: playing to the default output.';
+      if (outputBluetooth) hint = 'Bluetooth adds ~150–250 ms. Use a wired output for playing.';
+      _finishDescribe(m, tn, out, hint);
+      return;
+    }
     switch (state) {
       case ThroughState.unavailable:
         m = backend == null ? 'The audio engine is missing from this build.' : 'The computer’s audio system did not start.';
         tn = Tone.problem;
       case ThroughState.off:
-        m = 'Off. Turn on Through PC to hear the Striso on this computer.';
+        m = _prefs.through && _route == AudioRoute.off
+            ? 'Through PC is on: it plays while the Striso is connected.'
+            : 'Off. Turn on Through PC to hear the Striso on this computer.';
         tn = Tone.quiet;
       case ThroughState.searching:
         m = boardOnUsb() || !_haveDevices ? 'Looking for the Striso’s audio input…' : 'Looking for the Striso’s audio input: plug in the Striso.';
@@ -972,6 +1124,10 @@ class ThroughPc {
         }
     }
     if (_prefs.through && outputBluetooth) hint = 'Bluetooth adds ~150–250 ms. Use a wired output for playing.';
+    _finishDescribe(m, tn, out, hint);
+  }
+
+  void _finishDescribe(String m, Tone tn, String? out, String? hint) {
     outputNote = out;
     final changed = m != message || tn != tone || hint != outputHint;
     message = m;
@@ -992,6 +1148,10 @@ class ThroughPc {
   /// the input is not running.
   String get grantedLine {
     if (state != ThroughState.running) return '';
+    if (_route == AudioRoute.source) {
+      final ms = (st.playbackBuffer / (st.playbackRate > 0 ? st.playbackRate : 48000) * 1000).toStringAsFixed(1);
+      return 'Output: ${st.playbackExclusive ? 'exclusive' : 'shared'}${_sent.exclusiveOutput && !st.playbackExclusive ? ' (exclusive not granted)' : ''}, ${st.playbackBuffer} frames ($ms ms)';
+    }
     String part(String side, bool excl, bool asked, int bits, int frames, int rate) {
       final ms = (frames / (rate > 0 ? rate : 48000) * 1000).toStringAsFixed(1);
       final b = bitsText(bits);
@@ -1014,7 +1174,7 @@ class ThroughPc {
   String get liveLine {
     if (state != ThroughState.running) return '';
     final parts = <String>[];
-    if (_prefs.through && st.playback == DevState.running && st.playbackExclusive) parts.add('exclusive output');
+    if ((_prefs.through || _route == AudioRoute.source) && st.playback == DevState.running && st.playbackExclusive) parts.add('exclusive output');
     if (st.recordDropped > 0) parts.add('${st.recordDropped} frames lost in the recording');
     return parts.join(' · ');
   }

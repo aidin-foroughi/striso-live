@@ -11,16 +11,6 @@ import 'package:striso_live/src/ui/accidentals.dart';
 
 import 'widget_test.dart' show boot, finish, pumpUntil, runFor, settle, startDemo;
 
-/// A demo board whose firmware predates N and K: both commands are swallowed.
-class _OldBoard extends MockBoard {
-  _OldBoard() : super(autoplay: false, motionEnabled: false, idleFrames: 0);
-  @override
-  void receive(List<int> bytes) {
-    if (bytes.length >= 4 && bytes[0] == 0x53 && bytes[1] == 0x74 && bytes[2] == 0x63 && (bytes[3] == 0x4e || bytes[3] == 0x4b)) return;
-    super.receive(bytes);
-  }
-}
-
 Future<void> waitFor(WidgetTester tester, bool Function() done, {int tries = 60}) async {
   for (var i = 0; i < tries && !done(); i++) {
     await runFor(tester, 50);
@@ -85,36 +75,6 @@ void main() {
     expect(tester.widget<Text>(find.byKey(const Key('reference-chip'))).data, 'A = 432.0 Hz (−32 ¢)');
     // labels are notated relative to that reference: D4 reads exact
     expect(ctl.qtLabel(25).qt, closeTo(0.207, 0.001)); // just D is +10.4 cents, fine tune taken out
-    expect(tester.takeException(), isNull);
-    await finish(tester, ctl);
-  });
-
-  testWidgets('old firmware: no N reply means 12-TET from the layout, no K reply a one-time hint', (tester) async {
-    final ctl = await boot(tester);
-    final board = _OldBoard();
-    await pumpUntil(tester, ctl.startSession(MockTransport(board: board), ConnMode.demo));
-    for (var i = 0; i < 60 && (ctl.listsLoading || ctl.tuningSupported == null); i++) {
-      await runFor(tester, 50);
-    }
-    expect(ctl.tuningSupported, isFalse);
-    expect(ctl.tuning, isNull);
-    expect(ctl.tuningName, '12-TET');
-    expect(ctl.keyPitch(30), 61); // C♯4 from the layout
-    ctl.setNames(Names.pitch);
-    await settle(tester, 300);
-    expect(ctl.qtLabel(30).qt, 2);
-    expect(ctl.qtLabel(30).centsFrom12, 0);
-    // a tuning key in the settings overlay: no reply within 300 ms, one hint, nothing changes
-    ctl.setTab(AppTab.setup);
-    ctl.setSetupMode(SetupMode.settings);
-    await settle(tester, 300);
-    expect(await pumpUntil(tester, ctl.pressSettingsKey(36)), isFalse);
-    await settle(tester, 200);
-    expect(find.textContaining("can't switch tunings from the app yet"), findsOneWidget);
-    expect(await pumpUntil(tester, ctl.pressSettingsKey(38)), isFalse);
-    await settle(tester, 200);
-    expect(find.textContaining("can't switch tunings from the app yet"), findsOneWidget);
-    expect(board.tuning, 0);
     expect(tester.takeException(), isNull);
     await finish(tester, ctl);
   });

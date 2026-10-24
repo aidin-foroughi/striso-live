@@ -16,25 +16,24 @@ import 'app_log.dart';
 import 'harmony_tracker.dart';
 import 'morph_model.dart';
 import 'store.dart';
+import 'session/board.dart';
+import 'session/resources.dart';
+import 'session/session.dart';
+import 'session/session_machine.dart';
+import 'session/sound_routing.dart';
 import 'virtual_support.dart';
+
+export 'session/session.dart' show UsbBackend, reconnectDelay;
+export 'session/session_machine.dart' show Mode, SessionState, Idle, Waiting, Connecting, Live, Rebooting, Failed, FailKind, IdleWhy;
 
 /// Milliseconds since the app started: the one clock for the live state and the animation.
 final Stopwatch _appClock = Stopwatch()..start();
 double clockMs() => _appClock.elapsedMicroseconds / 1000;
 
-/// USB as the app sees it (the libusb service in the app, nothing in tests).
-abstract class UsbBackend {
-  Future<({bool present, String where})> probe();
-  Transport transport();
-  Future<void> dispose();
-}
-
 /// A change notifier anyone may ring.
 class Pulse extends ChangeNotifier {
   void ping() => notifyListeners();
 }
-
-enum ConnMode { none, usb, demo }
 
 enum Dot { off, on, demo, busy }
 
@@ -145,11 +144,10 @@ class AppOptions {
   final String? fakeSave; // null, 'ok' or 'fail'
   final bool reducedMotion;
 
-  /// Virtual (what Demo was): a firmware build's striso_virtual (--virtual-lib=PATH, else
-  /// STRISO_VIRTUAL_LIB or the one found); --mock-demo: the Dart mock instead; --audition: play
-  /// that build with the Striso once it is connected.
+  /// Virtual: a firmware build's striso_virtual (--virtual-lib=PATH, else STRISO_VIRTUAL_LIB or
+  /// the one found); --mock-demo: the Dart mock instead.
   final String? virtualLib;
-  final bool mockDemo, audition;
+  final bool mockDemo;
   const AppOptions({
     this.demo = false,
     this.noUsb = false,
@@ -158,7 +156,6 @@ class AppOptions {
     this.reducedMotion = false,
     this.virtualLib,
     this.mockDemo = false,
-    this.audition = false,
   });
 
   static AppOptions parse(List<String> args) {
@@ -176,23 +173,21 @@ class AppOptions {
       reducedMotion: args.contains('--reduced-motion'),
       virtualLib: vlib,
       mockDemo: args.contains('--mock-demo'),
-      audition: args.contains('--audition'),
     );
   }
 }
 
 const allTargets = [0, 1, 2, 3];
 const targetNames = ['voice', 'effect', 'touch', 'key'];
-const _intentKey = 'usbIntent';
-const reconnectDelay = Duration(milliseconds: 4000), _reconnectRetry = Duration(milliseconds: 3000), _reconnectWindow = Duration(milliseconds: 30000);
 
-class AppController extends ChangeNotifier implements MorphHost {
+class AppController extends ChangeNotifier implements MorphHost, SessionHost {
   final AppOptions options;
   final Store store;
   final UsbBackend? usb;
   final String backupDir;
 
-  /// Through PC: the Striso's USB audio through the computer, and recording it.
+  /// The audio engine: Through PC and Record in Striso mode, the virtual Striso's output in
+  /// Virtual. What it opens is the session's decision (SoundRouting), never a toggle's alone.
   late final ThroughPc audio;
 
   /// Through PC's state and choices changed (toggle, status line, pickers).
@@ -214,17 +209,21 @@ class AppController extends ChangeNotifier implements MorphHost {
 
   final toasts = ValueNotifier<List<ToastMsg>>(const []);
 
-  // connection
-  StrisoClient? client;
-  Transport? _transport;
-  ConnMode mode = ConnMode.none;
-  bool connecting = false, saving = false, listsLoading = false;
+  /// The connection: its state machine, the board, the pollers (session/session.dart).
+  late final Session session;
+
+  /// The audio route, the virtual board's clock, MIDI into the virtual Striso.
+  late final SoundRouting routing;
+
+  /// MIDI inputs for the virtual Striso (null without the native library).
+  MidiInputs? midi;
+
+  /// The virtual Striso (the striso_virtual library chosen, or the Dart mock in widget tests).
+  late final VirtualStrisoRuntime virtual;
+
+  bool saving = false, listsLoading = false;
   VersionInfo? version;
-  Dot dot = Dot.off;
-  String status = 'Not connected';
   Banner? banner;
-  InviteState invite = InviteState.idle;
-  String inviteText = '';
   Future<void>? listsReady;
   Map<String, int>? trace;
   Stopwatch? _traceClock;
@@ -269,15 +268,10 @@ class AppController extends ChangeNotifier implements MorphHost {
   List<Preset> presets = [];
   Map<String, Object?> _morphStore = {};
 
-  Timer? _reconnectTimer, _presenceTimer, _syncTimer;
-  bool _reconnectPending = false;
-  DateTime _reconnectDeadline = DateTime.now();
-  int _reconnectTries = 0;
-  bool? _lastPresent;
   bool _disposed = false;
   int _toastId = 0;
 
-  AppController({required this.options, required this.store, this.usb, AudioBackend? audioBackend, String? backupDir})
+  AppController({required this.options, required this.store, this.usb, AudioBackend? audioBackend, String? backupDir, MidiBackend? midiBackend})
     : backupDir = backupDir ?? '${appSupportDir()}${Platform.pathSeparator}backups' {
     _loadPrefs();
     final audioJson = store.raw('audio');
@@ -285,15 +279,34 @@ class AppController extends ChangeNotifier implements MorphHost {
     audio = ThroughPc(
       backend: audioBackend,
       prefs: AudioPrefs.fromJson(audioJson),
-      boardOnUsb: () => (client != null && mode == ConnMode.usb) || _lastPresent == true,
+      boardOnUsb: () => (client != null && mode == Mode.striso) || session.lastPresent == true,
       onPrefs: (p) => store.set('audio', p.toJson()),
       log: (s) => log(s),
+      route: AudioRoute.off,
     );
     if (repaired != null) {
       log(repaired);
       store.set('audio', audio.prefs.toJson()); // once: saved as version 3
     }
-    audio.addListener(audioState.ping);
+    final mb = midiBackend ?? (audioBackend is NativeAudioBackend ? NativeMidiBackend.of(audioBackend.library) : null);
+    if (mb != null) {
+      midi = MidiInputs.fromJson(mb, store.raw('midi'), onPrefs: (j) => store.set('midi', j), log: (s) => log(s));
+      midi!.addListener(audioState.ping);
+    }
+    final dataDir = store.path == null ? null : File(store.path!).parent.path;
+    virtual = VirtualStrisoRuntime(
+      libPath: options.virtualLib ?? Platform.environment['STRISO_VIRTUAL_LIB'],
+      mockOnly: options.mockDemo,
+      flashFile: dataDir == null ? null : '$dataDir${Platform.pathSeparator}virtual${Platform.pathSeparator}flash.bin',
+      log: (s) => log(s),
+      onChanged: () => _route(),
+    );
+    session = Session(host: this, store: store, usb: options.noUsb ? null : usb, virtual: virtual);
+    routing = SoundRouting(audio: audio, resources: session.resources, midi: midi, log: (s) => log(s));
+    audio.addListener(() {
+      routing.audioChanged();
+      audioState.ping();
+    });
     audio.addLevelListener(audioLevels.ping);
     live.pressListeners.add((id, _) {
       if (eqFollow) eqSelect(id);
@@ -345,92 +358,34 @@ class AppController extends ChangeNotifier implements MorphHost {
     if (ms is Map) _morphStore = ms.cast<String, Object?>();
   }
 
-  String? get intent => store.get<String>(_intentKey);
-  void _setIntent(String v) => store.set(_intentKey, v);
+  String? get intent => session.intent;
 
-  /// Starts presence polling and, when the user left the board connected, connects. Through PC
-  /// starts too (it plays at once when it was left on).
+  /// At start: what the user left on (the Striso connected, or Virtual), else nothing.
   Future<void> start() async {
     audio.start();
-    if (options.demo) {
-      await connectDemo();
-      return;
-    }
-    if (usb == null || options.noUsb) return;
-    final p = await _probe();
-    _lastPresent = p;
-    if (p && intent == 'connected') {
-      log('Striso found at start: connecting');
-      unawaited(_connectFound(quiet: true));
-    } else if (p && intent == 'off') {
-      _setStatus(Dot.off, 'Disconnected: click Connect to use the Striso');
-    }
-    _presenceTimer = Timer.periodic(const Duration(seconds: 1), (_) => _poll());
-    _syncTimer = Timer.periodic(const Duration(seconds: 6), (_) {
-      if (client != null && !connecting) syncVoice();
-    });
-  }
-
-  Future<bool> _probe() async {
-    try {
-      return (await usb!.probe()).present;
-    } catch (e) {
-      log('USB: $e', LogKind.err);
-      return false;
-    }
-  }
-
-  bool _polling = false;
-  Future<void> _poll() async {
-    if (_polling || _disposed || client != null || connecting || saving) return;
-    _polling = true;
-    try {
-      final p = await _probe();
-      final was = _lastPresent;
-      _lastPresent = p;
-      if (was != p) notifyListeners();
-      if (p && was == false) {
-        if (intent != 'connected') {
-          log('Striso plugged in; not connecting (disconnected by the user: click Connect)');
-        } else {
-          _scheduleReconnect('Striso plugged in');
-        }
-      } else if (!p && was == true && _reconnectPending) {
-        _cancelReconnect();
-        _setStatus(Dot.off, 'Unplugged');
-      }
-    } finally {
-      _polling = false;
-    }
+    await session.start(virtualFirst: options.demo);
   }
 
   @override
   void dispose() {
     _disposed = true;
-    unawaited(virtual.dispose());
-    _reconnectTimer?.cancel();
-    _presenceTimer?.cancel();
-    _syncTimer?.cancel();
     _editsTimer?.cancel();
-    _tuningPoll?.cancel();
+    routing.dispose();
+    unawaited(session.dispose());
+    midi?.dispose();
     audio.dispose();
-    final c = client;
-    client = null;
-    if (c != null) unawaited(c.disconnect().catchError((_) {}));
     unawaited(usb?.dispose());
     super.dispose();
   }
 
-  /// Let go of the board before the window closes.
+  /// Let go of everything before the window closes.
   Future<void> shutdown() async {
+    try {
+      await session.disconnect(why: IdleWhy.start).timeout(const Duration(seconds: 3));
+    } catch (_) {}
+    routing.dispose();
+    midi?.dispose();
     audio.dispose(); // finishes a recording's file, closes the audio devices
-    final c = client;
-    client = null;
-    if (c != null) {
-      try {
-        await c.disconnect().timeout(const Duration(seconds: 2));
-      } catch (_) {}
-    }
     await usb?.dispose();
   }
 
@@ -438,16 +393,14 @@ class AppController extends ChangeNotifier implements MorphHost {
   // status, banner, toasts, log
 
   void log(String text, [LogKind kind = LogKind.info]) => appLog.add(text, kind);
+  void logKind(String text, LogKind kind) => appLog.add(text, kind);
 
-  void _setStatus(Dot d, String s) {
-    dot = d;
-    status = s;
-    notifyListeners();
-  }
+  @override
+  void note(String text, {bool error = false}) => log(text, error ? LogKind.err : LogKind.info);
 
   void showBanner(String text, {bool info = false}) {
     banner = Banner(text, info: info);
-    log(text, LogKind.err);
+    appLog.add(text, LogKind.err);
     notifyListeners();
   }
 
@@ -484,261 +437,258 @@ class AppController extends ChangeNotifier implements MorphHost {
     log('connect +$ms ms: $label');
   }
 
-  void _setInvite(InviteState s, [String text = '']) {
-    invite = s;
-    inviteText = text;
-    notifyListeners();
-  }
-
   // ---------------------------------------------------------------------------------------------
-  // connecting
+  // the session: state, status, connect, disconnect (the logic is in session/session.dart)
 
-  bool get reconnectPending => _reconnectPending;
+  SessionState get state => session.state;
 
-  void _cancelReconnect() {
-    _reconnectTimer?.cancel();
-    _reconnectTimer = null;
-    _reconnectPending = false;
-    if (!connecting) _setInvite(InviteState.idle);
-    notifyListeners();
+  /// The mode of the session (connecting, live, rebooting, failed), or null when idle.
+  Mode? get mode => session.mode;
+  bool get isVirtual => mode == Mode.virtual;
+
+  /// The console of the active board.
+  StrisoClient? get client => session.client;
+
+  bool get connecting => state is Connecting;
+  bool get reconnectPending => state is Waiting;
+
+  /// A session is up (the UI shows the board's things).
+  bool get connected => client != null && (state is Live || state is Connecting);
+
+  /// The app may send to the board: the session is live. Every control that acts on the board
+  /// checks this; without it they do nothing and say so.
+  bool get canSend => client != null && state is Live;
+
+  /// What a control that sends to the board says while it cannot.
+  String get sendHint => connecting ? 'Connecting…' : 'Connect to switch this from the app';
+
+  /// A Striso is on USB (from the last probe).
+  bool get boardPresent => session.lastPresent == true;
+
+  /// The connection was lost (unplugged or a USB error), not ended by the user.
+  bool get lost => state is Idle && (state as Idle).lost;
+  bool get ledOn => connected;
+
+  /// The status dot, from the state.
+  Dot get dot => switch (state) {
+    Live(mode: Mode.virtual) => Dot.demo,
+    Live() => Dot.on,
+    Connecting() || Waiting() || Rebooting() => Dot.busy,
+    Failed(kind: FailKind.busy) => Dot.busy,
+    _ => Dot.off,
+  };
+
+  /// The status text, from the state (and, while live, what the session runs).
+  String get status {
+    final s = state;
+    return switch (s) {
+      Idle(why: IdleWhy.unplugged) => 'Unplugged',
+      Idle(why: IdleWhy.lost) => 'Connection lost',
+      Idle(why: IdleWhy.user) when session.lastPresent == true && session.usb != null => 'Disconnected: click Connect to use the Striso',
+      Idle() => 'Not connected',
+      Waiting(:final why) when why.startsWith('Board busy') => why,
+      Waiting() => 'Striso found, connecting in ${reconnectDelay.inSeconds} s',
+      Connecting(mode: Mode.virtual) => 'Starting the virtual Striso',
+      Connecting(mode: Mode.striso, :final step) => step == 'looking for the Striso' ? 'Looking for the Striso' : 'Connecting',
+      Live(mode: Mode.striso) => listsLoading ? 'Connected · reading parameters' : 'Connected',
+      Live(mode: Mode.virtual) => virtual.label,
+      Rebooting(mode: Mode.virtual, why: 'reset') => 'The virtual Striso restarts',
+      Rebooting() => 'Saving to the Striso',
+      Failed(kind: FailKind.busy, :final message) => message.startsWith('Board busy') ? message : 'Board busy',
+      Failed(kind: FailKind.needsUpdate) => 'Firmware update needed',
+      Failed(kind: FailKind.library) => 'The virtual Striso did not load',
+      Failed() => 'Not connected',
+    };
   }
 
-  void _scheduleReconnect(String why) {
-    _cancelReconnect();
-    if (saving || intent != 'connected' || client != null || connecting) return;
-    _reconnectPending = true;
-    _reconnectDeadline = DateTime.now().add(reconnectDelay + _reconnectWindow);
-    _reconnectTries = 0;
-    final s = reconnectDelay.inMilliseconds ~/ 1000;
-    _setInvite(InviteState.reconnect, 'Your Striso is back: connecting in $s s.');
-    _setStatus(Dot.busy, 'Striso found, connecting in $s s');
-    log('$why: reconnecting in $s s');
-    _reconnectTimer = Timer(reconnectDelay, _tryReconnect);
+  /// The sound line under the header: what makes the sound and where it is heard.
+  String get soundLine {
+    final s = state;
+    if (s.mode == Mode.virtual && s is! Failed) {
+      final out = audio.outputDevice?.name ?? 'the default output';
+      final why = routing.silentWhy;
+      final input = _inputLine();
+      return why != null ? '${virtual.label} · No sound: $why$input' : '${virtual.label} → $out$input';
+    }
+    if (s is Live && s.mode == Mode.striso) {
+      if (!audio.through) return 'Striso · heard from its jack';
+      final out = audio.outputDevice?.name ?? 'the default output';
+      return audio.playing ? 'Striso · Through PC → $out' : 'Striso · Through PC: ${audio.message}';
+    }
+    return '';
   }
 
-  Future<void> _tryReconnect() async {
-    _reconnectTimer = null;
-    if (!_reconnectPending || saving || intent != 'connected' || client != null || connecting) return;
-    _reconnectTries++;
-    final r = await _connectFound(quiet: true);
-    if (r == true) {
-      _cancelReconnect();
-      return;
-    }
-    if (!_reconnectPending) return; // cancelled meanwhile
-    if (r == 'busy' && DateTime.now().add(_reconnectRetry).isBefore(_reconnectDeadline)) {
-      _setStatus(Dot.busy, 'Board busy (being updated?)');
-      _reconnectTimer = Timer(_reconnectRetry, _tryReconnect);
-      return;
-    }
-    _cancelReconnect();
-    if (r == 'busy') {
-      _setStatus(Dot.off, 'Board busy: click Connect when it is free');
-      log('still busy after $_reconnectTries tries: gave up reconnecting', LogKind.err);
-    }
+  /// The header's one line: the sound line while a session plays, else the status.
+  String get statusLine {
+    final l = soundLine;
+    return l.isNotEmpty && (state is Live) ? l : status;
   }
 
-  /// The Connect button: the user wants the board, now.
+  String _inputLine() {
+    final m = midi;
+    if (m == null) return ' · input: on-screen';
+    final open = [
+      for (final d in m.devices)
+        if (d.state == MidiInputState.open) d.name,
+    ];
+    return open.isEmpty ? ' · input: on-screen' : ' · input: ${open.join(', ')}';
+  }
+
+  /// The start screen's line under the buttons (a reconnect waits, a connect runs).
+  InviteState get invite => switch (state) {
+    Waiting() => InviteState.reconnect,
+    Connecting(mode: Mode.striso) => InviteState.connecting,
+    _ => InviteState.idle,
+  };
+
+  String get inviteText => switch (state) {
+    Waiting(:final why) when why.startsWith('Board busy') => 'Your Striso is busy: trying again.',
+    Waiting() => 'Your Striso is back: connecting in ${reconnectDelay.inSeconds} s.',
+    Connecting(mode: Mode.striso, :final step) => step == 'looking for the Striso' ? 'Looking for your Striso…' : 'Connecting to your Striso…',
+    _ => '',
+  };
+
+  /// The Connect button: the Striso, now.
   Future<void> userConnect() async {
-    _cancelReconnect();
     _trace('click', start: true);
-    if (usb == null || options.noUsb) {
-      showBanner('USB is switched off in this run (--no-usb). Try the virtual Striso instead.');
-      return;
-    }
-    _setStatus(Dot.busy, 'Looking for the Striso');
-    _setInvite(InviteState.connecting, 'Looking for your Striso…');
-    final r = await _connectFound();
-    if (r != true && client == null) _setInvite(InviteState.idle);
+    await session.connect(Mode.striso);
   }
 
-  /// The Disconnect button (or Cancel while a reconnect waits): stay away until Connect.
-  Future<void> userDisconnect() async {
-    if (mode == ConnMode.usb || _reconnectPending) _setIntent('off');
-    _cancelReconnect();
-    await endSession();
+  /// The Disconnect button (or Cancel while a reconnect waits): everything ends; the Striso stays
+  /// away until Connect.
+  Future<void> userDisconnect() => session.disconnect();
+
+  /// Play without a Striso: the virtual Striso (a full teardown of a Striso session first).
+  Future<void> playVirtual() async {
+    if (saving) return;
+    await session.connect(Mode.virtual);
   }
+
+  /// The header's mode control.
+  Future<void> setMode(Mode m) => m == Mode.virtual ? playVirtual() : userConnect();
+
+  @Deprecated('use playVirtual')
+  Future<void> connectDemo() => playVirtual();
 
   /// The header button: Connect, Disconnect or Cancel.
   Future<void> connectButton() async {
-    if (client != null) return mode == ConnMode.usb ? userDisconnect() : endSession();
-    if (_reconnectPending) return userDisconnect();
+    final s = state;
+    if (s is Live || s is Connecting || s is Waiting || s is Rebooting) return userDisconnect();
     return userConnect();
   }
 
-  String get connectLabel => client != null ? 'Disconnect' : (_reconnectPending ? 'Cancel' : 'Connect');
-
-  Future<Object> _connectFound({bool quiet = false}) async {
-    final p = await _probe();
-    if (!p) {
-      if (!quiet) {
-        _setStatus(Dot.off, 'No Striso found');
-        showBanner('No Striso found on USB. Plug it in (and switch it on), then click Connect.');
-      }
-      return false;
-    }
-    return startSession(usb!.transport(), ConnMode.usb, quiet: quiet);
+  String get connectLabel {
+    final s = state;
+    if (s is Waiting) return 'Cancel';
+    if (s is Live || s is Connecting || s is Rebooting) return 'Disconnect';
+    return 'Connect';
   }
 
-  Future<void> connectDemo() async {
-    if (connecting) {
-      toast('Connecting to the Striso: the virtual Striso can wait', 'warn');
-      return;
-    }
-    if (virtual.auditioning) await virtual.stopAudition(reconnect: false);
-    if (client != null && mode == ConnMode.usb) _setIntent('off'); // leaving the board on purpose
-    _cancelReconnect();
-    await startSession(virtual.demoTransport(), ConnMode.demo);
+  /// Ends the session (tests, the window closing).
+  Future<void> endSession() => session.disconnect();
+
+  /// The Dart mock behind Virtual (widget tests).
+  MockBoard? get demoBoard => virtual.mock;
+
+  /// The board the board view plays by hand (Virtual).
+  PlayableBoard? get playBoard => isVirtual && connected ? session.board?.hand : null;
+
+  void _route() {
+    if (_disposed) return;
+    routing.apply(state, virtual.sound);
   }
 
-  /// The virtual Striso (striso_virtual), Virtual's board and the audition (virtual_support.dart).
-  late final VirtualSupport virtual = VirtualSupport(
-    this,
-    libPath: options.virtualLib ?? Platform.environment['STRISO_VIRTUAL_LIB'],
-    mockOnly: options.mockDemo,
-  );
+  // SessionHost -----------------------------------------------------------------------------------
 
-  MockBoard? get demoBoard {
-    final t = _transport;
-    return t is MockTransport ? t.board : null;
+  @override
+  void say(String text, {bool info = false}) => showBanner(text, info: info);
+  @override
+  void clearBanner() => hideBanner();
+
+  @override
+  void sessionChanged() {
+    if (_disposed) return;
+    _route();
+    notifyListeners();
+    audioState.ping();
   }
 
-  /// The board Virtual plays by hand: the virtual board, or the Dart mock.
-  PlayableBoard? get playBoard => demoBoard ?? (mode == ConnMode.demo ? virtual.player : null);
-
-  /// The audition takes the USB board's client (it keeps streaming to the virtual board); the
-  /// app's session is then the virtual board's.
-  StrisoClient? releaseClient() {
-    final c = client;
-    client = null;
-    _transport = null;
-    return c;
+  @override
+  void resourcesChanged() {
+    if (_disposed) return;
+    notifyListeners();
   }
 
-  /// true when connected; 'busy' when another program holds the board (quiet: no banner).
-  Future<Object> startSession(Transport transport, ConnMode m, {bool quiet = false}) async {
-    if (connecting) return false;
-    if (client != null) await endSession(quiet: true);
-    connecting = true;
-    hideBanner();
-    _setStatus(Dot.busy, m == ConnMode.demo ? 'Starting the virtual Striso' : 'Connecting');
-    if (m == ConnMode.usb) {
-      _setInvite(InviteState.connecting, 'Connecting to your Striso…');
+  @override
+  Future<FailEv?> boardUp(Board b, bool Function() current) async {
+    final c = b.client;
+    final usbBoard = b.mode == Mode.striso;
+    if (usbBoard) {
       if (_traceClock == null || _traceClock!.elapsedMilliseconds > 60000) _trace('connect', start: true);
+      c.trace = (l) => _trace(l);
     }
-    final c = StrisoClient(transport);
-    if (m == ConnMode.usb) c.trace = (l) => _trace(l);
     c.onStream = (src, id, v, n) => live.apply(src, id, v, n, clockMs());
-    c.closed.listen((reason) => _onClientClosed(c, reason));
     c.qErrors.listen((e) {
       final list = params[e.target]?.params ?? const <Param>[];
       final p = list.where((q) => q.index == e.index).firstOrNull;
       toast('The board refused ${e.target < targetNames.length ? targetNames[e.target] : e.target} parameter ${p?.name ?? e.index}', 'warn');
       log('Q err ${e.target} ${e.index}', LogKind.err);
     });
-    c.text.listen((l) => log(l, LogKind.out));
+    c.text.listen((l) => logKind(l, LogKind.out));
     c.restreams.listen((q) => log('no stream messages for ${(q / 1000).toStringAsFixed(1)} s while bytes arrive: sent S again', LogKind.err));
-    try {
-      await c.connect();
-    } catch (e) {
-      connecting = false;
-      final busy = e is UsbError && (e.code == UsbErrorCode.busy || e.code == UsbErrorCode.denied);
-      if (quiet && busy) {
-        log('board busy: $e');
-        notifyListeners();
-        return 'busy';
-      }
-      _setStatus(Dot.off, busy ? 'Board busy' : 'Not connected');
-      _setInvite(InviteState.idle);
-      showBanner(e is UsbError ? e.message : 'Could not connect: $e');
-      return busy ? 'busy' : false;
+    final v = await c.getVersion();
+    if (!current()) return null;
+    if (!c.open) return const FailEv(FailKind.other, 'The board went away while connecting.');
+    if (v == null) {
+      return const FailEv(
+        FailKind.needsUpdate,
+        'The Striso did not answer the version request. Check that it runs the Striso firmware, then unplug and replug it.',
+      );
     }
-    client = c;
-    _transport = transport;
-    mode = m;
-    try {
-      final v = await c.getVersion();
-      if (!c.open) throw UsbError.unplugged;
-      if (v == null) {
-        showBanner('The Striso did not answer the version request. Check that it runs the Striso firmware, then unplug and replug it.');
-      }
-      version = v;
-      log('connected: ${v?.line ?? 'no version reply'}');
-      if (m == ConnMode.usb) _trace('version');
-      await refreshVoices();
-      if (m == ConnMode.usb) _trace('voice list (${voices.length})');
-      unawaited(c.startStream().catchError((_) {}));
-    } catch (e) {
-      connecting = false;
-      if (identical(client, c)) await endSession(quiet: true);
-      showBanner(e is UsbError ? e.message : '$e');
-      return false;
-    }
-    connecting = false;
-    if (!c.open) return false;
-    _setStatus(m == ConnMode.demo ? Dot.demo : Dot.on, m == ConnMode.demo ? virtual.sessionLabel : 'Connected');
-    if (m == ConnMode.usb && options.audition && !virtual.auditioning && virtual.available) unawaited(Future(virtual.startAudition));
+    version = v;
+    log('connected: ${v.line}');
+    if (usbBoard) _trace('version');
+    await refreshVoices();
+    if (!current()) return null;
+    if (usbBoard) _trace('voice list (${voices.length})');
+    unawaited(c.startStream().catchError((_) {}));
+    session.resources.up(Res.stream, 'StcS');
+    return null;
+  }
+
+  @override
+  void boardLive(Board b) {
+    final c = b.client;
+    if (b.mode == Mode.striso) _trace('live');
     waveT = clockMs();
-    if (m == ConnMode.usb) {
-      _setIntent('connected');
-      _lastPresent = true;
-      _trace('live');
-    }
-    _setInvite(InviteState.idle);
-    // the parameter lists load behind the live view (the load poll waits its turn)
+    // the parameter lists load behind the live view (the pollers wait their turn)
     listsLoading = true;
-    if (m == ConnMode.usb) status = 'Connected \u00b7 reading parameters';
     notifyListeners();
+    bool same() => identical(client, c);
     listsReady = refreshParams(allTargets, voiceChanged: true)
         .then((_) async {
-          if (m == ConnMode.usb && identical(client, c)) _trace('all lists');
-          if (identical(client, c)) _offerRestore();
-          if (identical(client, c)) await refreshTuning();
+          if (b.mode == Mode.striso && same()) _trace('all lists');
+          if (same()) _offerRestore();
+          if (same()) await refreshTuning();
         })
         .whenComplete(() {
-          if (identical(client, c)) {
+          if (same()) {
             listsLoading = false;
-            if (m == ConnMode.usb) status = 'Connected';
             notifyListeners();
           }
         });
-    unawaited(_pollLoad(c));
-    unawaited(_pollUsbAudio(c));
-    return true;
+    session.every(Res.loadPoll, const Duration(seconds: 1), () => _loadOnce(c));
+    session.every('voice sync', const Duration(seconds: 6), () {
+      if (same() && canSend) syncVoice();
+    });
+    if (b.mode == Mode.striso) unawaited(_pollUsbAudio(c));
+    _scheduleTuningPoll();
   }
 
-  Future<void> endSession({bool quiet = false}) async {
-    final c = client;
-    client = null;
-    if (c != null) {
-      try {
-        await c.disconnect();
-      } catch (_) {}
-    }
+  @override
+  void boardDown() {
+    listsLoading = false;
     _resetUi();
-    if (!quiet) _setStatus(Dot.off, 'Not connected');
-  }
-
-  void _onClientClosed(StrisoClient c, UsbError? reason) {
-    if (!identical(client, c)) return;
-    client = null;
-    _resetUi();
-    final auto = mode == ConnMode.usb && intent == 'connected';
-    if (reason != null && reason.code == UsbErrorCode.unplugged) {
-      _lastPresent = false;
-      _setStatus(Dot.off, 'Unplugged');
-      showBanner(
-        auto ? 'The Striso was unplugged. It reconnects by itself a few seconds after it is back.' : 'The Striso was unplugged.',
-        info: true,
-      );
-    } else if (reason != null) {
-      _setStatus(Dot.off, 'Connection lost');
-      showBanner(reason.message);
-      // still plugged in (a USB error): try again after the delay
-      if (auto) _scheduleReconnect('connection lost');
-    } else {
-      _setStatus(Dot.off, 'Not connected');
-    }
   }
 
   void _resetUi() {
@@ -755,33 +705,15 @@ class AppController extends ChangeNotifier implements MorphHost {
     load = null;
     loadNa = false;
     loadHist.clear();
-    _transport = null;
     tuning = null;
     tuningSupported = null;
     _tuningSuggested = false;
     _tuningHinted = false;
-    _scheduleTuningPoll(); // stops it: no client
     harmony.reset();
+    if (_disposed) return;
     notifyListeners();
     values.ping();
   }
-
-  bool get connected => client != null;
-
-  /// The app may send to the board: a session is up (the board over USB, or the demo board) and is
-  /// not still being set up. Every control that acts on the board checks this; without it they do
-  /// nothing (no pulse, no state change) and say "Connect to switch this from the app".
-  bool get canSend => client != null && !connecting;
-
-  /// What a control that sends to the board says while it cannot.
-  String get sendHint => connecting ? 'Connecting…' : 'Connect to switch this from the app';
-
-  /// A Striso is on USB (from the presence poll).
-  bool get boardPresent => _lastPresent == true;
-
-  /// The connection was lost (unplugged or a USB error), not ended by the user.
-  bool get lost => !connected && (status == 'Unplugged' || status == 'Connection lost');
-  bool get ledOn => client != null;
 
   // ---------------------------------------------------------------------------------------------
   // voices
@@ -1188,32 +1120,36 @@ class AppController extends ChangeNotifier implements MorphHost {
     audio: audio,
     getStats: c.getUsbAudioStats,
     setTarget: c.setUsbAudioTarget,
-    alive: () => identical(client, c) && !_disposed,
+    alive: () => identical(client, c) && !_disposed && state is Live,
     paused: () => connecting || saving,
     log: (s) => log(s),
     onTarget: audioState.ping,
   ).run();
 
-  Future<void> _pollLoad(StrisoClient c) async {
-    while (identical(client, c) && !_disposed) {
-      if (!connecting) {
-        final l = await c.getLoad();
-        if (!identical(client, c)) return;
-        if (l != null) {
-          _loadMisses = 0;
-          loadNa = false;
-          load = l;
-          if (l.blocks > 0) {
-            loadHist.add(l);
-            if (loadHist.length > 90) loadHist.removeAt(0);
-          }
-          notifyListeners();
-        } else if (++_loadMisses == 3) {
-          loadNa = true;
-          notifyListeners();
+  bool _loadBusy = false;
+
+  /// One load reading (the session's load poller, every second).
+  Future<void> _loadOnce(StrisoClient c) async {
+    if (_loadBusy || !identical(client, c) || state is! Live) return;
+    _loadBusy = true;
+    try {
+      final l = await c.getLoad();
+      if (!identical(client, c)) return;
+      if (l != null) {
+        _loadMisses = 0;
+        loadNa = false;
+        load = l;
+        if (l.blocks > 0) {
+          loadHist.add(l);
+          if (loadHist.length > 90) loadHist.removeAt(0);
         }
+        notifyListeners();
+      } else if (++_loadMisses == 3) {
+        loadNa = true;
+        notifyListeners();
       }
-      await Future<void>.delayed(const Duration(seconds: 1));
+    } finally {
+      _loadBusy = false;
     }
   }
 
@@ -1248,23 +1184,23 @@ class AppController extends ChangeNotifier implements MorphHost {
   /// null: not asked yet; false: the firmware gave no reply (no N command); true: it answers.
   bool? tuningSupported;
   bool _tuningSuggested = false, _tuningHinted = false, _tuningBusy = false;
-  Timer? _tuningPoll;
 
   /// Pitch labels want the tuning: N is asked for on connect, after the Settings button is
   /// released, and every 2 s while pitch or cents labels show (a cheap one-line poll).
   bool get _wantsTuningPoll => client != null && (names == Names.pitch || names == Names.cents) && tuningSupported != false;
 
   void _scheduleTuningPoll() {
-    _tuningPoll?.cancel();
-    _tuningPoll = null;
-    if (!_wantsTuningPoll) return;
-    _tuningPoll = Timer.periodic(const Duration(seconds: 2), (_) {
+    if (!_wantsTuningPoll || state is! Live) {
+      session.stopEvery(Res.tuningPoll);
+      return;
+    }
+    if (session.runs(Res.tuningPoll)) return;
+    session.every(Res.tuningPoll, const Duration(seconds: 2), () {
       if (!_wantsTuningPoll) {
-        _tuningPoll?.cancel();
-        _tuningPoll = null;
+        session.stopEvery(Res.tuningPoll);
         return;
       }
-      if (!connecting && !saving) refreshTuning();
+      if (canSend && !saving) refreshTuning();
     });
   }
 
@@ -1521,9 +1457,9 @@ class AppController extends ChangeNotifier implements MorphHost {
 
   /// null when a save may start (the UI then asks for confirmation), else why not.
   String? canSave() {
-    final virtualSave = mode == ConnMode.demo && virtual.isVirtual && !virtual.auditioning;
-    if (client == null || (mode != ConnMode.usb && options.fakeSave == null && !virtualSave)) {
-      toast(mode == ConnMode.demo ? 'The demo keeps its settings until you restart it' : 'Connect the Striso first', 'warn');
+    final mockOnly = isVirtual && virtual.isMock;
+    if (!canSend || (mockOnly && options.fakeSave == null)) {
+      toast(mockOnly ? 'The demo keeps its settings until you restart it' : 'Connect the Striso first', 'warn');
       return 'not connected';
     }
     if (params[2]!.params.isEmpty && params[3]!.params.isEmpty) {
@@ -1533,13 +1469,15 @@ class AppController extends ChangeNotifier implements MorphHost {
     return null;
   }
 
+  /// Save to Striso: the touch settings and key factors into the board's settings (preset 1),
+  /// through its bootloader's drive (the Striso's, or the virtual Striso's own), then the restart
+  /// and the read-back.
   Future<void> doSave() async {
-    final c = client;
-    if (c == null) return;
+    final c = client, b = session.board;
+    if (c == null || b == null || state is! Live) return;
     saving = true;
-    _cancelReconnect();
     notifyListeners();
-    final demo = mode == ConnMode.demo;
+    final virtualSave = b.mode == Mode.virtual && !virtual.isMock;
     // the values as the board lists them right now
     await refreshParams([2, 3]);
     final values = TouchValues([for (final p in params[2]!.params) (p.name, p.value)], [for (final p in params[3]!.params) (p.name, p.value)]);
@@ -1552,23 +1490,19 @@ class AppController extends ChangeNotifier implements MorphHost {
         if (c.open) await c.send(Cmd.bootloader()).timeout(const Duration(seconds: 1));
       } catch (_) {}
     }
-    await endSession(quiet: true);
-    _setStatus(Dot.busy, 'Saving to the Striso');
+    await session.beginReboot('save');
     final res = await saveTouch(
       values,
       backupDir: backupDir,
       progress: (t) => _setSaveStatus(t),
       fake: options.fakeSave,
-      roots: demo && virtual.isVirtual ? virtual.driveRoots : null,
+      roots: virtualSave ? () => b.saveRoots ?? const [] : null,
     );
     saving = false;
     log('save: ${res.ok ? 'ok' : 'failed'}: ${res.message}', res.ok ? LogKind.info : LogKind.err);
     _setSaveStatus(res.ok ? 'Saved. Reconnecting…' : 'Saving failed. Reconnecting…', res.ok ? '' : 'err');
-    final back = demo && virtual.isVirtual
-        ? await virtual.reconnect()
-        : demo
-        ? (await startSession(MockTransport(board: MockBoard(config: _fakeConfig(values))), ConnMode.demo)) == true
-        : await _reconnectAfterSave();
+    final back = await session.comeBack();
+    if (virtualSave && back) virtual.keepFlash(); // its settings, kept on this computer
     if (!res.ok) {
       final msg = 'Saving failed: ${res.message}${res.backupPath != null ? '. The previous settings are backed up in ${res.backupPath}.' : ''}';
       _setSaveStatus(msg, 'err');
@@ -1598,21 +1532,6 @@ class AppController extends ChangeNotifier implements MorphHost {
       );
       toast('Touch settings saved to the Striso');
     }
-  }
-
-  MockConfig _fakeConfig(TouchValues v) => MockConfig([for (final (_, x) in v.touch) x], [for (final (_, x) in v.keys) x]);
-
-  Future<bool> _reconnectAfterSave() async {
-    final sw = Stopwatch()..start();
-    while (sw.elapsed < const Duration(seconds: 40) && !_disposed) {
-      if (client != null) break;
-      if (!connecting && usb != null && await _probe()) {
-        if ((await startSession(usb!.transport(), ConnMode.usb, quiet: true)) == true) break;
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 1500));
-    }
-    _cancelReconnect();
-    return client != null;
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -1985,5 +1904,5 @@ class AppController extends ChangeNotifier implements MorphHost {
 
   // demo play -------------------------------------------------------------------------------------
 
-  bool get playable => mode == ConnMode.demo && playBoard != null;
+  bool get playable => playBoard != null;
 }
