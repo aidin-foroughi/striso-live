@@ -99,6 +99,18 @@ void main() {
       expect(mem.autoMemory['dock|exclusive'], AutoMemory(stable: 128, failed: 64, failedAt: DateTime.fromMillisecondsSinceEpoch(1000)));
       expect(AudioPrefs.fromJson(mem.toJson()), mem);
     });
+    test('settings before 3: exclusive input back on, once, with a note; from 3 the choice stands', () {
+      final old = {'v': 2, 'through': true, 'period': 64, 'exclusive': false, 'exclusiveOutput': true};
+      expect(AudioPrefs.fromJson(old).exclusive, isTrue);
+      expect(AudioPrefs.repairNote(old), contains('exclusive input was off'));
+      final saved = AudioPrefs.fromJson(old).toJson();
+      expect(saved['v'], 3);
+      expect(AudioPrefs.repairNote(saved), isNull);
+      expect(AudioPrefs.fromJson({'v': 3, 'exclusive': false}).exclusive, isFalse);
+      expect(AudioPrefs.repairNote({'v': 3, 'exclusive': false}), isNull);
+      expect(AudioPrefs.repairNote({'v': 2, 'exclusive': true}), isNull);
+      expect(AudioPrefs.repairNote(null), isNull);
+    });
     test('JSON round trip', () {
       const p = AudioPrefs(
         through: true,
@@ -165,6 +177,19 @@ void main() {
       r.pc.setGainDb(-20);
       r.run(50);
       expect(r.fake.gain, closeTo(0.1, 1e-9));
+    });
+
+    test('what was granted, not what was asked: both sides, a refused exclusive mode said so', () {
+      r = Rig(prefs: const AudioPrefs(through: true, period: 128));
+      r.run(300);
+      expect(r.pc.grantedLine, 'Input: exclusive, 24-bit, 128 frames (2.7 ms) · Output: exclusive, 128 frames (2.7 ms)');
+      r.dispose();
+      r = Rig(prefs: const AudioPrefs(through: true, period: 128, exclusive: false), setup: (f) => f.exclusiveBusy = true);
+      r.run(300);
+      expect(r.pc.grantedLine, 'Input: shared, float, 480 frames (10.0 ms) · Output: shared (exclusive not granted), 128 frames (2.7 ms)');
+      r.pc.setThrough(false);
+      r.run(300);
+      expect(r.pc.grantedLine, '');
     });
 
     test('remembered on: starts by itself', () {

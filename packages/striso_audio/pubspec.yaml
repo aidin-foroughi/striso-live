@@ -8,6 +8,8 @@ environment:
 
 dependencies:
   ffi: ^2.1.0
+  striso_core:
+    path: ../striso_core
 
 dev_dependencies:
   lints: ^6.0.0

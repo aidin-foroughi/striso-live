@@ -95,8 +95,18 @@ class AudioPrefs {
   static const periods = [64, 128, 256, 512];
   static const minDb = -40.0, maxDb = 6.0;
 
-  /// The settings' version: 2 made Auto and exclusive output the defaults.
-  static const version = 2;
+  /// The settings' version: 2 made Auto and exclusive output the defaults; 3 turned exclusive input
+  /// back on once (it had been switched off, leaving the input shared: 7 ms bursts and a ring sized
+  /// for them, about 6 ms more latency).
+  static const version = 3;
+
+  /// The note for the log when [fromJson] repaired [j] (exclusive input back on), else null.
+  static String? repairNote(Object? j) {
+    if (j is! Map) return null;
+    final v = (j['v'] as num?)?.toInt() ?? 1;
+    if (v >= 3 || j['exclusive'] != false) return null;
+    return 'audio settings: exclusive input was off; turned back on once (the shared input added about 6 ms)';
+  }
 
   bool get isAuto => period == auto;
 
@@ -156,7 +166,8 @@ class AudioPrefs {
       // settings from before Auto: Auto (the old fixed size dropped out; Auto finds the best)
       period: v < 2 ? auto : (p == auto || periods.contains(p) ? p : auto),
       gainDb: g.isFinite ? g.clamp(minDb, maxDb) : -6,
-      exclusive: j['exclusive'] != false,
+      // before 3: on, whatever was stored (see repairNote); from 3 the choice stands
+      exclusive: v < 3 ? true : j['exclusive'] != false,
       // before 2 the output was shared unless asked: now exclusive on wired outputs unless turned off
       exclusiveOutput: v < 2 ? true : j['exclusiveOutput'] != false,
       autoMemory: mem,
@@ -974,6 +985,22 @@ class ThroughPc {
       if (hint != null && hint.startsWith('Shared')) _log('audio: $hint');
       _notify();
     }
+  }
+
+  /// What the system granted (not the toggles): "Input: exclusive, 24-bit, 144 frames (3.0 ms) ·
+  /// Output: exclusive, 144 frames (3.0 ms)"; a mode asked for and not granted says so. Empty while
+  /// the input is not running.
+  String get grantedLine {
+    if (state != ThroughState.running) return '';
+    String part(String side, bool excl, bool asked, int bits, int frames, int rate) {
+      final ms = (frames / (rate > 0 ? rate : 48000) * 1000).toStringAsFixed(1);
+      final b = bitsText(bits);
+      return '$side: ${excl ? 'exclusive' : 'shared'}${asked && !excl ? ' (exclusive not granted)' : ''}${b.isNotEmpty ? ', $b' : ''}, $frames frames ($ms ms)';
+    }
+
+    final inp = part('Input', st.captureExclusive, windows && _sent.exclusive, st.captureBits, st.captureBuffer, st.captureRate);
+    if (!_prefs.through || st.playback != DevState.running) return inp;
+    return '$inp · ${part('Output', st.playbackExclusive, _sent.exclusiveOutput, 0, st.playbackBuffer, st.playbackRate)}';
   }
 
   /// The dropouts in the last minute, all sides: "dropouts: N in the last minute".

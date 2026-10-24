@@ -5,7 +5,8 @@
 library;
 
 export 'src/auto_buffer.dart';
+export 'src/board_link.dart';
 export 'src/backend.dart';
 export 'src/fake.dart';
-export 'src/native.dart' show NativeAudioBackend, StrisoAudioLib, strisoAudioCandidates, backendSystem, backendNull;
+export 'src/native.dart' show NativeAudioBackend, StrisoAudioLib, strisoAudioCandidates, backendSystem, backendNull, MarkKind, ProbeMark;
 export 'src/through_pc.dart';

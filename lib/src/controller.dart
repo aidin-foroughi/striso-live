@@ -260,13 +260,19 @@ class AppController extends ChangeNotifier implements MorphHost {
   AppController({required this.options, required this.store, this.usb, AudioBackend? audioBackend, String? backupDir})
     : backupDir = backupDir ?? '${appSupportDir()}${Platform.pathSeparator}backups' {
     _loadPrefs();
+    final audioJson = store.raw('audio');
+    final repaired = AudioPrefs.repairNote(audioJson);
     audio = ThroughPc(
       backend: audioBackend,
-      prefs: AudioPrefs.fromJson(store.raw('audio')),
+      prefs: AudioPrefs.fromJson(audioJson),
       boardOnUsb: () => (client != null && mode == ConnMode.usb) || _lastPresent == true,
       onPrefs: (p) => store.set('audio', p.toJson()),
       log: (s) => log(s),
     );
+    if (repaired != null) {
+      log(repaired);
+      store.set('audio', audio.prefs.toJson()); // once: saved as version 3
+    }
     audio.addListener(audioState.ping);
     audio.addLevelListener(audioLevels.ping);
     live.pressListeners.add((id, _) {
@@ -1136,68 +1142,15 @@ class AppController extends ChangeNotifier implements MorphHost {
   /// every call), so a dropout can be told apart: on the board, in the computer's input, in its
   /// output. The first reply after starting only sets the baseline (it counts since whenever U
   /// was last asked). Firmware that does not answer is not asked again in this session.
-  Future<void> _pollUsbAudio(StrisoClient c) async {
-    var misses = 0;
-    var baseline = true;
-    int? targetSet; // the board's ring target as last set (it forgets it at a restart: a new session)
-    Future<void> setTarget() async {
-      final want = audio.boardTargetWanted;
-      if (audio.boardTargetSupported == false || want == targetSet) return;
-      final v = await c.setUsbAudioTarget(want);
-      if (!identical(client, c)) return;
-      if (v == null) {
-        audio.boardTargetSupported = false;
-        log('the board does not take a USB audio ring target (Stct): its own stays');
-      } else {
-        audio.boardTargetSupported = true;
-        targetSet = v;
-        log('board USB audio ring target: $v frames (${(v / 48).toStringAsFixed(2)} ms)');
-        audioState.ping();
-      }
-    }
-
-    while (identical(client, c) && !_disposed && misses < 3) {
-      await Future<void>.delayed(const Duration(seconds: 2));
-      if (!identical(client, c) || connecting || saving) continue;
-      if (!audio.playing) {
-        baseline = true;
-        continue;
-      }
-      final s = await c.getUsbAudioStats();
-      if (!identical(client, c)) return;
-      if (s == null) {
-        misses++;
-        if (misses == 3) log('the board does not report its USB audio counters (StcU): board-side dropouts are not counted');
-        continue;
-      }
-      misses = 0;
-      if (baseline) {
-        baseline = false;
-        if (s.uac != null) log('board USB audio: UAC${s.uac}, ring target ${s.ringTarget ?? '?'} frames');
-        if (s.drops > 0) log('board USB audio before this: ${s.underruns ?? 0} underruns, ${s.hostSkipped ?? 0} host-skipped frames (not counted)');
-        await setTarget();
-        continue;
-      }
-      audio.boardStats(
-        BoardAudioStats(
-          sent: s.sent,
-          missed: s.missed,
-          underruns: s.underruns,
-          overruns: s.overruns,
-          primes: s.primes,
-          ringFiltered: s.ringFiltered?.toDouble(),
-          ringMin: s.ringMin,
-          ringMax: s.ringMax,
-          ringTarget: s.ringTarget,
-          streaming: s.streaming,
-          hostSkipped: s.hostSkipped,
-          notReady: s.notReady,
-          uac: s.uac,
-        ),
-      );
-      await setTarget();
-    }
-  }
+  Future<void> _pollUsbAudio(StrisoClient c) => BoardAudioLink(
+    audio: audio,
+    getStats: c.getUsbAudioStats,
+    setTarget: c.setUsbAudioTarget,
+    alive: () => identical(client, c) && !_disposed,
+    paused: () => connecting || saving,
+    log: (s) => log(s),
+    onTarget: audioState.ping,
+  ).run();
 
   Future<void> _pollLoad(StrisoClient c) async {
     while (identical(client, c) && !_disposed) {

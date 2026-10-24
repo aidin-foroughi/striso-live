@@ -297,6 +297,17 @@ class _AudioSectionState extends State<AudioSection> {
             ),
             _AutoLine(widget.ctl),
             _rowTall('Latency', _Latency(widget.ctl)),
+            _row(
+              'Granted',
+              ListenableBuilder(
+                listenable: widget.ctl.audioLevels,
+                builder: (context, _) {
+                  final g = widget.ctl.audio.grantedLine;
+                  return Text(g.isEmpty ? '–' : g, key: const Key('audio-granted'), style: ui(TypeSize.small, color: Pal.text2), overflow: TextOverflow.ellipsis);
+                },
+              ),
+              tip: 'What the system granted for the input and the output, whatever the toggles ask',
+            ),
             _rowTall('Dropouts', _Dropouts(widget.ctl)),
             if (a.boardTargetSupported == true) ...[
               _row(
@@ -454,10 +465,10 @@ class _Latency extends StatelessWidget {
           ? [
               'Through the computer, ${_ms(b.total)} ms:',
               '· input ${_ms(b.input)} ms: half its ${_ms(st.capNominalUs / 1000)} ms wake-up interval'
-                  '${st.captureStreamLatency > 0 ? ' + ${_ms(st.captureStreamLatency / inRate * 1000)} ms the system reports' : ''}',
+                  '${Platform.isWindows ? (st.captureExclusive ? ' + about 1 ms the USB driver adds (measured)' : '') : (st.captureStreamLatency > 0 ? ' + ${_ms(st.captureStreamLatency / inRate * 1000)} ms the system reports' : '')}',
               '· ring ${_ms(b.ring)} ms: the passthrough (it aims at ${_ms(st.targetMs)} ms; margin ${_ms(st.marginMs)} ms)',
               '· output ${_ms(b.output)} ms: ${st.playbackBuffer} frames per wake-up${st.playbackExclusive ? ' (exclusive)' : ' (shared)'}'
-                  '${st.playbackStreamLatency > 0 ? ' + ${_ms(st.playbackStreamLatency / outRate * 1000)} ms the system reports' : ''}',
+                  '${st.playbackClock ? ', measured by the output’s own clock' : (st.playbackStreamLatency > 0 ? ' + ${_ms(st.playbackStreamLatency / outRate * 1000)} ms the system reports' : '')}',
               '· USB ${_ms(b.usb)} ms: the board’s ring before each 1 ms packet, ${b.usbMeasured ? 'as it reports it' : 'its target (estimated)'}',
               'Device periods: input ${per(st.captureDevMin, st.captureDevDefault, inRate)}; output ${per(st.playbackDevMin, st.playbackDevDefault, outRate)}.',
               'The synth itself adds its block before USB, as at the headphone jack. Clock drift corrected: ${st.driftPpm.toStringAsFixed(0)} ppm.',
