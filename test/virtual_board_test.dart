@@ -311,4 +311,41 @@ void main() {
     expect(ctl.midi!.running, isFalse);
     await finish(tester, ctl);
   });
+
+  testWidgets('the virtual firmware switched at run time: torn down, the old library let go of, started on the new one; a bad file refused', skip: skip != null, (
+    tester,
+  ) async {
+    final dir = await tester.runAsync(() async => Directory.systemTemp.createTempSync('sv_fw'));
+    String copy(String name) {
+      final d = Directory('${dir!.path}${Platform.pathSeparator}$name')..createSync();
+      return File(lib!).copySync('${d.path}${Platform.pathSeparator}${lib.split(RegExp(r'[\/]')).last}').path;
+    }
+
+    final a = copy('2026-10-01 build a'), b = copy('2026-10-24 build b');
+    final ctl = AppController(options: AppOptions(virtualLib: a, noUsb: true), store: Store.memory());
+    await run(tester, ctl.playVirtual());
+    await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+    expect(ctl.firmwarePath, File(a).absolute.path);
+    expect(await run(tester, ctl.useFirmware(b)), isTrue);
+    await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+    expect(ctl.firmwarePath, File(b).absolute.path);
+    expect(ctl.version!.line, startsWith(ctl.virtual.version!));
+    expect(StrisoVirtualLib.isLoaded(a), isFalse, reason: 'the old build is unloaded');
+    expect(ctl.store.get<String>('virtualLib'), File(b).absolute.path, reason: 'remembered');
+    // not a striso_virtual library: refused, said so, Virtual stays down
+    final junk = File('${dir!.path}${Platform.pathSeparator}junk.dll')..writeAsStringSync('no');
+    expect(await run(tester, ctl.useFirmware(junk.path)), isFalse);
+    expect(ctl.banner!.text, contains('cannot run here'));
+    expect(ctl.state, isA<Idle>());
+    // and back to a good one
+    expect(await run(tester, ctl.useFirmware(a)), isTrue);
+    await run(tester, ctl.playVirtual());
+    await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+    await finish(tester, ctl);
+    await tester.runAsync(() async {
+      try {
+        dir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+  });
 }

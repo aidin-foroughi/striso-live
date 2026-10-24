@@ -125,6 +125,17 @@ class VirtualStrisoRuntime implements VirtualRuntime {
 
   bool get available => lib != null;
 
+  /// Another build: the instrument must be stopped (the session tears down first). The old
+  /// library is let go of (DynamicLibrary.close); the next [lib] loads [path] afresh.
+  void selectLibrary(String? path) {
+    if (instrument != null) throw StateError('stop the virtual Striso before switching its firmware');
+    final old = _lib;
+    _lib = null;
+    loadError = null;
+    if (old != null) StrisoVirtualLib.unload(old.path);
+    libPath = path;
+  }
+
   /// The firmware the library runs (sv_firmware_version: what StcV says first).
   String? get version => _lib?.firmwareVersion;
   bool get isMock => instrument == null && mock != null;

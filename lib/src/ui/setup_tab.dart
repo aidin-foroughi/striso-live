@@ -2,14 +2,17 @@
 // board's overlay and the right column; Save to Striso, Audio (Through PC, devices, Record), the
 // motion sensor and the firmware are always at the lower right.
 
+import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:striso_core/striso_core.dart';
 
 import '../controller.dart';
+import '../firmware_library.dart';
 import '../theme.dart';
 import 'audio.dart';
 import 'board_view.dart';
@@ -82,6 +85,8 @@ class SetupTab extends StatelessWidget {
                 AudioSection(ctl),
                 const SizedBox(height: Space.xl),
                 if (c.maxWidth >= 1100) ...[MotionRow(ctl), const SizedBox(height: Space.l), FirmwareRow(ctl)],
+                const SizedBox(height: Space.l),
+                VirtualFirmwareRow(ctl),
                 const SizedBox(height: Space.m),
                 Align(
                   alignment: Alignment.centerLeft,
@@ -670,6 +675,74 @@ class FirmwareRow extends StatelessWidget {
                 onPressed: () async {
                   await Clipboard.setData(ClipboardData(text: [v.line, ...v.extra].join('\n')));
                   ctl.toast('Copied to the clipboard');
+                },
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// The virtual Striso's firmware: the builds in the firmware folder, Load from file…, the
+/// version the loaded one reports. A switch tears Virtual down and starts it on the new build.
+class VirtualFirmwareRow extends StatelessWidget {
+  final AppController ctl;
+  const VirtualFirmwareRow(this.ctl, {super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final builds = ctl.firmwareBuilds();
+    final cur = ctl.firmwarePath ?? ctl.virtual.libPath;
+    final v = ctl.virtual.version;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Micro('Virtual firmware'),
+        const SizedBox(height: Space.xs),
+        Row(
+          children: [
+            Expanded(
+              child: builds.isEmpty
+                  ? Text(
+                      ctl.virtual.isMock ? 'The Dart mock (tests)' : 'None: put a striso_virtual build in the firmware folder, or load one',
+                      key: const Key('vfw-none'),
+                      maxLines: 2,
+                      style: ui(TypeSize.small, color: Pal.text3),
+                    )
+                  : LayoutBuilder(
+                      builder: (context, box) => SmallSelect<String>(
+                        key: const Key('vfw-select'),
+                        value: builds.any((b) => b.path == cur) ? cur! : builds.first.path,
+                        items: [for (final b in builds) (b.path, b.path == ctl.firmwarePath && v != null ? '${b.name} · $v' : b.name)],
+                        onChanged: ctl.saving ? null : (p) => ctl.useFirmware(p),
+                        width: box.maxWidth,
+                        tooltip: cur ?? '',
+                      ),
+                    ),
+            ),
+            const SizedBox(width: Space.s),
+            Btn(
+              'Load…',
+              key: const Key('vfw-load'),
+              kind: BtnKind.ghost,
+              tooltip: 'A striso_virtual library from a firmware build (${virtualLibName()})',
+              onPressed: () async {
+                final f = await openFile(
+                  acceptedTypeGroups: [
+                    XTypeGroup(label: 'striso_virtual', extensions: [virtualLibName().split('.').last]),
+                  ],
+                );
+                if (f != null) await ctl.useFirmware(f.path);
+              },
+            ),
+            if (ctl.firmwareDir != null)
+              IconBtn(
+                Icons.folder_open,
+                tooltip: 'The firmware folder: ${ctl.firmwareDir}',
+                onPressed: () async {
+                  Directory(ctl.firmwareDir!).createSync(recursive: true);
+                  await revealFile('${ctl.firmwareDir!}${Platform.pathSeparator}.');
                 },
               ),
           ],

@@ -13,6 +13,7 @@ import 'package:striso_audio/striso_audio.dart';
 import 'package:striso_core/striso_core.dart';
 
 import 'app_log.dart';
+import 'firmware_library.dart';
 import 'harmony_tracker.dart';
 import 'morph_model.dart';
 import 'store.dart';
@@ -294,8 +295,14 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
       midi!.addListener(audioState.ping);
     }
     final dataDir = store.path == null ? null : File(store.path!).parent.path;
+    firmwareDir = dataDir == null ? null : '$dataDir${Platform.pathSeparator}firmware';
+    final chosen = store.get<String>('virtualLib');
     virtual = VirtualStrisoRuntime(
-      libPath: options.virtualLib ?? Platform.environment['STRISO_VIRTUAL_LIB'],
+      libPath:
+          options.virtualLib ??
+          (chosen != null && File(chosen).existsSync() ? chosen : null) ??
+          Platform.environment['STRISO_VIRTUAL_LIB'] ??
+          findFirmwareBuilds(firmwareDir).firstOrNull?.path,
       mockOnly: options.mockDemo,
       flashFile: dataDir == null ? null : '$dataDir${Platform.pathSeparator}virtual${Platform.pathSeparator}flash.bin',
       log: (s) => log(s),
@@ -562,6 +569,43 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
   Future<void> playVirtual() async {
     if (saving) return;
     await session.connect(Mode.virtual);
+  }
+
+  // the virtual Striso's firmware -----------------------------------------------------------------
+
+  /// The firmware folder in the app data: a folder per build (null in tests with a memory store).
+  late final String? firmwareDir;
+
+  /// The builds in the firmware folder, and the one in use when it is elsewhere.
+  List<FirmwareBuild> firmwareBuilds() {
+    final l = [...findFirmwareBuilds(firmwareDir)];
+    final cur = virtual.lib?.path ?? virtual.libPath;
+    if (cur != null && !l.any((b) => b.path == File(cur).absolute.path)) l.add(buildOf(cur));
+    return l;
+  }
+
+  /// The build in use (its library's path), if one is loaded.
+  String? get firmwarePath => virtual.lib?.path;
+
+  /// Plays another firmware build: Virtual is torn down (if it runs), the old library unloaded,
+  /// the new one loaded and checked, and Virtual started again on it. Remembered.
+  Future<bool> useFirmware(String path) async {
+    final wasLive = mode == Mode.virtual;
+    if (wasLive) await session.disconnect(why: IdleWhy.modeSwitch);
+    virtual.selectLibrary(path);
+    final l = virtual.lib;
+    if (l == null) {
+      final why = virtual.loadError ?? 'it did not load';
+      showBanner('That firmware build cannot run here: $why');
+      notifyListeners();
+      return false;
+    }
+    store.set('virtualLib', l.path);
+    log('virtual firmware: ${l.path} (${l.firmwareVersion})');
+    toast('Virtual firmware: ${l.firmwareVersion}');
+    notifyListeners();
+    if (wasLive) await playVirtual();
+    return true;
   }
 
   /// The header's mode control.

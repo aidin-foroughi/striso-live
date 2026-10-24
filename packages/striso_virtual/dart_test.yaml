@@ -1,0 +1,3 @@
+# the tests share the native libraries of one process (a library unloaded in one would be gone
+# for the others): one test file at a time
+concurrency: 1

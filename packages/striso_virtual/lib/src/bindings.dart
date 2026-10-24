@@ -103,8 +103,8 @@ typedef SvStateDartFn = int Function(Pointer<Void>, Pointer<SvState>);
 typedef SvPathFn = Int32 Function(Pointer<Void>, Pointer<Char>, Int32);
 typedef SvPathDartFn = int Function(Pointer<Void>, Pointer<Char>, int);
 
-/// Where striso_virtual may be: [explicit], $STRISO_VIRTUAL_LIB, next to the app, the firmware
-/// checkout's host build ($STRISO_FW_DIR or ../striso-control-firmware from the current directory
+/// Where striso_virtual may be (the app ships none: it picks a build from its firmware folder, or
+/// these): [explicit], $STRISO_VIRTUAL_LIB, a firmware checkout's host build ($STRISO_FW_DIR or ../striso-control-firmware from the current directory
 /// and its parents: build/host-virtual/virtual or build/host/virtual).
 List<String> strisoVirtualCandidates({String? explicit}) {
   final name = Platform.isWindows ? 'striso_virtual.dll' : (Platform.isMacOS ? 'libstriso_virtual.dylib' : 'libstriso_virtual.so');
@@ -112,9 +112,6 @@ List<String> strisoVirtualCandidates({String? explicit}) {
   if (explicit != null) out.add(explicit);
   final env = Platform.environment['STRISO_VIRTUAL_LIB'];
   if (env != null && env.isNotEmpty) out.add(env);
-  final exe = File(Platform.resolvedExecutable).parent;
-  out.add('${exe.path}${Platform.pathSeparator}$name');
-  if (Platform.isMacOS) out.add('${exe.parent.path}/Frameworks/$name');
   final fws = <String>[];
   final fwEnv = Platform.environment['STRISO_FW_DIR'];
   if (fwEnv != null && fwEnv.isNotEmpty) fws.add(fwEnv);
@@ -188,9 +185,25 @@ class StrisoVirtualLib {
       final have = _byPath[abs];
       if (have != null) return have;
       if (!File(abs).existsSync()) throw StateError(loadError = 'striso_virtual not found: $abs');
-      final l = StrisoVirtualLib._(DynamicLibrary.open(abs), abs);
-      if (l.apiVersion() != svApiVersion) throw StateError(loadError = '$abs: API ${l.apiVersion()}, need $svApiVersion');
-      return _byPath[abs] = l;
+      final DynamicLibrary dl;
+      try {
+        dl = DynamicLibrary.open(abs);
+      } catch (e) {
+        throw StateError(loadError = '$abs could not be loaded: $e');
+      }
+      final int api;
+      try {
+        api = dl.lookupFunction<SvI32VFn, int Function()>('sv_api_version')();
+      } catch (_) {
+        dl.close();
+        throw StateError(loadError = '$abs is not a striso_virtual library (no sv_api_version)');
+      }
+      final why = apiMismatch(api);
+      if (why != null) {
+        dl.close();
+        throw StateError(loadError = '$abs: $why');
+      }
+      return _byPath[abs] = StrisoVirtualLib._(dl, abs);
     }
     if (_cached != null) return _cached!;
     final tried = <String>[];
@@ -213,6 +226,22 @@ class StrisoVirtualLib {
     loadError = 'striso_virtual not found: ${tried.join('; ')}';
     throw StateError(loadError!);
   }
+
+  /// Why a library with C API [api] is refused (null: it fits). Not compatibility: a guard.
+  static String? apiMismatch(int api) =>
+      api == svApiVersion ? null : 'its C API is version $api, this app speaks version $svApiVersion: use a firmware build for this app';
+
+  /// Lets go of the library at [path] (every board on it must be disposed first): the next load
+  /// of that path is a fresh instance.
+  static void unload(String path) {
+    final abs = File(path).absolute.path;
+    final l = _byPath.remove(abs) ?? (_cached?.path == abs ? _cached : null);
+    if (_cached?.path == abs) _cached = null;
+    l?._l.close();
+  }
+
+  /// The library at [path] is loaded.
+  static bool isLoaded(String path) => _byPath.containsKey(File(path).absolute.path) || _cached?.path == File(path).absolute.path;
 
   static StrisoVirtualLib? tryLoad({String? explicit}) {
     try {
