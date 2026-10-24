@@ -1,0 +1,20 @@
+name: striso_bench
+description: The Striso's USB audio latency, dropouts and Through PC measured headlessly (the app's own audio engine and Through PC code), with a JSON report.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  ffi: ^2.1.0
+  striso_audio:
+    path: ../striso_audio
+  striso_core:
+    path: ../striso_core
+  striso_usb:
+    path: ../striso_usb
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6

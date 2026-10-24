@@ -262,6 +262,64 @@ dart run bin/striso_probe.dart --lib path\to\libusb-1.0.dll probe
 dart run bin/striso_probe.dart --lib path\to\libusb-1.0.dll connect 1
 ```
 
+## Testing without the UI
+
+Latency, dropouts and Through PC are measured electronically by `packages/striso_bench`, a
+command-line tool that runs the app's own audio engine (`striso_audio` through dart:ffi) and its
+own Through PC code (`ThroughPc`, `BoardAudioLink`), plus the board's console. It prints a JSON
+report (schema `striso-bench/1`, `lib/src/report.dart`) and exits 0 when every check passed.
+**Nothing makes a sound.** A real output is only opened to play digital silence, at most 30 s per
+run. The engine's silence guard forces every output sample to 0 and counts any that was not; a
+run fails if one was. Exclusive output is never taken from a program that is playing to that
+output. On a hardware run the bench closes a running Striso Live, which holds the board's console.
+
+How it measures:
+
+- **The marker.** Firmware with `Stcl` (console `Stcl1`) writes a 32-frame pseudo-random burst at
+  −20 dBFS over the right channel of its next USB packet (USB only; the jack never has it). It
+  replies with the packet's frame number, its ring level and the time from the command's OUT
+  packet to the marker's IN transfer (the board's own clock). `Stcl0` is an echo that says how long
+  the board held it, so the console's round trip splits into transit.
+- **The host's clocks.** The USB worker stamps every transfer on the process's monotonic clock
+  (QueryPerformanceCounter). The audio callbacks record timing marks, and the taps carry the input
+  as it arrives and the output before its gain (`sa_probe`). The output's own clock
+  (`IAudioClock`, or Core Audio's presentation time) says when an output frame plays.
+- So the marker's packet on the bus is known on the host clock: sent + console one-way + the
+  board's time. Correlation then finds it in the input, and again in the output after the
+  resampler, even at gain 0. Every number in the report says whether it was **measured**,
+  **reported** (a ring level, a stream latency) or **estimated**.
+
+One line each (from `packages/striso_bench`; `--sim` runs any of them without hardware, on
+miniaudio's null backend and a simulated board, with deterministic usb-in numbers):
+
+```
+dart run bin/striso_bench.dart usb-in                # bus -> capture callback, exclusive and shared, 50 markers each
+dart run bin/striso_bench.dart out                   # the output alone, silence: its latency by its own clock, exclusive/shared x 128/256/Auto
+dart run bin/striso_bench.dart through --seconds 25  # Through PC at gain 0: end to end and its parts, dropouts by side, Auto, CPU
+dart run bin/striso_bench.dart soak --minutes 5      # the same for dropouts
+dart run bin/striso_bench.dart targets --targets 72,80,96 --seconds 20   # board ring targets: board underruns
+dart run bin/striso_bench.dart stats                 # StcU, the drivers bound to the USB functions (usbaudio2, WinUSB), the MIDI port
+dart run bin/striso_bench.dart all --json out.json   # all of the above
+```
+
+Through PC runs with the settings in Striso Live's `settings.json` (read, never written).
+`--excl-in on|off`, `--excl-out on|off` and `--period N|auto` override them.
+
+Tests:
+
+```
+(cd packages/striso_bench && dart test)              # marker detection, timestamp alignment, statistics, the report schema, the simulated run
+(cd packages/striso_bench && dart test -t hardware)  # with a Striso: connect < 1 s, usbaudio2 + MIDI, usb-in median < 8 ms, no board underruns, silence
+powershell -File tools\hwtest.ps1                    # the whole hardware suite: test-results\hw-<time>.json, .txt, .log
+sh tools/hwtest.sh                                   # the same on macOS
+```
+
+`test-results/` is gitignored. CI (`.github/workflows/striso-live-flutter.yml`) runs the bench
+tests and a simulated `all` on Windows and macOS. Measured on the development PC (TBT200 dock,
+UAC2 firmware, exclusive in and out at the device minimum, 144 frames): usb-in 2.5 ms median;
+Through PC end to end 13.9 ms median (board 2.4, usb-in 2.5, ring 4.3, output 4.6), 0 dropouts
+over 3 minutes.
+
 ## Layout
 
 - `packages/striso_core`: pure Dart, no Flutter: protocol and stream parser, client (request

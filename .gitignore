@@ -53,3 +53,6 @@ app.*.map.json
 /macos/Flutter/ephemeral/
 /macos/Pods/
 *.dmg
+
+# hardware suite reports (tools/hwtest.ps1, tools/hwtest.sh, striso_bench --json)
+/test-results/

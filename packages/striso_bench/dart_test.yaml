@@ -1,0 +1,6 @@
+# `dart test` runs the unit tests (no hardware); `dart test -t hardware` runs the hardware suite,
+# which skips itself when no Striso is connected.
+tags:
+  hardware:
+    timeout: 15x
+exclude_tags: hardware

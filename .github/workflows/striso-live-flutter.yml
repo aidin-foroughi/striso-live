@@ -74,11 +74,20 @@ jobs:
         working-directory: packages/striso_audio
         run: dart test -r expanded
 
+      - name: Bench tests (measurement math, the simulated board; no hardware)
+        working-directory: packages/striso_bench
+        run: dart test -r expanded
+
+      - name: Bench, simulated end to end (null backend, simulated board, JSON report)
+        working-directory: packages/striso_bench
+        run: dart run bin/striso_bench.dart all --sim --n 20 --seconds 3 --minutes 0.05 --out-seconds 0.5 --json "$RUNNER_TEMP/bench-sim.json" > /dev/null
+
       - name: Analyze
         run: |
           flutter analyze
           (cd packages/striso_usb && dart analyze)
           (cd packages/striso_audio && dart analyze)
+          (cd packages/striso_bench && dart analyze)
 
       - name: Widget and controller tests (headless)
         run: flutter test
