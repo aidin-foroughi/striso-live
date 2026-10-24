@@ -101,7 +101,7 @@ String _root() {
   final s = Platform.script.toFilePath();
   var d = File(s).parent;
   for (var i = 0; i < 6; i++) {
-    if (File('${d.path}${Platform.pathSeparator}pubspec.yaml').existsSync() && Directory('${d.path}${Platform.pathSeparator}packages').existsSync()) return d.path;
+    if (Directory('${d.path}${Platform.pathSeparator}packages${Platform.pathSeparator}striso_audio').existsSync()) return d.path;
     d = d.parent;
   }
   return Directory.current.path;
