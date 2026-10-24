@@ -20,7 +20,8 @@ FLAGS="-O2 -std=gnu11 -fblocks -arch arm64 -arch x86_64 -mmacosx-version-min=10.
 clang $FLAGS -fvisibility=hidden -DSA_BUILD_DLL -I"$HERE/include" -I"$HERE/third_party/miniaudio" \
   -dynamiclib -install_name @rpath/libstriso_audio.dylib -o "$LIB" \
   "$HERE/src/striso_audio.c" "$HERE/src/sa_core.c" "$HERE/src/sa_platform.c" "$HERE/src/selftest.c" \
-  -framework CoreFoundation -framework CoreAudio -framework AudioToolbox -framework AVFoundation -lobjc
+  "$HERE/src/striso_midi.c" "$HERE/src/selftest_midi.c" \
+  -framework CoreFoundation -framework CoreAudio -framework AudioToolbox -framework AVFoundation -framework CoreMIDI -lobjc
 codesign --force --sign - "$LIB"
 echo "striso_audio: $(lipo -archs "$LIB")  $LIB"
 

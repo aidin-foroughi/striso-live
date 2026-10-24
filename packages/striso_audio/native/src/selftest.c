@@ -809,6 +809,79 @@ static void test_session_jitter(void) {
     sa_shutdown();
 }
 
+/* sa_set_source on the null backend's output: a detach (or a swap) returns only when the output
+ * callback is no longer inside the previous source */
+static volatile uint32_t g_src_calls, g_src_inside, g_src_badpair, g_src2_calls;
+static int32_t count_src(void* user, float* stereo, int32_t frames, int32_t rate) {
+    (void)rate;
+    sa_st(&g_src_inside, 1);
+    if (user != (void*)&g_src_calls) sa_inc(&g_src_badpair);
+    sa_sleep_ms(2); /* a source that takes a while: the detach has something to wait for */
+    memset(stereo, 0, sizeof(float) * 2 * (size_t)frames);
+    sa_inc(&g_src_calls);
+    sa_st(&g_src_inside, 0);
+    return frames;
+}
+static int32_t count_src2(void* user, float* stereo, int32_t frames, int32_t rate) {
+    (void)rate;
+    if (user != (void*)&g_src2_calls) sa_inc(&g_src_badpair);
+    memset(stereo, 0, sizeof(float) * 2 * (size_t)frames);
+    sa_inc(&g_src2_calls);
+    return frames;
+}
+static int play_running(const sa_status* s) { return applied(s) && s->playback_state == SA_DEV_RUNNING; }
+
+static void test_source_guard(void) {
+    if (sa_internal_inited()) {
+        check(0, "source guard: the library is in use: skipped");
+        return;
+    }
+    sa_status s;
+    if (sa_init(SA_BACKEND_NULL) != SA_OK) {
+        check(0, "source guard: null backend init");
+        return;
+    }
+    sa_get_status(&s);
+    g_dev_gen = s.devices_gen;
+    sa_enumerate();
+    wait_for(enumerated, 2000, &s);
+    g_gen = sa_configure(1, "", "", 256, 0, SA_OUTPUT_ONLY);
+    int ok = wait_for(play_running, 3000, &s);
+    sa_st(&g_src_calls, 0);
+    sa_st(&g_src2_calls, 0);
+    sa_st(&g_src_badpair, 0);
+    int bad = 0, rounds = 0, busy = 0;
+    for (int r = 0; ok && r < 15; r++) {
+        busy += sa_set_source(count_src, (void*)&g_src_calls) != SA_OK;
+        const uint32_t c0 = sa_ld(&g_src_calls);
+        for (int t = 0; t < 200 && sa_ld(&g_src_calls) < c0 + 2; t++) sa_sleep_ms(1);
+        busy += sa_set_source(NULL, NULL) != SA_OK;
+        const uint32_t inside = sa_ld(&g_src_inside), c = sa_ld(&g_src_calls);
+        sa_sleep_ms(15);
+        if (inside || sa_ld(&g_src_calls) != c) bad++;
+        rounds++;
+    }
+    char what[300];
+    snprintf(what, sizeof(what), "source guard: %d detaches while the output plays (%u calls): none inside or after a detach returned", rounds,
+             sa_ld(&g_src_calls));
+    check(ok && rounds == 15 && bad == 0 && busy == 0 && sa_ld(&g_src_calls) >= 30, what);
+
+    /* a swap from one source to another: the first is done when it returns, the second has its own user */
+    sa_set_source(count_src, (void*)&g_src_calls);
+    sa_sleep_ms(30);
+    const int32_t r = sa_set_source(count_src2, (void*)&g_src2_calls);
+    const uint32_t inside = sa_ld(&g_src_inside), c = sa_ld(&g_src_calls);
+    sa_sleep_ms(40);
+    check(r == SA_OK && !inside && sa_ld(&g_src_calls) == c && sa_ld(&g_src2_calls) > 2 && sa_ld(&g_src_badpair) == 0,
+          "source guard: a swap leaves the previous source at once; each source gets its own user");
+    sa_set_source(NULL, NULL);
+    g_gen = sa_configure(0, "", "", 256, 0, 0);
+    wait_for(applied, 2000, &s);
+    sa_shutdown();
+}
+
+void sa_selftest_midi(void (*say)(const char* fmt, ...), void (*check)(int ok, const char* what));
+
 SA_API int32_t sa_selftest(const char* dir, char* report, int32_t report_size) {
     g_rep = report;
     g_rep_size = report_size;
@@ -829,6 +902,8 @@ SA_API int32_t sa_selftest(const char* dir, char* report, int32_t report_size) {
     test_device_min();
     test_session(d);
     test_session_jitter();
+    test_source_guard();
+    sa_selftest_midi(say, check);
     say("%d failure%s, %.1f s\n", g_fail, g_fail == 1 ? "" : "s", (sa_now_us() - t0) / 1e6);
     return g_fail;
 }

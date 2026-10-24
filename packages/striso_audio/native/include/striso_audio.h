@@ -60,6 +60,7 @@ extern "C" {
 #define SA_ERR_NOT_RUNNING -9       /* recording needs the input running */
 #define SA_ERR_BAD_ARG -10
 #define SA_ERR_NOT_INITIALISED -11
+#define SA_ERR_BUSY -12             /* sa_set_source: the output callback was still inside the previous source after 500 ms */
 
 /* sa_configure exclusive flags (Windows; ignored elsewhere) */
 #define SA_EXCLUSIVE_INPUT 1  /* the input alone: its own format, short periods */
@@ -327,9 +328,16 @@ SA_API void sa_silence_guard(int32_t on);
  * plays what fn writes, called on the output's thread for every buffer (interleaved stereo float,
  * `frames` of them at the device's `rate`; returns the frames written, the rest is silence), times
  * the gain. Striso Live's audition of a firmware build: the virtual board renders there
- * (striso_virtual's sv_audio_source). NULL: silence again. Set it while the output is closed. */
+ * (striso_virtual's sv_audio_source). NULL: silence again.
+ * It can be set or cleared at any time, also while the output plays: sa_set_source returns only
+ * when the output callback is no longer inside the previous source (it detaches it, then waits in
+ * 1 ms sleeps while a call is in flight, at most 500 ms), so the caller may destroy the previous
+ * user (a virtual board) right after SA_OK. SA_ERR_BUSY: the callback was still inside it after
+ * 500 ms: nothing is attached then (silence); do not destroy the previous user yet, call again.
+ * Setting the same (non-NULL) fn and user again returns SA_OK at once. Call it from one thread at a time.
+ * (Returned void before; the result is new, the binary interface is the same.) */
 typedef int32_t (*sa_source_fn)(void* user, float* stereo, int32_t frames, int32_t rate);
-SA_API void sa_set_source(sa_source_fn fn, void* user);
+SA_API int32_t sa_set_source(sa_source_fn fn, void* user);
 
 /* Windows: how many other programs have an active audio session on that output (exact name, or
  * "" for the default), so a measurement never takes a device in use: 0 none, -1 unknown

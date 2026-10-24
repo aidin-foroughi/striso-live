@@ -5,9 +5,13 @@
  *   striso_audio_check --capture SECONDS OUT.wav [--shared] [--period N] [--input NAME]
  *                                               records the Striso input (at most 5 s) to OUT.wav and
  *                                               reports its format and level; opens no output device
+ *   striso_audio_check --midi-list              the system's MIDI inputs and their ids (opens nothing)
+ *   striso_audio_check --midi-monitor ID SECONDS  opens that MIDI input (at most 60 s) and prints what
+ *                                               reaches the sink (channel messages only)
  * Exit code: number of self-test failures, or 1 when a check fails.
  */
 #include "striso_audio.h"
+#include "striso_midi.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -154,8 +158,88 @@ static int capture_check(double secs, const char* out, int exclusive, int period
     return s.record_error == SA_OK && s.record_frames > 0 ? 0 : 1;
 }
 
+static const char* midi_err(int32_t e) {
+    switch (e) {
+    case SA_OK: return "ok";
+    case SA_ERR_NOT_FOUND: return "not found";
+    case SA_ERR_MIDI_IN_USE: return "in use by another program";
+    case SA_ERR_MIDI_OPEN: return "would not open";
+    case SA_ERR_MIDI_GONE: return "gone";
+    case SA_ERR_MIDI_SYSTEM: return "the MIDI system did not start";
+    case SA_ERR_NOT_INITIALISED: return "not initialised";
+    default: return "error";
+    }
+}
+
+static int midi_list(void) {
+    int32_t r = sa_midi_init();
+    if (r != SA_OK) {
+        fprintf(stderr, "MIDI: %s (%d)\n", midi_err(r), r);
+        return 1;
+    }
+    uint32_t g = sa_midi_refresh();
+    int n = sa_midi_count();
+    printf("MIDI inputs (%d, generation %u):\n", n, g);
+    for (int i = 0; i < n; i++) {
+        sa_midi_device d;
+        if (sa_midi_get(i, &d) != SA_OK) continue;
+        printf("  %s\n      id %s%s\n", d.name, d.id, d.present ? "" : "  (gone)");
+    }
+    sa_midi_shutdown();
+    return 0;
+}
+
+static int32_t count_sink(void* user, const uint8_t* packets, int32_t n) {
+    (void)packets;
+    *(volatile uint32_t*)user += (uint32_t)(n / 4);
+    return n;
+}
+
+/* opens one input for at most 60 s and prints every channel message the sink gets */
+static int midi_monitor(const char* id, double secs) {
+    if (secs > 60) secs = 60;
+    if (sa_midi_init() != SA_OK) {
+        fprintf(stderr, "MIDI did not start\n");
+        return 1;
+    }
+    sa_midi_refresh();
+    static volatile uint32_t packets = 0;
+    sa_midi_set_sink(count_sink, (void*)&packets);
+    int32_t r = sa_midi_open(id);
+    if (r != SA_OK) {
+        fprintf(stderr, "%s: %s (%d)\n", id, midi_err(r), r);
+        sa_midi_shutdown();
+        return 1;
+    }
+    printf("%s open for %.0f s\n", id, secs);
+    fflush(stdout);
+    const int64_t t0 = sa_clock_us();
+    uint32_t shown = 0, loops = 0;
+    while (sa_clock_us() - t0 < (int64_t)(secs * 1e6)) {
+        sa_midi_event ev[256];
+        int k;
+        while ((k = sa_midi_events(ev, 256)) > 0) {
+            for (int i = 0; i < k; i++) {
+                printf("%10.3f  slot %d  %02X %02X", (ev[i].t_us - t0) / 1e6, ev[i].device, ev[i].bytes[0], ev[i].bytes[1]);
+                if (ev[i].len == 3) printf(" %02X", ev[i].bytes[2]);
+                printf("\n");
+            }
+            shown += (uint32_t)k;
+        }
+        fflush(stdout);
+        nap(20);
+        if (++loops % 50 == 0) sa_midi_refresh(); /* once a second: an unplug closes it */
+    }
+    sa_midi_set_sink(NULL, NULL);
+    printf("%u messages shown, %u packets to the sink, %u monitor events dropped\n", shown, packets, sa_midi_events_lost());
+    sa_midi_shutdown();
+    return 0;
+}
+
 int main(int argc, char** argv) {
     if (argc >= 2 && strcmp(argv[1], "--list") == 0) return list_devices();
+    if (argc >= 2 && strcmp(argv[1], "--midi-list") == 0) return midi_list();
+    if (argc >= 4 && strcmp(argv[1], "--midi-monitor") == 0) return midi_monitor(argv[2], atof(argv[3]));
     if (argc >= 4 && strcmp(argv[1], "--capture") == 0) {
         int exclusive = 1, period = 128;
         const char* input = "";

@@ -52,6 +52,16 @@ static void play_time_hook(struct ma_device* d, uint32_t frames, uint64_t t);
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
 
+/* a full memory barrier (store-load ordering): sa_set_source's handshake with the output callback */
+static void full_fence(void) {
+#if defined(_MSC_VER)
+    volatile long x = 0;
+    _InterlockedExchange(&x, 1);
+#else
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+#endif
+}
+
 #define SA_MAXDEV 64
 #define SA_NAME 256
 #define SA_EVLOG 512
@@ -105,6 +115,7 @@ static struct {
     void* volatile pass; /* sa_pass* */
     void* volatile rec;  /* sa_ring* */
     void* volatile src_fn, *volatile src_user; /* sa_set_source */
+    volatile uint32_t src_busy;                /* the output callback is inside the source (sa_set_source waits for 0) */
     volatile uint32_t cb_enter, cb_exit;
     volatile uint32_t cap_closing, play_closing, cap_lost_evt, play_lost_evt;
     volatile uint32_t cap_callbacks, play_callbacks;
@@ -499,7 +510,10 @@ static void playback_cb(ma_device* d, void* out, const void* in, ma_uint32 n) {
         p->tap = NULL;
         if (tap) tap_write(1, P.scratch, n, frame0);
     } else {
-        /* the output alone: its source (sa_set_source), else silence */
+        /* the output alone: its source (sa_set_source), else silence. src_busy is up around every
+           look at the source, so sa_set_source knows when no call to the previous one is left */
+        sa_inc(&G.src_busy);
+        full_fence();
         sa_source_fn src = (sa_source_fn)sa_ldp(&G.src_fn);
         int32_t got = 0;
         if (src && d->playback.channels == 2) {
@@ -509,6 +523,7 @@ static void playback_cb(ma_device* d, void* out, const void* in, ma_uint32 n) {
             float* o = (float*)out;
             for (int32_t i = 0; i < 2 * got; i++) o[i] *= g;
         }
+        sa_addu(&G.src_busy, 0xFFFFFFFFu); /* -1 */
         memset((float*)out + (size_t)got * d->playback.channels, 0, (size_t)(n - (ma_uint32)got) * d->playback.channels * sizeof(float));
     }
     if (sa_ld(&P.guard)) {
@@ -1511,9 +1526,20 @@ SA_API int32_t sa_probe_marks(sa_mark* out, int32_t max) {
 
 SA_API void sa_silence_guard(int32_t on) { sa_st(&P.guard, on ? 1u : 0u); }
 
-SA_API void sa_set_source(sa_source_fn fn, void* user) {
+SA_API int32_t sa_set_source(sa_source_fn fn, void* user) {
+    if (fn && sa_ldp(&G.src_fn) == (void*)fn && sa_ldp(&G.src_user) == user) return SA_OK; /* already attached */
+    /* detach first, then wait until the callback is out of the previous source: it either saw
+       NULL or is counted in src_busy (both sides fence between their store and their load) */
+    sa_stp(&G.src_fn, NULL);
+    full_fence();
+    const uint64_t t0 = sa_now_us64();
+    while (sa_ld(&G.src_busy) != 0) {
+        if (sa_now_us64() - t0 > 500000u) return SA_ERR_BUSY; /* left detached: silence */
+        sa_sleep_ms(1);
+    }
     sa_stp(&G.src_user, user);
     sa_stp(&G.src_fn, (void*)fn);
+    return SA_OK;
 }
 
 SA_API int32_t sa_output_busy(const char* output) {

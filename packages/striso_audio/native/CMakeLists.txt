@@ -1,5 +1,6 @@
 # striso_audio: the native audio library of Striso Live (miniaudio + the passthrough, the WAV
-# writer and the self-test), and striso_audio_check (self-test and hardware checks).
+# writer, the MIDI input (striso_midi.c: WinMM, CoreMIDI) and the self-test), and striso_audio_check
+# (self-test and hardware checks).
 #
 # Used two ways:
 #   - from windows/CMakeLists.txt (add_subdirectory): builds striso_audio.dll next to the app
@@ -18,6 +19,8 @@ add_library(striso_audio SHARED
   src/sa_core.c
   src/sa_platform.c
   src/selftest.c
+  src/striso_midi.c
+  src/selftest_midi.c
 )
 set_target_properties(striso_audio PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_VISIBILITY_PRESET hidden)
 target_include_directories(striso_audio PRIVATE include third_party/miniaudio)
@@ -26,9 +29,9 @@ target_compile_definitions(striso_audio PRIVATE SA_BUILD_DLL)
 if(MSVC)
   target_compile_definitions(striso_audio PRIVATE _CRT_SECURE_NO_WARNINGS)
   target_compile_options(striso_audio PRIVATE /W3 /utf-8 $<$<NOT:$<CONFIG:Debug>>:/O2>)
-  target_link_libraries(striso_audio PRIVATE cfgmgr32 ole32 shell32)
+  target_link_libraries(striso_audio PRIVATE cfgmgr32 ole32 shell32 winmm)
 elseif(APPLE)
-  target_link_libraries(striso_audio PRIVATE "-framework CoreFoundation" "-framework CoreAudio" "-framework AudioToolbox" "-framework AVFoundation" objc)
+  target_link_libraries(striso_audio PRIVATE "-framework CoreFoundation" "-framework CoreAudio" "-framework AudioToolbox" "-framework AVFoundation" "-framework CoreMIDI" objc)
 else()
   target_link_libraries(striso_audio PRIVATE m pthread dl)
 endif()
