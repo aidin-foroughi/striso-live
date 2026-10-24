@@ -42,6 +42,13 @@
 #define MA_ENABLE_COREAUDIO
 #define MA_ENABLE_NULL
 #define MA_WASAPI_EXCLUSIVE_CAPTURE_PREFER_S24 /* the local patch in third_party/miniaudio (README there) */
+/* the local patch's timestamp hooks (measurements, API 3): each input buffer's device position and
+ * time (WASAPI GetBuffer, Core Audio's input time stamp), the output's presentation time (Core Audio) */
+struct ma_device;
+static void cap_packet_hook(struct ma_device* d, uint32_t frames, uint32_t flags, uint64_t pos, uint64_t t);
+static void play_time_hook(struct ma_device* d, uint32_t frames, uint64_t t);
+#define MA_CAPTURE_PACKET_HOOK(d, n, f, pos, t) cap_packet_hook((struct ma_device*)(d), (uint32_t)(n), (uint32_t)(f), (uint64_t)(pos), (uint64_t)(t))
+#define MA_PLAYBACK_TIME_HOOK(d, n, t) play_time_hook((struct ma_device*)(d), (uint32_t)(n), (uint64_t)(t))
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
 
@@ -97,6 +104,7 @@ static struct {
     /* shared with the audio callbacks */
     void* volatile pass; /* sa_pass* */
     void* volatile rec;  /* sa_ring* */
+    void* volatile src_fn, *volatile src_user; /* sa_set_source */
     volatile uint32_t cb_enter, cb_exit;
     volatile uint32_t cap_closing, play_closing, cap_lost_evt, play_lost_evt;
     volatile uint32_t cap_callbacks, play_callbacks;
@@ -116,6 +124,100 @@ static struct {
     uint32_t ev_lost;
     uint64_t ev_last_t;
 } G;
+
+/* ======================================================================== measurements (API 3)
+ *
+ * sa_probe: the callbacks record timing marks (one queue per device thread) and copy the input as
+ * it arrives and the output before its gain into two taps; the caller reads them (under G.lock,
+ * which the callbacks never take). A device's queue and tap are reset only while that device is
+ * closed (its thread is not running), when it opens: session goes up and frames start at 0. */
+#define SA_MARKQ 8192
+#define SA_TAP_FRAMES 131072 /* 2.7 s at 48 kHz */
+#define SA_SCRATCH 16384
+
+typedef struct {
+    sa_mark it[SA_MARKQ];
+    volatile uint32_t w, r;
+} sa_markq;
+
+static struct {
+    int alloc;
+    volatile uint32_t on, guard, lost, violations, discont;
+    sa_markq qcap, qplay;
+    sa_ring tap[2];
+    volatile uint32_t tap_state[2]; /* 0 waiting for its first frame, 1 running, 2 stopped (overflowed) */
+    int64_t tap_first[2];           /* the device frame of the tap's first frame (set by the producer) */
+    int64_t tap_read[2];            /* consumer */
+    int32_t tap_session[2];
+    float* scratch;                 /* playback thread: the output before its gain */
+    /* capture thread */
+    int64_t cap_frames, cap_pkt_frames;
+    int32_t cap_session;
+    /* playback thread */
+    int64_t play_frames;
+    int32_t play_session;
+    void* wclock;
+    double play_rate;
+    int64_t play_host_us; /* macOS: when this buffer is presented (the hook, same thread) */
+    uint32_t clock_n;     /* playback thread: callbacks, to read the output's clock every 8th */
+    double out_ahead_s;   /* playback thread: frames from what plays to a callback's first frame (smoothed) */
+    uint32_t out_ahead_n;
+    volatile uint32_t out_ahead; /* float: published */
+    volatile uint32_t cpu_cap, cpu_play, busy_cap, busy_play, clock_ok;
+} P;
+
+static void markq_push(sa_markq* q, const sa_mark* m) {
+    uint32_t w = sa_ld(&q->w);
+    if (w - sa_ld(&q->r) >= SA_MARKQ) {
+        sa_inc(&P.lost);
+        return;
+    }
+    q->it[w % SA_MARKQ] = *m;
+    sa_st(&q->w, w + 1);
+}
+
+/* resets of one side's queue and tap: the control thread, with that device closed */
+static void probe_reset(int capture) {
+    ma_mutex_lock(&G.lock);
+    sa_markq* q = capture ? &P.qcap : &P.qplay;
+    sa_st(&q->w, 0);
+    sa_st(&q->r, 0);
+    int k = capture ? 0 : 1;
+    if (P.alloc) {
+        sa_st(&P.tap[k].w, 0);
+        sa_st(&P.tap[k].r, 0);
+    }
+    sa_st(&P.tap_state[k], 0);
+    P.tap_read[k] = 0;
+    if (capture) {
+        P.cap_frames = P.cap_pkt_frames = 0;
+        P.tap_session[0] = ++P.cap_session;
+    } else {
+        P.play_frames = 0;
+        P.play_host_us = 0;
+        P.clock_n = 0;
+        P.out_ahead_n = 0;
+        P.out_ahead_s = 0;
+        sa_stf(&P.out_ahead, 0);
+        P.tap_session[1] = ++P.play_session;
+    }
+    ma_mutex_unlock(&G.lock);
+}
+
+/* a producer's tap write: latches its first frame, stops for good when it would overflow */
+static void tap_write(int k, const float* x, uint32_t n, int64_t frame) {
+    uint32_t s = sa_ld(&P.tap_state[k]);
+    if (s == 2 || !P.alloc) return;
+    if (s == 0) {
+        P.tap_first[k] = frame;
+        sa_st(&P.tap_state[k], 1);
+    }
+    uint32_t w = sa_ring_write(&P.tap[k], x, n);
+    if (w < n) {
+        sa_addu(&P.lost, n - w);
+        sa_st(&P.tap_state[k], 2);
+    }
+}
 
 /* ======================================================================== small helpers */
 
@@ -298,12 +400,71 @@ static void jitter(volatile uint32_t* n) {
     sa_sleep_ms((int)((late + 500) / 1000));
 }
 
+/* the capture thread: every buffer the input device hands over, before its callbacks (WASAPI
+ * GetBuffer; Core Audio's input proc) */
+static void cap_packet_hook(struct ma_device* dv, uint32_t n, uint32_t flags, uint64_t pos, uint64_t t) {
+    if ((ma_device*)dv != &G.cap) return;
+    int disc = 0, bad_time = 0;
+#if defined(_WIN32)
+    disc = (flags & 1u) != 0;     /* AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY */
+    bad_time = (flags & 4u) != 0; /* AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR */
+#else
+    (void)flags;
+#endif
+    /* the first buffer after a start is flagged as a matter of course */
+    if (disc && P.cap_pkt_frames > 0) sa_inc(&P.discont);
+    if (sa_ld(&P.on)) {
+        sa_mark m;
+        memset(&m, 0, sizeof(m));
+        m.kind = SA_MARK_CAP_PACKET;
+        m.n = (int32_t)n;
+        m.session = P.cap_session;
+        m.flags = (disc ? 1 : 0) | (bad_time ? 2 : 0);
+        m.frame = P.cap_pkt_frames;
+        m.t_us = (int64_t)sa_now_us64();
+        m.dev_pos = (int64_t)pos;
+        m.dev_us = t && !bad_time ? (int64_t)sa_device_time_us(t) : 0;
+        markq_push(&P.qcap, &m);
+    }
+    P.cap_pkt_frames += n;
+}
+
+/* the playback thread (Core Audio): when the buffer about to be rendered is presented */
+static void play_time_hook(struct ma_device* dv, uint32_t n, uint64_t t) {
+    (void)n;
+    if ((ma_device*)dv != &G.play) return;
+    P.play_host_us = t ? (int64_t)sa_device_time_us(t) : 0;
+}
+
+/* end of a callback while probing: its mark, the thread's CPU time */
+static void probe_cb_mark(sa_markq* q, int kind, int32_t session, int64_t frame, uint32_t n, uint64_t t0, int64_t dev_pos, int64_t dev_us,
+                          volatile uint32_t* busy_sum, volatile uint32_t* cpu) {
+    uint64_t t1 = sa_now_us64();
+    sa_mark m;
+    memset(&m, 0, sizeof(m));
+    m.kind = kind;
+    m.n = (int32_t)n;
+    m.session = session;
+    m.frame = frame;
+    m.t_us = (int64_t)t0;
+    m.dev_pos = dev_pos;
+    m.dev_us = dev_us;
+    m.busy_us = (int32_t)(t1 - t0);
+    markq_push(q, &m);
+    sa_addu(busy_sum, (uint32_t)(t1 - t0));
+    sa_st(cpu, sa_thread_cpu_us());
+}
+
 static void capture_cb(ma_device* d, void* out, const void* in, ma_uint32 n) {
     (void)out;
     sa_inc(&G.cb_enter);
+    const int probing = (int)sa_ld(&P.on);
+    const uint64_t t0 = probing ? sa_now_us64() : 0;
+    const int64_t frame0 = P.cap_frames;
     rt_once(d, &G.cap_tid, &G.rt_cap, &G.ev_cap, 1);
     jitter(&G.jit_n_cap);
     const float* x = (const float*)in;
+    if (x && d->capture.channels == 2 && probing) tap_write(0, x, n, frame0);
     if (x && d->capture.channels == 2) {
         uint32_t now = sa_now_us();
         sa_meter(x, n, (double)d->sampleRate, &G.peak_l, &G.peak_r);
@@ -317,19 +478,76 @@ static void capture_cb(ma_device* d, void* out, const void* in, ma_uint32 n) {
             if (w < n) sa_addu(&G.rec_dropped, n - w);
         }
     }
+    P.cap_frames += n;
+    if (probing) probe_cb_mark(&P.qcap, SA_MARK_CAP_CB, P.cap_session, frame0, n, t0, 0, 0, &P.busy_cap, &P.cpu_cap);
     sa_inc(&G.cap_callbacks);
     sa_inc(&G.cb_exit);
 }
 
 static void playback_cb(ma_device* d, void* out, const void* in, ma_uint32 n) {
     (void)in;
+    const int probing = (int)sa_ld(&P.on);
+    const uint64_t t0 = probing ? sa_now_us64() : 0;
+    const int64_t frame0 = P.play_frames;
     rt_once(d, &G.play_tid, &G.rt_play, &G.ev_play, 0);
     if (sa_ld(&G.jit_out)) jitter(&G.jit_n_play);
     sa_pass* p = (sa_pass*)sa_ldp(&G.pass);
     if (p && d->playback.channels == 2) {
+        const int tap = probing && P.alloc && n <= SA_SCRATCH;
+        if (tap) p->tap = P.scratch;
         sa_pass_pull(p, (float*)out, n, sa_now_us(), sa_ldf(&G.gain_bits));
+        p->tap = NULL;
+        if (tap) tap_write(1, P.scratch, n, frame0);
     } else {
-        memset(out, 0, (size_t)n * d->playback.channels * sizeof(float));
+        /* the output alone: its source (sa_set_source), else silence */
+        sa_source_fn src = (sa_source_fn)sa_ldp(&G.src_fn);
+        int32_t got = 0;
+        if (src && d->playback.channels == 2) {
+            got = src(sa_ldp(&G.src_user), (float*)out, (int32_t)n, (int32_t)P.play_rate);
+            got = got < 0 ? 0 : (got > (int32_t)n ? (int32_t)n : got);
+            const float g = sa_ldf(&G.gain_bits);
+            float* o = (float*)out;
+            for (int32_t i = 0; i < 2 * got; i++) o[i] *= g;
+        }
+        memset((float*)out + (size_t)got * d->playback.channels, 0, (size_t)(n - (ma_uint32)got) * d->playback.channels * sizeof(float));
+    }
+    if (sa_ld(&P.guard)) {
+        /* digital silence, whatever the passthrough made (measurements on a real output) */
+        float* o = (float*)out;
+        const size_t k = (size_t)n * d->playback.channels;
+        uint32_t bad = 0;
+        for (size_t i = 0; i < k; i++) {
+            if (o[i] != 0.0f) bad++;
+            o[i] = 0.0f;
+        }
+        if (bad) sa_addu(&P.violations, bad);
+    }
+    P.play_frames += n;
+    /* where the output plays, by its own clock: every callback while probing, every 8th otherwise
+       (the latency the app shows is measured this way, not modelled) */
+    if (probing || (++P.clock_n & 7u) == 0) {
+        const uint64_t tc = probing ? t0 : sa_now_us64();
+        int64_t pos = 0, tus = 0;
+#if defined(_WIN32)
+        if (P.wclock && sa_wasapi_clock_read(P.wclock, P.play_rate, &pos, &tus)) sa_st(&P.clock_ok, 1);
+        else tus = 0;
+#elif defined(__APPLE__)
+        if (P.play_host_us) {
+            pos = frame0; /* this buffer's first frame is presented at its time stamp */
+            tus = P.play_host_us;
+            sa_st(&P.clock_ok, 1);
+        }
+#endif
+        if (tus) {
+            /* frames between what plays now and this callback's first frame */
+            double ahead = (double)(frame0 - pos) - ((double)(int64_t)(tc - (uint64_t)tus)) * P.play_rate / 1e6;
+            if (ahead >= 0 && ahead < P.play_rate) {
+                P.out_ahead_s = P.out_ahead_n ? P.out_ahead_s + 0.05 * (ahead - P.out_ahead_s) : ahead;
+                P.out_ahead_n++;
+                sa_stf(&P.out_ahead, (float)P.out_ahead_s);
+            }
+        }
+        if (probing) probe_cb_mark(&P.qplay, SA_MARK_PLAY_CB, P.play_session, frame0, n, t0, pos, tus, &P.busy_play, &P.cpu_play);
     }
     sa_inc(&G.play_callbacks);
 }
@@ -575,6 +793,10 @@ static void close_playback(int32_t state, int32_t err) {
         sa_st(&G.play_closing, 0);
         G.play_open = 0;
     }
+    if (P.wclock) {
+        sa_wasapi_clock_close(P.wclock);
+        P.wclock = NULL;
+    }
     sa_st(&G.play_lost_evt, 0);
     sa_st(&G.play_tid, 0);
     sa_st(&G.rt_play, 0);
@@ -663,6 +885,7 @@ static void open_capture(void) {
         return;
     }
     device_periods(ma_device_type_capture, &id, &G.cap_dmin, &G.cap_ddef);
+    probe_reset(1); /* no capture thread runs now */
     ma_result r = MA_ERROR;
 #if defined(_WIN32)
     if ((G.cur.exclusive & SA_EXCLUSIVE_INPUT) && G.backend == SA_BACKEND_SYSTEM) {
@@ -738,6 +961,7 @@ static void open_playback(void) {
         pid = &id;
     }
     device_periods(ma_device_type_playback, pid, &G.play_dmin, &G.play_ddef);
+    probe_reset(0); /* no playback thread runs now */
     ma_result r = MA_ERROR;
 #if defined(_WIN32)
     if ((G.cur.exclusive & SA_EXCLUSIVE_OUTPUT) && G.backend == SA_BACKEND_SYSTEM) {
@@ -757,26 +981,33 @@ static void open_playback(void) {
     device_latency(&G.play, 0, &G.play_buffer, &G.play_lat);
     int excl = G.play.playback.shareMode == ma_share_mode_exclusive;
     log_now(SA_EV_OPEN, 0, G.play_buffer, excl);
-    sa_pass* p = (sa_pass*)malloc(sizeof(sa_pass));
-    uint32_t in_hint = G.cap_buffer > 0 ? (uint32_t)G.cap_buffer : G.cap.capture.internalPeriodSizeInFrames;
-    if (!p || sa_pass_init(p, (double)G.cap.sampleRate, (double)G.play.sampleRate, in_hint) != 0) {
-        free(p);
-        close_playback(SA_DEV_FAILED, SA_ERR_OPEN_PLAYBACK);
-        return;
-    }
-    /* how late a playback wake-up may come before the device runs dry: exclusive, one buffer (the
-       other one is playing); shared, what the buffer holds beyond one engine period */
-    double slack_us = 0;
+    P.play_rate = G.play.sampleRate > 0 ? G.play.sampleRate : 48000;
+    sa_st(&P.clock_ok, 0);
 #if defined(_WIN32)
-    if (G.backend == SA_BACKEND_SYSTEM) {
-        double rate = G.play.sampleRate;
-        ma_uint32 actual = G.play.wasapi.actualBufferSizeInFramesPlayback, per = G.play.wasapi.periodSizeInFramesPlayback;
-        slack_us = excl ? actual * 1e6 / rate : (actual > per ? (actual - per) * 1e6 / rate : 0);
-    }
+    if (G.backend == SA_BACKEND_SYSTEM) P.wclock = sa_wasapi_clock_open(G.play.wasapi.pAudioClientPlayback);
 #endif
-    sa_pass_set_output(p, (uint32_t)(G.play_buffer > 0 ? G.play_buffer : 0), slack_us);
-    G.pass_owned = p;
-    sa_stp(&G.pass, p);
+    if (!(G.cur.exclusive & SA_OUTPUT_ONLY)) { /* output only: no passthrough, the callback plays silence */
+        sa_pass* p = (sa_pass*)malloc(sizeof(sa_pass));
+        uint32_t in_hint = G.cap_buffer > 0 ? (uint32_t)G.cap_buffer : G.cap.capture.internalPeriodSizeInFrames;
+        if (!p || sa_pass_init(p, (double)G.cap.sampleRate, (double)G.play.sampleRate, in_hint) != 0) {
+            free(p);
+            close_playback(SA_DEV_FAILED, SA_ERR_OPEN_PLAYBACK);
+            return;
+        }
+        /* how late a playback wake-up may come before the device runs dry: exclusive, one buffer (the
+           other one is playing); shared, what the buffer holds beyond one engine period */
+        double slack_us = 0;
+#if defined(_WIN32)
+        if (G.backend == SA_BACKEND_SYSTEM) {
+            double rate = G.play.sampleRate;
+            ma_uint32 actual = G.play.wasapi.actualBufferSizeInFramesPlayback, per = G.play.wasapi.periodSizeInFramesPlayback;
+            slack_us = excl ? actual * 1e6 / rate : (actual > per ? (actual - per) * 1e6 / rate : 0);
+        }
+#endif
+        sa_pass_set_output(p, (uint32_t)(G.play_buffer > 0 ? G.play_buffer : 0), slack_us);
+        G.pass_owned = p;
+        sa_stp(&G.pass, p);
+    }
     sa_st(&G.play_lost_evt, 0);
     r = ma_device_start(&G.play);
     if (r != MA_SUCCESS) {
@@ -803,6 +1034,16 @@ static void apply(const sa_want* w) {
         close_all();
         return;
     }
+    if (w->exclusive & SA_OUTPUT_ONLY) {
+        int change = !G.play_open || G.cap_open || !(old.exclusive & SA_OUTPUT_ONLY) || strcmp(old.output, w->output) != 0 ||
+                     old.period != w->period || (old.exclusive & SA_EXCLUSIVE_OUTPUT) != (w->exclusive & SA_EXCLUSIVE_OUTPUT);
+        if (change) {
+            close_all();
+            open_playback();
+        }
+        return;
+    }
+    if (old.exclusive & SA_OUTPUT_ONLY) close_all(); /* back to input + output */
     int cap_change = !G.cap_open || strcmp(old.input, w->input) != 0 || old.period != w->period ||
                      (old.exclusive & SA_EXCLUSIVE_INPUT) != (w->exclusive & SA_EXCLUSIVE_INPUT);
     if (cap_change) {
@@ -836,6 +1077,38 @@ static void check_lost(void) {
     if (G.play_open && (sa_ld(&G.play_lost_evt) || ma_device_get_state(&G.play) != ma_device_state_started)) {
         close_playback(SA_DEV_LOST, SA_ERR_LOST);
     }
+}
+
+/* The latency breakdown the app shows, as striso_bench measures it (packages/striso_bench):
+ *   input   the wait for the input's next wake-up, half its interval on average, + what the system
+ *           adds. Windows: about 1 ms in exclusive mode (usbaudio2 completes its transfers per 1 ms
+ *           frame; the marker measured 2.5 ms from the bus to the callback at a 3 ms period), none in
+ *           shared mode (3.5 ms at its 7 ms). WASAPI's capture "stream latency" is the buffer itself:
+ *           adding it (as before) counted the period twice. macOS: Core Audio's reported device +
+ *           stream latency + safety offset.
+ *   output  measured: from a callback to when its first frame plays, by the output's own clock
+ *           (IAudioClock; Core Audio's presentation time + the reported device latency), + half the
+ *           take (the mean frame); where no clock is there, the buffer model as before. */
+static double input_ms(double nominal_ms, double fs, int exclusive) {
+#if defined(_WIN32)
+    (void)fs;
+    return nominal_ms / 2 + (G.backend == SA_BACKEND_SYSTEM && exclusive ? 1.0 : 0.0);
+#else
+    (void)exclusive;
+    return nominal_ms / 2 + G.cap_lat / fs * 1000;
+#endif
+}
+
+static double output_ms(double model_frames, double take, double rate) {
+    float ahead = sa_ldf(&P.out_ahead);
+    if (P.out_ahead_n > 4 && ahead > 0) {
+        double extra = 0;
+#if defined(__APPLE__)
+        extra = G.play_lat; /* after the presentation time: device + stream latency (reported) */
+#endif
+        return (ahead + take / 2 + extra) / rate * 1000;
+    }
+    return (model_frames + G.play_lat) / rate * 1000;
 }
 
 static void publish(void) {
@@ -912,7 +1185,7 @@ static void publish(void) {
            output: its buffer (exclusive: the one being written waits for the one playing; shared:
            the buffer is kept full, less half an engine period) + what the system reports */
         double nom_in = s.cap_nominal_us > 0 ? s.cap_nominal_us * 1e-3 : (G.cap_buffer > 0 ? G.cap_buffer / fs * 1000 : 0);
-        s.in_ms = (float)(nom_in / 2 + G.cap_lat / fs * 1000);
+        s.in_ms = (float)input_ms(nom_in, fs, s.capture_exclusive);
         double pr = s.playback_rate > 0 ? s.playback_rate : 48000;
         double ob = G.play_buffer > 0 ? G.play_buffer : (double)s.playback_period * (s.playback_periods > 0 ? s.playback_periods : 1);
         double take = s.play_burst > 0 ? s.play_burst : ob;
@@ -924,8 +1197,20 @@ static void publish(void) {
             if (actual > 0) out_frames = actual - take / 2 > 0 ? actual - take / 2 : actual;
         }
 #endif
-        s.out_ms = (float)((out_frames + G.play_lat) / pr * 1000);
+        s.out_ms = (float)output_ms(out_frames, take, pr);
         s.latency_ms = s.in_ms + s.ring_ms + s.out_ms;
+    } else if (G.play_open) {
+        /* the output alone (SA_OUTPUT_ONLY): its part of the breakdown, as above */
+        double pr = s.playback_rate > 0 ? s.playback_rate : 48000;
+        double ob = G.play_buffer > 0 ? G.play_buffer : (double)s.playback_period * (s.playback_periods > 0 ? s.playback_periods : 1);
+        double out_frames = s.playback_exclusive ? ob : ob / 2;
+#if defined(_WIN32)
+        if (G.backend == SA_BACKEND_SYSTEM && !s.playback_exclusive) {
+            ma_uint32 actual = G.play.wasapi.actualBufferSizeInFramesPlayback;
+            if (actual > 0) out_frames = actual - ob / 2 > 0 ? actual - ob / 2 : actual;
+        }
+#endif
+        s.out_ms = (float)output_ms(out_frames, ob, pr);
     }
     s.record_state = G.rec_state;
     s.record_error = G.rec_error;
@@ -944,6 +1229,16 @@ static void publish(void) {
     s.timer_1ms = G.timer_1ms;
     s.power_throttling_off = G.power_off;
     s.events_lost = events_lost();
+    s.cap_discontinuities = sa_ld(&P.discont);
+    s.silence_violations = sa_ld(&P.violations);
+    s.probe_lost = sa_ld(&P.lost);
+    s.probe_on = (int32_t)sa_ld(&P.on);
+    s.cpu_capture_us = sa_ld(&P.cpu_cap);
+    s.cpu_playback_us = sa_ld(&P.cpu_play);
+    s.busy_capture_us = sa_ld(&P.busy_cap);
+    s.busy_playback_us = sa_ld(&P.busy_play);
+    s.playback_clock = G.play_open ? (int32_t)sa_ld(&P.clock_ok) : 0;
+    s.silence_guard = (int32_t)sa_ld(&P.guard);
     ma_mutex_lock(&G.lock);
     s.event_seq = G.ev_seq;
     G.st = s;
@@ -1088,7 +1383,7 @@ SA_API uint32_t sa_configure(int32_t run, const char* input, const char* output,
     copy_name(G.want.output, output);
     G.want.period = period;
     G.want.monitor = monitor ? 1 : 0;
-    G.want.exclusive = exclusive & (SA_EXCLUSIVE_INPUT | SA_EXCLUSIVE_OUTPUT);
+    G.want.exclusive = exclusive & (SA_EXCLUSIVE_INPUT | SA_EXCLUSIVE_OUTPUT | SA_OUTPUT_ONLY);
     uint32_t gen = ++G.want_gen;
     ma_mutex_unlock(&G.lock);
     return gen;
@@ -1164,6 +1459,81 @@ SA_API int32_t sa_documents_dir(char* out, int32_t size) {
 }
 
 SA_API void sa_request_mic(void) { sa_mic_request(); }
+
+/* ------------------------------------------------------------------------ measurements (API 3) */
+
+SA_API int64_t sa_clock_us(void) { return (int64_t)sa_now_us64(); }
+SA_API int32_t sa_sizeof_mark(void) { return (int32_t)sizeof(sa_mark); }
+
+SA_API void sa_probe(int32_t on) {
+    if (on && !P.alloc) {
+        /* once, before any callback can see it on (they check P.alloc after P.on) */
+        P.scratch = (float*)malloc(sizeof(float) * 2 * SA_SCRATCH);
+        if (!P.scratch || sa_ring_init(&P.tap[0], SA_TAP_FRAMES) != 0 || sa_ring_init(&P.tap[1], SA_TAP_FRAMES) != 0) {
+            free(P.scratch);
+            P.scratch = NULL;
+            sa_ring_free(&P.tap[0]);
+            sa_ring_free(&P.tap[1]);
+            return;
+        }
+        P.alloc = 1;
+    }
+    sa_st(&P.on, on && P.alloc ? 1u : 0u);
+}
+
+SA_API int32_t sa_probe_audio(int32_t which, float* out, int32_t max_frames, int64_t* first_frame, int32_t* session) {
+    if (!G.inited || !P.alloc || which < 0 || which > 1 || !out || max_frames <= 0) return 0;
+    ma_mutex_lock(&G.lock);
+    uint32_t n = sa_ring_read(&P.tap[which], out, (uint32_t)max_frames);
+    if (first_frame) *first_frame = P.tap_first[which] + P.tap_read[which];
+    if (session) *session = P.tap_session[which];
+    P.tap_read[which] += n;
+    ma_mutex_unlock(&G.lock);
+    return (int32_t)n;
+}
+
+static int32_t markq_pop(sa_markq* q, sa_mark* out, int32_t max) {
+    int32_t n = 0;
+    uint32_t r = sa_ld(&q->r), w = sa_ld(&q->w);
+    while (r != w && n < max) out[n++] = q->it[r++ % SA_MARKQ];
+    sa_st(&q->r, r);
+    return n;
+}
+
+SA_API int32_t sa_probe_marks(sa_mark* out, int32_t max) {
+    if (!G.inited || !out || max <= 0) return 0;
+    ma_mutex_lock(&G.lock);
+    int32_t n = markq_pop(&P.qcap, out, max);
+    n += markq_pop(&P.qplay, out + n, max - n);
+    ma_mutex_unlock(&G.lock);
+    return n;
+}
+
+SA_API void sa_silence_guard(int32_t on) { sa_st(&P.guard, on ? 1u : 0u); }
+
+SA_API void sa_set_source(sa_source_fn fn, void* user) {
+    sa_stp(&G.src_user, user);
+    sa_stp(&G.src_fn, (void*)fn);
+}
+
+SA_API int32_t sa_output_busy(const char* output) {
+    if (!G.inited || G.backend != SA_BACKEND_SYSTEM) return -1;
+    char id[SA_NAME] = {0};
+    if (output && output[0]) {
+        int found = 0;
+        ma_mutex_lock(&G.lock);
+        for (int i = 0; i < G.nplay; i++) {
+            if (strcmp(G.plays[i].name, output) == 0) {
+                memcpy(id, G.plays[i].id, SA_NAME);
+                found = 1;
+                break;
+            }
+        }
+        ma_mutex_unlock(&G.lock);
+        if (!found) return -1;
+    }
+    return sa_output_sessions_active(id[0] ? id : NULL);
+}
 
 /* the self-test reaches into the state above (null-backend session) */
 int sa_internal_inited(void) { return G.inited; }

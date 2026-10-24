@@ -5,12 +5,15 @@
 // Messages from the main isolate: [op, id, ...]
 //   ['probe', id]                  -> ['probe', id, present, where, micros]
 //   ['open', id]                   -> ['opened', id, where, micros] | ['error', id, code, message]
-//   ['write', id, bytes]           -> ['written', id] | ['error', id, code, message]
+//   ['write', id, bytes]           -> ['written', id, submitted, completed] | ['error', id, code, message]
 //   ['close', id]                  -> ['closed', id]
 //   ['quit']
-// Events: ['data', TransferableTypedData], ['lost', code, message], ['log', text]
+// Events: ['data', TransferableTypedData, arrived], ['lost', code, message], ['log', text]
+// Times (submitted, completed, arrived) are Timeline.now: the process's monotonic microseconds
+// (QueryPerformanceCounter on Windows), for latency measurements.
 
 import 'dart:async';
+import 'dart:developer' show Timeline;
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:isolate';
@@ -37,7 +40,8 @@ void usbWorkerMain(List<Object?> args) {
 class _Write {
   final int id;
   final Pointer<LibusbTransfer> transfer;
-  _Write(this.id, this.transfer);
+  final int submittedAt; // Timeline.now
+  _Write(this.id, this.transfer, this.submittedAt);
 }
 
 class _Worker {
@@ -52,6 +56,7 @@ class _Worker {
   final reads = <Pointer<LibusbTransfer>>{};
   final writes = <int, _Write>{}; // transfer address -> write
   final _rx = BytesBuilder(copy: true);
+  int _rxAt = 0; // Timeline.now when the oldest bytes not yet delivered arrived
   String? _lostCode;
   String _lostMessage = '';
   late final NativeCallable<Void Function(Pointer<LibusbTransfer>)> _readCb, _writeCb;
@@ -118,7 +123,9 @@ class _Worker {
     main.send([
       'data',
       TransferableTypedData.fromList([_rx.takeBytes()]),
+      _rxAt,
     ]);
+    _rxAt = 0;
   }
 
   void _handle(List<Object?> m) {
@@ -257,7 +264,10 @@ class _Worker {
     final s = t.ref.status;
     if (s == LIBUSB_TRANSFER_COMPLETED) {
       final n = t.ref.actual_length;
-      if (n > 0) _rx.add(t.ref.buffer.asTypedList(n));
+      if (n > 0) {
+        if (_rx.isEmpty) _rxAt = Timeline.now;
+        _rx.add(t.ref.buffer.asTypedList(n));
+      }
     }
     final again = !closing && _lostCode == null && (s == LIBUSB_TRANSFER_COMPLETED || s == LIBUSB_TRANSFER_TIMED_OUT || s == LIBUSB_TRANSFER_STALL);
     if (s == LIBUSB_TRANSFER_STALL && again) u.clearHalt(handle, Usb.epIn);
@@ -288,13 +298,14 @@ class _Worker {
       ..buffer = buf
       ..callback = _writeCb.nativeFunction
       ..num_iso_packets = 0;
+    final at = Timeline.now;
     final r = u.submitTransfer(t);
     if (r != LIBUSB_SUCCESS) {
       calloc.free(buf);
       u.freeTransfer(t);
       return _fail(id, r == LIBUSB_ERROR_NO_DEVICE ? WireError.unplugged : WireError.io, 'write: ${u.errorName(r)}');
     }
-    writes[t.address] = _Write(id, t);
+    writes[t.address] = _Write(id, t, at);
   }
 
   void _onWrite(Pointer<LibusbTransfer> t) {
@@ -303,7 +314,7 @@ class _Worker {
     final s = t.ref.status;
     if (w != null) {
       if (s == LIBUSB_TRANSFER_COMPLETED) {
-        main.send(['written', w.id]);
+        main.send(['written', w.id, w.submittedAt, Timeline.now]);
       } else {
         _fail(w.id, s == LIBUSB_TRANSFER_NO_DEVICE ? WireError.unplugged : WireError.io, 'write ended: status $s');
       }

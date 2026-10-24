@@ -80,6 +80,9 @@ class AudioConfig {
   /// Windows: try the output in exclusive mode first (other programs cannot play to it meanwhile).
   final bool exclusiveOutput;
 
+  /// The output alone, no input: it plays silence (measurements of the output; native API 3).
+  final bool outputOnly;
+
   const AudioConfig({
     required this.run,
     this.input = '',
@@ -88,6 +91,7 @@ class AudioConfig {
     this.monitor = false,
     this.exclusive = true,
     this.exclusiveOutput = false,
+    this.outputOnly = false,
   });
 
   static const off = AudioConfig(run: false);
@@ -101,14 +105,15 @@ class AudioConfig {
       other.period == period &&
       other.monitor == monitor &&
       other.exclusive == exclusive &&
-      other.exclusiveOutput == exclusiveOutput;
+      other.exclusiveOutput == exclusiveOutput &&
+      other.outputOnly == outputOnly;
 
   @override
-  int get hashCode => Object.hash(run, input, output, period, monitor, exclusive, exclusiveOutput);
+  int get hashCode => Object.hash(run, input, output, period, monitor, exclusive, exclusiveOutput, outputOnly);
 
   @override
   String toString() =>
-      'AudioConfig(${run ? 'run' : 'off'}, in "$input", out "${output.isEmpty ? 'default' : output}", $period, ${monitor ? 'monitor' : 'input only'}${exclusive ? ', exclusive input' : ''}${exclusiveOutput ? ', exclusive output' : ''})';
+      'AudioConfig(${run ? 'run' : 'off'}, in "$input", out "${output.isEmpty ? 'default' : output}", $period, ${monitor ? 'monitor' : 'input only'}${exclusive ? ', exclusive input' : ''}${exclusiveOutput ? ', exclusive output' : ''}${outputOnly ? ', output only' : ''})';
 }
 
 /// Device states (SA_DEV_*).
@@ -189,6 +194,21 @@ class AudioStatus {
   final int rtCapture, rtPlayback, rtControl;
   final bool timer1ms, powerThrottlingOff;
 
+  // API 3: measurements (NativeAudioBackend.probe)
+  /// Input buffers the system flagged as discontinuous (WASAPI): input-side glitches.
+  final int capDiscontinuities;
+
+  /// Silence guard on: output samples that were not 0 (each was forced to 0).
+  final int silenceViolations;
+  final int probeLost;
+  final bool probeOn, silenceGuard;
+
+  /// While probing: CPU time of the device threads, and the time inside this library's callbacks (us, wrap at 2^32).
+  final int cpuCaptureUs, cpuPlaybackUs, busyCaptureUs, busyPlaybackUs;
+
+  /// The output reports where it plays (Windows IAudioClock; Core Audio presentation times).
+  final bool playbackClock;
+
   const AudioStatus({
     this.initialised = false,
     this.configGen = 0,
@@ -265,6 +285,16 @@ class AudioStatus {
     this.rtControl = 0,
     this.timer1ms = false,
     this.powerThrottlingOff = false,
+    this.capDiscontinuities = 0,
+    this.silenceViolations = 0,
+    this.probeLost = 0,
+    this.probeOn = false,
+    this.silenceGuard = false,
+    this.cpuCaptureUs = 0,
+    this.cpuPlaybackUs = 0,
+    this.busyCaptureUs = 0,
+    this.busyPlaybackUs = 0,
+    this.playbackClock = false,
   });
 
   static const idle = AudioStatus();

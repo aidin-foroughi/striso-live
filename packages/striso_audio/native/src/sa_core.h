@@ -189,6 +189,10 @@ typedef struct sa_pass {
     double ring_s;
     float peak;
     double fixed_ratio; /* tests: > 0 replaces the servo */
+    sa_wmax slack_w;    /* the lowest slack of the last half minute (as 1e6 - slack): the margin follows it */
+    uint32_t grow_us;   /* when the margin last grew for a low slack */
+    float* tap;         /* measurements: when set (by the caller, for one pull), the output before the fades and the
+                           gain, stereo, as many frames as the pull (0 while priming) */
 } sa_pass;
 
 /* in_hint: the input device's buffer in frames; out_hint: the output device's (output frames);

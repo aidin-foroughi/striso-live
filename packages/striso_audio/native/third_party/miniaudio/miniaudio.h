@@ -24785,12 +24785,16 @@ static ma_result ma_device_read__wasapi(ma_device* pDevice, void* pFrames, ma_ui
             /* We don't have any cached data pointer, so grab another one. */
             HRESULT hr;
             DWORD flags = 0;
+            ma_uint64 devicePosition = 0, qpcPosition = 0; /* striso_audio local patch: the packet's position and time */
 
             /* First just ask WASAPI for a data buffer. If it's not available, we'll wait for more. */
-            hr = ma_IAudioCaptureClient_GetBuffer((ma_IAudioCaptureClient*)pDevice->wasapi.pCaptureClient, (BYTE**)&pDevice->wasapi.pMappedBufferCapture, &pDevice->wasapi.mappedBufferCaptureCap, &flags, NULL, NULL);
+            hr = ma_IAudioCaptureClient_GetBuffer((ma_IAudioCaptureClient*)pDevice->wasapi.pCaptureClient, (BYTE**)&pDevice->wasapi.pMappedBufferCapture, &pDevice->wasapi.mappedBufferCaptureCap, &flags, &devicePosition, &qpcPosition);
             if (hr == S_OK) {
                 /* We got a data buffer. Continue to the next loop iteration which will then read from the mapped pointer. */
                 pDevice->wasapi.mappedBufferCaptureLen = pDevice->wasapi.mappedBufferCaptureCap;
+                #if defined(MA_CAPTURE_PACKET_HOOK)
+                MA_CAPTURE_PACKET_HOOK(pDevice, pDevice->wasapi.mappedBufferCaptureCap, (ma_uint32)flags, devicePosition, qpcPosition);
+                #endif
 
                 /*
                 There have been reports that indicate that at times the AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY is reported for every
@@ -35112,6 +35116,10 @@ static OSStatus ma_on_output__coreaudio(void* pUserData, AudioUnitRenderActionFl
 
     MA_ASSERT(pDevice != NULL);
 
+    #if defined(MA_PLAYBACK_TIME_HOOK) /* striso_audio local patch: the host time this buffer plays at */
+    MA_PLAYBACK_TIME_HOOK(pDevice, frameCount, (pTimeStamp != NULL && (pTimeStamp->mFlags & kAudioTimeStampHostTimeValid)) ? (ma_uint64)pTimeStamp->mHostTime : 0);
+    #endif
+
     /*ma_log_postf(ma_device_get_log(pDevice), MA_LOG_LEVEL_DEBUG, "INFO: Output Callback: busNumber=%d, frameCount=%d, mNumberBuffers=%d\n", (int)busNumber, (int)frameCount, (int)pBufferList->mNumberBuffers);*/
 
     /* We need to check whether or not we are outputting interleaved or non-interleaved samples. The way we do this is slightly different for each type. */
@@ -35200,6 +35208,10 @@ static OSStatus ma_on_input__coreaudio(void* pUserData, AudioUnitRenderActionFla
 
     pRenderedBufferList = (AudioBufferList*)pDevice->coreaudio.pAudioBufferList;
     MA_ASSERT(pRenderedBufferList);
+
+    #if defined(MA_CAPTURE_PACKET_HOOK) /* striso_audio local patch: the buffer's position and host time */
+    MA_CAPTURE_PACKET_HOOK(pDevice, frameCount, 0, (pTimeStamp != NULL && (pTimeStamp->mFlags & kAudioTimeStampSampleTimeValid)) ? (ma_uint64)pTimeStamp->mSampleTime : 0, (pTimeStamp != NULL && (pTimeStamp->mFlags & kAudioTimeStampHostTimeValid)) ? (ma_uint64)pTimeStamp->mHostTime : 0);
+    #endif
 
     /* We need to check whether or not we are outputting interleaved or non-interleaved samples. The way we do this is slightly different for each type. */
     layout = ma_stream_layout_interleaved;

@@ -53,6 +53,21 @@ uint32_t sa_thread_id(void);
  * first stream's latency + safety offset (frames), for the scope. 0 elsewhere / on failure. */
 int sa_ca_latency(uint32_t device_object_id, int input, int32_t* buffer_frames, int32_t* latency_frames);
 
+/* Measurements (API 3):
+ *   sa_device_time_us    a device timestamp on sa_now_us64's clock: Windows, WASAPI's QPC position
+ *                        (100 ns units); macOS, a Core Audio host time (mach ticks)
+ *   sa_thread_cpu_us     CPU time of the calling thread (us, wraps)
+ *   sa_wasapi_clock_*    Windows: the output's IAudioClock, from its IAudioClient (NULL elsewhere);
+ *                        read gives the play position in frames at rate and its time (sa_now_us64)
+ *   sa_output_sessions_active  Windows: other processes' active sessions on the output endpoint
+ *                        (endpoint_id_utf8 NULL or "": the default output); -1 unknown */
+uint64_t sa_device_time_us(uint64_t t);
+uint32_t sa_thread_cpu_us(void);
+void* sa_wasapi_clock_open(void* audio_client);
+int sa_wasapi_clock_read(void* clock, double rate, int64_t* pos_frames, int64_t* t_us);
+void sa_wasapi_clock_close(void* clock);
+int sa_output_sessions_active(const char* endpoint_id_utf8);
+
 /* macOS: AVAuthorizationStatus for audio (0..3), -1 elsewhere. */
 int sa_mic_status(void);
 /* macOS: shows the system prompt; the answer lands in sa_mic_status. */

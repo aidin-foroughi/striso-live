@@ -5,12 +5,13 @@
 import 'dart:convert' show Utf8Decoder;
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
 import 'backend.dart';
 
-const _apiVersion = 2;
+const _apiVersion = 3;
 
 final class SaDevice extends Struct {
   @Array(256)
@@ -223,6 +224,53 @@ final class SaStatus extends Struct {
   external int power_throttling_off;
   @Array(4)
   external Array<Uint32> reserved2;
+
+  @Uint32()
+  external int cap_discontinuities;
+  @Uint32()
+  external int silence_violations;
+  @Uint32()
+  external int probe_lost;
+  @Int32()
+  external int probe_on;
+  @Uint32()
+  external int cpu_capture_us;
+  @Uint32()
+  external int cpu_playback_us;
+  @Uint32()
+  external int busy_capture_us;
+  @Uint32()
+  external int busy_playback_us;
+  @Int32()
+  external int playback_clock;
+  @Int32()
+  external int silence_guard;
+  @Array(2)
+  external Array<Uint32> reserved3;
+}
+
+/// sa_mark (API 3): a timing mark of a device callback (see striso_audio.h).
+final class SaMark extends Struct {
+  @Int32()
+  external int kind;
+  @Int32()
+  external int n;
+  @Int32()
+  external int session;
+  @Int32()
+  external int flags;
+  @Int64()
+  external int frame;
+  @Int64()
+  external int t_us;
+  @Int64()
+  external int dev_pos;
+  @Int64()
+  external int dev_us;
+  @Int32()
+  external int busy_us;
+  @Int32()
+  external int reserved;
 }
 
 /// Where to look for the library: STRISO_AUDIO_LIB, next to the executable (Windows), the app
@@ -276,7 +324,8 @@ class StrisoAudioLib {
         final l = StrisoAudioLib._(DynamicLibrary.open(p), p);
         final v = l.apiVersion(), ss = l.sizeofStatus(), sd = l.sizeofDevice();
         final se = v >= 2 ? l.sizeofEvent() : 0;
-        if (v != _apiVersion || ss != sizeOf<SaStatus>() || sd != sizeOf<SaDevice>() || se != sizeOf<SaEvent>()) {
+        final sm = v >= 3 ? l.sizeofMark() : 0;
+        if (v != _apiVersion || ss != sizeOf<SaStatus>() || sd != sizeOf<SaDevice>() || se != sizeOf<SaEvent>() || sm != sizeOf<SaMark>()) {
           tried.add(
             '$p (api $v, status $ss bytes, device $sd bytes, event $se bytes; this app expects api $_apiVersion, ${sizeOf<SaStatus>()}, ${sizeOf<SaDevice>()}, ${sizeOf<SaEvent>()})',
           );
@@ -295,6 +344,17 @@ class StrisoAudioLib {
   late final sizeofStatus = lib.lookupFunction<Int32 Function(), int Function()>('sa_sizeof_status');
   late final sizeofDevice = lib.lookupFunction<Int32 Function(), int Function()>('sa_sizeof_device');
   late final sizeofEvent = lib.lookupFunction<Int32 Function(), int Function()>('sa_sizeof_event');
+  late final sizeofMark = lib.lookupFunction<Int32 Function(), int Function()>('sa_sizeof_mark');
+  late final clockUs = lib.lookupFunction<Int64 Function(), int Function()>('sa_clock_us');
+  late final probe = lib.lookupFunction<Void Function(Int32), void Function(int)>('sa_probe');
+  late final probeAudio = lib
+      .lookupFunction<
+        Int32 Function(Int32, Pointer<Float>, Int32, Pointer<Int64>, Pointer<Int32>),
+        int Function(int, Pointer<Float>, int, Pointer<Int64>, Pointer<Int32>)
+      >('sa_probe_audio');
+  late final probeMarks = lib.lookupFunction<Int32 Function(Pointer<SaMark>, Int32), int Function(Pointer<SaMark>, int)>('sa_probe_marks');
+  late final silenceGuard = lib.lookupFunction<Void Function(Int32), void Function(int)>('sa_silence_guard');
+  late final outputBusy = lib.lookupFunction<Int32 Function(Pointer<Utf8>), int Function(Pointer<Utf8>)>('sa_output_busy');
   late final getEvents = lib.lookupFunction<Int32 Function(Uint32, Pointer<SaEvent>, Int32), int Function(int, Pointer<SaEvent>, int)>('sa_get_events');
   late final testJitter = lib.lookupFunction<Void Function(Int32, Int32, Int32), void Function(int, int, int)>('sa_test_jitter');
   late final init = lib.lookupFunction<Int32 Function(Int32), int Function(int)>('sa_init');
@@ -333,6 +393,17 @@ class StrisoAudioLib {
 
 /// SA_BACKEND_*
 const backendSystem = 0, backendNull = 1;
+
+/// SA_MARK_*
+class MarkKind {
+  static const capPacket = 1, capCallback = 2, playCallback = 3;
+}
+
+/// A timing mark of a device callback (sa_mark): see striso_audio.h. Times on [NativeAudioBackend.clockUs].
+class ProbeMark {
+  final int kind, n, session, flags, frame, tUs, devPos, devUs, busyUs;
+  const ProbeMark(this.kind, this.n, this.session, this.flags, this.frame, this.tUs, this.devPos, this.devUs, this.busyUs);
+}
 
 class NativeAudioBackend implements AudioBackend {
   final StrisoAudioLib _l;
@@ -410,7 +481,7 @@ class NativeAudioBackend implements AudioBackend {
   int configure(AudioConfig c) {
     final i = c.input.toNativeUtf8(), o = c.output.toNativeUtf8();
     try {
-      return _l.configure(c.run ? 1 : 0, i, o, c.period, c.monitor ? 1 : 0, (c.exclusive ? 1 : 0) | (c.exclusiveOutput ? 2 : 0));
+      return _l.configure(c.run ? 1 : 0, i, o, c.period, c.monitor ? 1 : 0, (c.exclusive ? 1 : 0) | (c.exclusiveOutput ? 2 : 0) | (c.outputOnly ? 4 : 0));
     } finally {
       calloc.free(i);
       calloc.free(o);
@@ -514,6 +585,16 @@ class NativeAudioBackend implements AudioBackend {
       rtControl: s.rt_control,
       timer1ms: s.timer_1ms != 0,
       powerThrottlingOff: s.power_throttling_off != 0,
+      capDiscontinuities: s.cap_discontinuities,
+      silenceViolations: s.silence_violations,
+      probeLost: s.probe_lost,
+      probeOn: s.probe_on != 0,
+      silenceGuard: s.silence_guard != 0,
+      cpuCaptureUs: s.cpu_capture_us,
+      cpuPlaybackUs: s.cpu_playback_us,
+      busyCaptureUs: s.busy_capture_us,
+      busyPlaybackUs: s.busy_playback_us,
+      playbackClock: s.playback_clock != 0,
     );
   }
 
@@ -529,6 +610,72 @@ class NativeAudioBackend implements AudioBackend {
         after = e.seq;
       }
       if (n < _evMax) break;
+    }
+    return out;
+  }
+
+  // ---- measurements (API 3; the bench, never the app) ----
+
+  /// The library's clock (us): QueryPerformanceCounter on Windows, mach_absolute_time on macOS.
+  int clockUs() => _l.clockUs();
+
+  /// Timing marks and the two taps (input as it arrives, output before its gain).
+  void probe(bool on) => _l.probe(on ? 1 : 0);
+
+  /// Every output sample forced to 0 and any that was not counted (status().silenceViolations).
+  void silenceGuard(bool on) => _l.silenceGuard(on ? 1 : 0);
+
+  /// Windows: other programs' active sessions on [output] ('' default): 0 none, -1 unknown.
+  int outputBusy(String output) {
+    final o = output.toNativeUtf8();
+    try {
+      return _l.outputBusy(o);
+    } finally {
+      calloc.free(o);
+    }
+  }
+
+  static const _tapMax = 16384, _markMax = 4096;
+  final Pointer<Float> _tap = calloc<Float>(_tapMax * 2);
+  final Pointer<Int64> _first = calloc<Int64>();
+  final Pointer<Int32> _session = calloc<Int32>();
+  final Pointer<SaMark> _marks = calloc<SaMark>(_markMax);
+
+  /// All of tap [which] (0 input, 1 output before the gain) since the last read: stereo
+  /// interleaved, its first device frame and session. Null when there is nothing.
+  ({Float32List samples, int firstFrame, int session})? probeAudio(int which) {
+    final chunks = <Float32List>[];
+    int? first;
+    var session = 0;
+    for (var round = 0; round < 64; round++) {
+      final n = _l.probeAudio(which, _tap, _tapMax, _first, _session);
+      if (n <= 0) break;
+      first ??= _first.value;
+      session = _session.value;
+      chunks.add(Float32List.fromList(_tap.asTypedList(n * 2)));
+      if (n < _tapMax) break;
+    }
+    if (first == null) return null;
+    final total = chunks.fold<int>(0, (a, c) => a + c.length);
+    final out = Float32List(total);
+    var o = 0;
+    for (final c in chunks) {
+      out.setAll(o, c);
+      o += c.length;
+    }
+    return (samples: out, firstFrame: first, session: session);
+  }
+
+  /// The timing marks since the last read.
+  List<ProbeMark> probeMarks() {
+    final out = <ProbeMark>[];
+    for (var round = 0; round < 64; round++) {
+      final n = _l.probeMarks(_marks, _markMax);
+      for (var i = 0; i < n; i++) {
+        final m = (_marks + i).ref;
+        out.add(ProbeMark(m.kind, m.n, m.session, m.flags, m.frame, m.t_us, m.dev_pos, m.dev_us, m.busy_us));
+      }
+      if (n < _markMax) break;
     }
     return out;
   }

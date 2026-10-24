@@ -200,6 +200,10 @@ int sa_evq_pop(sa_evq* q, sa_evq_item* out) {
 #define SA_SAFETY_S 0.0005   /* on top of the measured need: the servo's own wobble */
 #define SA_HYST_S 0.00025    /* the target only moves down by more than this */
 #define SA_CALM_US 15000000u /* the margin shrinks after this long without an underrun */
+#define SA_SHRINK_US 10000000u /* how often the margin may shrink to what the observed slack allows */
+#define SA_SLACK_BIG 1e6     /* the slack's windowed minimum is kept as a maximum of BIG - slack */
+#define SA_KEEP_S 0.0005     /* the slack the margin keeps in hand over the lowest one observed */
+#define SA_GROW_US 1000000u    /* at most once a second, the margin grows when the slack ran low */
 #define SA_START_MARGIN_S 0.001 /* the margin to start with (the servo finds the drift meanwhile) */
 
 static void rs_reset(sa_pass* p) {
@@ -296,10 +300,20 @@ static void pull_block(sa_pass* p, float* out, uint32_t n, uint32_t now_us, floa
     }
     double backlog = (double)p->have - p->pos;
     double fv = fill + backlog + el;
-    const double safety = SA_SAFETY_S * fs_in, hyst = SA_HYST_S * fs_in;
-    /* what the ring must hold: the longest wait for the input + the output's biggest take + the
-       resampler's look-ahead + safety + the margin earned by underruns */
-    double computed = wait + out_burst * p->ratio_nom + SA_HALF + 2 + safety + p->margin;
+    const double safety = SA_SAFETY_S * fs_in, hyst = SA_HYST_S * fs_in, keep = SA_KEEP_S * fs_in;
+    (void)safety;
+    /* what the ring must hold: the input's typical wait + the output's typical take + the
+       resampler's look-ahead + the margin. The margin is what the ring's observed lowest slack
+       asks for (the joint lateness of both sides, as it really happened; see below), so a late
+       input wake-up and a big output take only count when they coincided, and a late output
+       wake-up (which leaves the ring fuller, not emptier) does not count at all. (The engine before
+       added the half-minute maxima of the input gap and the output burst: about 5 ms more here.) */
+    double in_typ = p->tin.nominal_us > 0 ? p->tin.nominal_us * 1e-6 * fs_in : p->in_hint;
+    if (in_typ < p->in_hint) in_typ = p->in_hint;
+    /* how late the input came at worst in the last half minute: the ring has to bridge exactly that */
+    double in_late = wait - in_typ;
+    if (in_late < 0) in_late = 0;
+    double computed = in_typ + in_late + out_burst * p->ratio_nom + SA_HALF + 2 + p->margin;
     /* hysteresis: up at once, down only by more than hyst */
     if (computed > p->target_used || computed < p->target_used - hyst) p->target_used = computed;
     double target = p->target_used;
@@ -345,6 +359,7 @@ static void pull_block(sa_pass* p, float* out, uint32_t n, uint32_t now_us, floa
             backlog = (double)p->have - p->pos;
         } else {
             memset(out, 0, (size_t)n * 2 * sizeof(float));
+            if (p->tap) memset(p->tap, 0, (size_t)n * 2 * sizeof(float));
             p->peak *= (float)exp(-dt / 0.3);
             sa_stf(&p->st_peak, p->peak);
             sa_st(&p->streaming, 0);
@@ -391,9 +406,10 @@ static void pull_block(sa_pass* p, float* out, uint32_t n, uint32_t now_us, floa
 
     /* bring in the input this block needs */
     uint32_t need_have = (uint32_t)floor(p->pos + (n - 1) * r) + SA_HALF + 1;
-    /* how much was to spare (for tightening the margin) */
+    /* how much was to spare: the ring's real slack at this pull (the margin follows it) */
     double slack = fill + (double)p->have - need_have;
     if (slack < p->min_slack) p->min_slack = slack;
+    if (p->running) sa_wmax_put(&p->slack_w, (float)(SA_SLACK_BIG - slack), now_us); /* a windowed minimum */
     /* the ring's real delay, for the latency: what waits beyond the read point, mid-take */
     p->ring_s += a * ((fill + backlog - 0.5 * n * r) - p->ring_s);
 
@@ -463,6 +479,10 @@ static void pull_block(sa_pass* p, float* out, uint32_t n, uint32_t now_us, floa
             p->fade += step_in;
             if (p->fade > 1) p->fade = 1;
         }
+        if (p->tap) {
+            p->tap[2 * i] = yl;
+            p->tap[2 * i + 1] = yr;
+        }
         p->gain_s += gk * (gain - p->gain_s);
         float g = p->fade * p->gain_s;
         float ol = yl * g, orr = yr * g;
@@ -495,9 +515,9 @@ static void pull_block(sa_pass* p, float* out, uint32_t n, uint32_t now_us, floa
         /* more room next time: what was missing, and then some */
         double grow = 1.5 * deficit + 16;
         if (grow < 0.25e-3 * fs_in) grow = 0.25e-3 * fs_in;
-        /* one discontinuity (a frame the host skipped is a 1 ms gap in the input now) adds at most
-           1 ms: what keeps happening is in the measured waits anyway */
-        if (grow > 1e-3 * fs_in) grow = 1e-3 * fs_in;
+        /* at most 3 ms for one dropout (a stall is not a pattern); the slack rule below keeps what
+           keeps happening */
+        if (grow > 3e-3 * fs_in) grow = 3e-3 * fs_in;
         double cap = 0.05 * fs_in; /* 50 ms */
         p->margin = p->margin + grow > cap ? cap : p->margin + grow;
         sa_inc(&p->underruns);
@@ -517,13 +537,25 @@ static void pull_block(sa_pass* p, float* out, uint32_t n, uint32_t now_us, floa
         p->fill_s = target;
         sa_inc(&p->resyncs);
         sa_evq_push(&p->ev_out, SA_EV_RESYNC, now_us, (int32_t)(f > keep ? f - (uint32_t)keep : 0), (int32_t)f, 0);
-    } else if ((uint32_t)(now_us - p->calm_t0) >= SA_CALM_US) {
-        /* stable for a while: give back some of the margin, if the smallest slack seen allows it */
-        if (p->margin > 0) {
-            double dec = 0.25 * p->margin;
-            if (dec < 8) dec = 8;
+    } else if (p->running && slack < keep && (uint32_t)(now_us - p->grow_us) >= SA_GROW_US && (uint32_t)(now_us - p->stream_us) > SA_GROW_US) {
+        /* the slack came close to nothing (the input late while the output took): more margin at
+           once, as much as was missing, before it becomes a dropout (once a second at most: the
+           servo needs a moment to raise the fill) */
+        double grow = keep - slack;
+        double cap = 0.05 * fs_in;
+        p->margin = p->margin + grow > cap ? cap : p->margin + grow;
+        p->grow_us = now_us;
+        p->calm_t0 = now_us;
+    } else if ((uint32_t)(now_us - p->calm_t0) >= SA_SHRINK_US) {
+        /* every 10 s: give back a quarter of what the lowest slack of the last half minute left over
+           the slack to keep (at most 8 frames) */
+        float w = sa_wmax_get(&p->slack_w);
+        double lo = SA_SLACK_BIG - w;
+        if (w > 0 && (uint32_t)(now_us - p->stream_us) > 30000000u && p->margin > 0 && lo > keep + 8) {
+            double dec = 0.25 * (lo - keep);
+            if (dec > 8 * fs_in / 48000) dec = 8 * fs_in / 48000; /* slowly: the servo drains it at < 20 ppm */
             if (dec > p->margin) dec = p->margin;
-            if (p->min_slack > dec + safety) p->margin -= dec;
+            p->margin -= dec;
         }
         p->calm_t0 = now_us;
         p->min_slack = 1e9;
@@ -554,15 +586,23 @@ void sa_pass_pull(sa_pass* p, float* out, uint32_t frames, uint32_t now_us, floa
             sa_evq_push(&p->ev_out, SA_EV_OUT_LATE, now_us, (int32_t)gap, (int32_t)nom, glitch);
         }
     }
-    /* the output's biggest single take: its bursts, at least its device buffer */
-    double ob = sa_wmax_get(&p->tout.burst_w);
-    if (p->tout.frames > ob) ob = p->tout.frames;
+    /* the output's typical take: its bursts (smoothed), at least its device buffer and this pull (a
+       late wake-up's double take shows in the slack, if it matters) */
+    double ob = p->tout.burst_s;
+    /* until it has played a moment (and while priming), its biggest burst so far: a device's first
+       bursts are often larger than its usual ones */
+    if (!p->running || (uint32_t)(now_us - p->stream_us) < 2000000u) {
+        double mx = sa_wmax_get(&p->tout.burst_w);
+        if (p->tout.frames > mx) mx = p->tout.frames;
+        if (mx > ob) ob = mx;
+    }
     if (p->out_hint > ob) ob = p->out_hint;
     if (frames > ob) ob = frames;
     while (frames > 0) {
         uint32_t n = frames > SA_MAXBLOCK ? SA_MAXBLOCK : frames;
         pull_block(p, out, n, now_us, gain, ob);
         out += (size_t)n * 2;
+        if (p->tap) p->tap += (size_t)n * 2;
         frames -= n;
         now_us += (uint32_t)(n * 1e6 / p->fs_out);
     }

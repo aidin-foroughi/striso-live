@@ -34,6 +34,115 @@ uint64_t sa_now_us64(void) {
 
 void sa_sleep_ms(int ms) { Sleep((DWORD)(ms < 0 ? 0 : ms)); }
 
+/* ---------------------------------------------------------------- measurements (API 3) */
+#define COBJMACROS
+#include <audioclient.h>
+#include <audiopolicy.h>
+#include <mmdeviceapi.h>
+
+/* the interface ids, here so no uuid library is needed */
+static const GUID sa_IID_IAudioClock = {0xCD63314F, 0x3FBA, 0x4A1B, {0x81, 0x2C, 0xEF, 0x96, 0x35, 0x87, 0x28, 0xE7}};
+static const GUID sa_IID_IAudioSessionManager2 = {0x77AA99A0, 0x1BD6, 0x484F, {0x8B, 0xC7, 0x2C, 0x65, 0x4C, 0x9A, 0x9B, 0x6F}};
+static const GUID sa_IID_IAudioSessionControl2 = {0xBFB7FF88, 0x7239, 0x4FC9, {0x8F, 0xA2, 0x07, 0xC9, 0x50, 0xBE, 0x9C, 0x6D}};
+static const GUID sa_CLSID_MMDeviceEnumerator = {0xBCDE0395, 0xE52F, 0x467C, {0x8E, 0x3D, 0xC4, 0x57, 0x92, 0x91, 0x69, 0x2E}};
+static const GUID sa_IID_IMMDeviceEnumerator = {0xA95664D2, 0x9614, 0x4F35, {0xA7, 0x46, 0xDE, 0x8D, 0xB6, 0x36, 0x17, 0xE6}};
+
+/* WASAPI's QPC positions are QPC converted to 100 ns: the same clock as sa_now_us64 */
+uint64_t sa_device_time_us(uint64_t t) { return t / 10u; }
+
+uint32_t sa_thread_cpu_us(void) {
+    FILETIME c, e, k, u;
+    if (!GetThreadTimes(GetCurrentThread(), &c, &e, &k, &u)) return 0;
+    uint64_t kk = ((uint64_t)k.dwHighDateTime << 32) | k.dwLowDateTime, uu = ((uint64_t)u.dwHighDateTime << 32) | u.dwLowDateTime;
+    return (uint32_t)((kk + uu) / 10u);
+}
+
+typedef struct {
+    IAudioClock* clock;
+    uint64_t freq;
+} sa_wclock;
+
+void* sa_wasapi_clock_open(void* audio_client) {
+    if (!audio_client) return NULL;
+    IAudioClock* c = NULL;
+    if (FAILED(IAudioClient_GetService((IAudioClient*)audio_client, &sa_IID_IAudioClock, (void**)&c)) || !c) return NULL;
+    UINT64 f = 0;
+    if (FAILED(IAudioClock_GetFrequency(c, &f)) || f == 0) {
+        IAudioClock_Release(c);
+        return NULL;
+    }
+    sa_wclock* w = (sa_wclock*)malloc(sizeof(sa_wclock));
+    if (!w) {
+        IAudioClock_Release(c);
+        return NULL;
+    }
+    w->clock = c;
+    w->freq = f;
+    return w;
+}
+
+int sa_wasapi_clock_read(void* clock, double rate, int64_t* pos_frames, int64_t* t_us) {
+    sa_wclock* w = (sa_wclock*)clock;
+    if (!w) return 0;
+    UINT64 pos = 0, qpc = 0;
+    if (FAILED(IAudioClock_GetPosition(w->clock, &pos, &qpc))) return 0;
+    /* the position is in the clock's units (bytes or frames per second: its frequency) */
+    *pos_frames = (int64_t)((double)pos * rate / (double)w->freq + 0.5);
+    *t_us = (int64_t)(qpc / 10u);
+    return 1;
+}
+
+void sa_wasapi_clock_close(void* clock) {
+    sa_wclock* w = (sa_wclock*)clock;
+    if (!w) return;
+    IAudioClock_Release(w->clock);
+    free(w);
+}
+
+static wchar_t* widen(const char* s);
+
+int sa_output_sessions_active(const char* endpoint_id) {
+    HRESULT ci = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    int out = -1;
+    IMMDeviceEnumerator* en = NULL;
+    IMMDevice* dev = NULL;
+    IAudioSessionManager2* mgr = NULL;
+    IAudioSessionEnumerator* list = NULL;
+    wchar_t* wid = endpoint_id && endpoint_id[0] ? widen(endpoint_id) : NULL;
+    if (FAILED(CoCreateInstance(&sa_CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL, &sa_IID_IMMDeviceEnumerator, (void**)&en))) goto done;
+    if (wid ? FAILED(IMMDeviceEnumerator_GetDevice(en, wid, &dev))
+            : FAILED(IMMDeviceEnumerator_GetDefaultAudioEndpoint(en, eRender, eConsole, &dev)))
+        goto done;
+    if (FAILED(IMMDevice_Activate(dev, &sa_IID_IAudioSessionManager2, CLSCTX_ALL, NULL, (void**)&mgr))) goto done;
+    if (FAILED(IAudioSessionManager2_GetSessionEnumerator(mgr, &list))) goto done;
+    int n = 0;
+    if (FAILED(IAudioSessionEnumerator_GetCount(list, &n))) goto done;
+    out = 0;
+    DWORD me = GetCurrentProcessId();
+    for (int i = 0; i < n; i++) {
+        IAudioSessionControl* s = NULL;
+        IAudioSessionControl2* s2 = NULL;
+        if (FAILED(IAudioSessionEnumerator_GetSession(list, i, &s)) || !s) continue;
+        AudioSessionState state = AudioSessionStateInactive;
+        DWORD pid = 0;
+        if (SUCCEEDED(IAudioSessionControl_GetState(s, &state)) && state == AudioSessionStateActive &&
+            SUCCEEDED(IAudioSessionControl_QueryInterface(s, &sa_IID_IAudioSessionControl2, (void**)&s2)) && s2) {
+            /* pid 0: the system sounds session, always there */
+            if (SUCCEEDED(IAudioSessionControl2_GetProcessId(s2, &pid)) && pid != me && pid != 0) out++;
+            IAudioSessionControl2_Release(s2);
+        }
+        IAudioSessionControl_Release(s);
+    }
+done:
+    if (list) IAudioSessionEnumerator_Release(list);
+    if (mgr) IAudioSessionManager2_Release(mgr);
+    if (dev) IMMDevice_Release(dev);
+    if (en) IMMDeviceEnumerator_Release(en);
+    free(wid);
+    if (SUCCEEDED(ci)) CoUninitialize();
+    return out;
+}
+
 uint32_t sa_thread_id(void) { return (uint32_t)GetCurrentThreadId(); }
 
 /* avrt.dll and winmm.dll are loaded when first needed (no import libraries, no load-time failure
@@ -273,10 +382,52 @@ void sa_mic_request(void) {}
 #include <pthread.h>
 #include <time.h>
 
+#if defined(__APPLE__)
+/* mach_absolute_time (CLOCK_UPTIME_RAW): the clock of Core Audio's host times, so a device's own
+ * timestamps convert exactly (sa_device_time_us) */
+#include <mach/mach_time.h>
+#define SA_MONO CLOCK_UPTIME_RAW
+#else
+#define SA_MONO CLOCK_MONOTONIC
+#endif
+
 uint32_t sa_now_us(void) {
     struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
+    clock_gettime(SA_MONO, &ts);
     return (uint32_t)((uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u);
+}
+
+uint64_t sa_device_time_us(uint64_t t) {
+#if defined(__APPLE__)
+    static mach_timebase_info_data_t tb;
+    if (tb.denom == 0) mach_timebase_info(&tb);
+    return (uint64_t)((double)t * tb.numer / tb.denom / 1000.0);
+#else
+    return t / 1000u;
+#endif
+}
+
+uint32_t sa_thread_cpu_us(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) != 0) return 0;
+    return (uint32_t)((uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u);
+}
+
+void* sa_wasapi_clock_open(void* audio_client) {
+    (void)audio_client;
+    return NULL;
+}
+int sa_wasapi_clock_read(void* clock, double rate, int64_t* pos_frames, int64_t* t_us) {
+    (void)clock;
+    (void)rate;
+    (void)pos_frames;
+    (void)t_us;
+    return 0;
+}
+void sa_wasapi_clock_close(void* clock) { (void)clock; }
+int sa_output_sessions_active(const char* endpoint_id) {
+    (void)endpoint_id;
+    return -1;
 }
 
 void sa_sleep_ms(int ms) {
@@ -343,7 +494,7 @@ int sa_is_striso_endpoint_w(const void* wasapi_id) {
 
 uint64_t sa_now_us64(void) {
     struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
+    clock_gettime(SA_MONO, &ts);
     return (uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u;
 }
 

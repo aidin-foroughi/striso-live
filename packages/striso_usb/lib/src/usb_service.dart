@@ -74,7 +74,7 @@ class UsbService {
     final l = m as List<Object?>;
     switch (l[0]) {
       case 'data':
-        _current?._data((l[1] as TransferableTypedData).materialize().asUint8List());
+        _current?._data((l[1] as TransferableTypedData).materialize().asUint8List(), l.length > 2 ? l[2] as int : 0);
       case 'lost':
         final t = _current;
         _current = null;
@@ -136,8 +136,27 @@ class LibusbTransport implements Transport {
   @override
   Future<UsbError> get lost => _lostCompleter.future;
 
-  void _data(Uint8List b) {
-    if (_open) _dataController.add(b);
+  /// What arrives with when it arrived in the USB worker (Timeline.now, the process's monotonic
+  /// microseconds: QueryPerformanceCounter on Windows), for latency measurements.
+  Stream<(Uint8List, int)> get timedData => _timedController.stream;
+  final _timedController = StreamController<(Uint8List, int)>.broadcast(sync: true);
+
+  void _data(Uint8List b, int at) {
+    if (!_open) return;
+    _dataController.add(b);
+    if (_timedController.hasListener) _timedController.add((b, at));
+  }
+
+  /// [write], returning when the worker submitted the transfer and when it completed
+  /// (Timeline.now microseconds; the OUT packet was on the bus in between).
+  Future<(int, int)> writeTimed(Uint8List bytes) async {
+    if (!_open) throw StateError('not connected');
+    final r = await _service._request([
+      'write',
+      TransferableTypedData.fromList([bytes]),
+    ]);
+    if (r[0] != 'written') throw _usbError(r[2] as String, r[3] as String);
+    return (r.length > 3 ? r[2] as int : 0, r.length > 3 ? r[3] as int : 0);
   }
 
   void _lost(UsbError e) {

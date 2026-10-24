@@ -30,7 +30,7 @@ extern "C" {
 #endif
 
 /* Bumped whenever a struct or a function below changes. */
-#define SA_API_VERSION 2
+#define SA_API_VERSION 3
 
 /* sa_init backends */
 #define SA_BACKEND_SYSTEM 0 /* WASAPI on Windows, Core Audio on macOS */
@@ -64,6 +64,7 @@ extern "C" {
 /* sa_configure exclusive flags (Windows; ignored elsewhere) */
 #define SA_EXCLUSIVE_INPUT 1  /* the input alone: its own format, short periods */
 #define SA_EXCLUSIVE_OUTPUT 2 /* the output alone: lowest latency; other programs cannot play to it meanwhile */
+#define SA_OUTPUT_ONLY 4      /* API 3: the output alone, no input (it plays silence): measurements of the output */
 
 /* macOS microphone permission (sa_status.mic_permission); -1 elsewhere */
 #define SA_MIC_NA -1
@@ -194,7 +195,41 @@ typedef struct sa_status {
     int32_t timer_1ms;        /* Windows: timeBeginPeriod(1) is held */
     int32_t power_throttling_off; /* Windows: the process asked not to be throttled */
     uint32_t reserved2[4];
+
+    /* API 3: for measurements (sa_probe) */
+    uint32_t cap_discontinuities; /* input buffers the system flagged as discontinuous (WASAPI DATA_DISCONTINUITY): input-side glitches */
+    uint32_t silence_violations;  /* sa_silence_guard on: output samples that were not 0 (each was forced to 0) */
+    uint32_t probe_lost;          /* tap frames and marks dropped because they were not read in time */
+    int32_t probe_on;
+    uint32_t cpu_capture_us, cpu_playback_us;   /* while probing: CPU time of the device threads so far (wraps) */
+    uint32_t busy_capture_us, busy_playback_us; /* while probing: time spent in this library's callbacks (wraps) */
+    int32_t playback_clock;       /* 1: the output reports where it plays (Windows IAudioClock; Core Audio presentation times) */
+    int32_t silence_guard;
+    uint32_t reserved3[2];
 } sa_status;
+
+/* API 3: measurements. Timing marks of the device callbacks, for a host-side latency and glitch
+ * analysis (the bench, packages/striso_bench). Times are on sa_clock_us. */
+#define SA_MARK_CAP_PACKET 1 /* a buffer the input device delivered. frame: its first frame (frames since the input opened); n;
+                                dev_pos: the device's own position of that frame; dev_us: when the device captured it (0: not reported);
+                                flags: 1 discontinuity, 2 the time is unreliable */
+#define SA_MARK_CAP_CB 2     /* a capture callback. frame: its first frame; n; t_us: its start; busy_us: its own run time */
+#define SA_MARK_PLAY_CB 3    /* a playback callback. frame: frames written before it; n; t_us; busy_us; dev_pos / dev_us: the
+                                output plays frame dev_pos at dev_us (Windows: IAudioClock's position and its QPC time; macOS: this
+                                buffer's first frame and Core Audio's presentation time); dev_us 0: not known */
+
+typedef struct sa_mark {
+    int32_t kind;    /* SA_MARK_* */
+    int32_t n;
+    int32_t session; /* bumped every time the device opens (frames restart at 0) */
+    int32_t flags;
+    int64_t frame;
+    int64_t t_us;
+    int64_t dev_pos;
+    int64_t dev_us;
+    int32_t busy_us;
+    int32_t reserved;
+} sa_mark;
 
 /* Version of this library (SA_API_VERSION) and of miniaudio (e.g. "0.11.25"). */
 SA_API int32_t sa_api_version(void);
@@ -264,6 +299,42 @@ SA_API void sa_test_jitter(int32_t max_late_us, int32_t every_n, int32_t output)
  * session on the null backend. Writes a report (UTF-8 lines) into report and its scratch files
  * into dir. Returns the number of failures. Must not run while the app uses the library. */
 SA_API int32_t sa_selftest(const char* dir, char* report, int32_t report_size);
+
+/* ---- API 3: measurements (the bench; the app never calls these) ---- */
+
+/* The library's clock in microseconds: QueryPerformanceCounter (Windows), mach_absolute_time
+ * (macOS), CLOCK_MONOTONIC elsewhere. The marks' times and the devices' own timestamps are on it. */
+SA_API int64_t sa_clock_us(void);
+SA_API int32_t sa_sizeof_mark(void);
+
+/* 1: the device callbacks record timing marks and copy what they carry into two taps (stereo,
+ * float): the input as it arrives (which 0) and the output before the gain (which 1: the
+ * passthrough's resampled signal, so a marker can be followed to the output even at gain 0).
+ * About 2.7 s of each is kept; whatever is not read in time is dropped (probe_lost) and a tap that
+ * overflowed stops until its device opens again. 0: off. */
+SA_API void sa_probe(int32_t on);
+/* Copies up to max frames of tap `which` (stereo, interleaved) into out; *first_frame: the
+ * device frame of the first one (the marks' frames), *session: its device session. Returns frames. */
+SA_API int32_t sa_probe_audio(int32_t which, float* out, int32_t max_frames, int64_t* first_frame, int32_t* session);
+/* Copies up to max marks (capture and playback, each in order); returns how many. */
+SA_API int32_t sa_probe_marks(sa_mark* out, int32_t max);
+
+/* 1: every output sample is forced to 0 (digital silence) after the passthrough, and any that
+ * was not 0 is counted (status.silence_violations). For measurements on a real output. */
+SA_API void sa_silence_guard(int32_t on);
+
+/* The output's own source, for the output alone (SA_OUTPUT_ONLY): instead of silence the output
+ * plays what fn writes, called on the output's thread for every buffer (interleaved stereo float,
+ * `frames` of them at the device's `rate`; returns the frames written, the rest is silence), times
+ * the gain. Striso Live's audition of a firmware build: the virtual board renders there
+ * (striso_virtual's sv_audio_source). NULL: silence again. Set it while the output is closed. */
+typedef int32_t (*sa_source_fn)(void* user, float* stereo, int32_t frames, int32_t rate);
+SA_API void sa_set_source(sa_source_fn fn, void* user);
+
+/* Windows: how many other programs have an active audio session on that output (exact name, or
+ * "" for the default), so a measurement never takes a device in use: 0 none, -1 unknown
+ * (elsewhere, or it could not be asked). */
+SA_API int32_t sa_output_busy(const char* output);
 
 #ifdef __cplusplus
 }
