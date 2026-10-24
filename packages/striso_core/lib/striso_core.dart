@@ -2,6 +2,7 @@
 /// parameters, touch math, settings map and config/UF2, all in pure Dart.
 library;
 
+export 'src/board_state.dart';
 export 'src/client.dart';
 export 'src/config_uf2.dart';
 export 'src/harmony.dart';

@@ -346,8 +346,10 @@ class HoverReadout extends StatelessWidget {
         final live = ctl.live;
         String text = '';
         if (ctl.settingsOn && ctl.tab == AppTab.setup && (id >= 0 || hc >= 0)) {
-          final f = id >= 0 ? settingsKeys[id] : null;
-          text = f != null
+          final f = id >= 0 ? ctl.settingsLayout[id] : null;
+          text = ctl.settingsLayout.isEmpty
+              ? 'Connect to see what each key does in settings mode (the Striso lists it) · key $id'
+              : f != null
               ? [
                   ...f.describe(id),
                   if ((f.engine != null || f.switchable) && !ctl.canSend)
@@ -419,7 +421,7 @@ class _SettingsInfoState extends State<SettingsInfo> {
       listenable: Listenable.merge([ctl, ctl.stats]),
       builder: (context, _) {
         final id = ctl.hover >= 0 ? ctl.hover : ctl.settingsSelected;
-        final f = id >= 0 ? settingsKeys[id] : null;
+        final f = id >= 0 ? ctl.settingsLayout[id] : null;
         final voices = ctl.settingsVoices();
         final v = f?.engine != null ? voices[f!.engine] : null;
         return Column(

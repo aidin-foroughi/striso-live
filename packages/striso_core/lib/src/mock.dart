@@ -11,6 +11,7 @@ import 'dart:typed_data';
 import 'layout.dart';
 import 'playable.dart';
 import 'protocol.dart';
+import 'board_state.dart';
 import 'settings_map.dart';
 import 'transport.dart';
 import 'tuning.dart';
@@ -272,6 +273,56 @@ class MockConfig {
   const MockConfig(this.touch, this.keys);
 }
 
+/// The firmware's StcX reply, as recorded from the virtual board (striso-control-firmware's
+/// virtual/tests/transcripts/settings_layout.txt). The mock (widget tests only) answers with it.
+const mockSettingsLayoutReply = [
+  'X keys 41',
+  'X 0 switch midi - - k MPE|MPE MIDI mode|number of MPE voices, 1 to 15',
+  'X 2 switch midi - - k Poly|Normal MIDI mode (all notes on one channel)|MIDI channel, 1 to 16',
+  'X 4 switch midi - - k Mono|Mono (glissando) MIDI mode|MIDI channel, 1 to 16',
+  'X 6 dial sens - - - Bend|Pitch bend sensitivity (sideways tilt)|0 to 4, steps of 1/4',
+  'X 8 dial sens - - - Tilt|Tilt (forward/back) sensitivity|0 to 3, steps of 1/8',
+  'X 11 action layout - - - Flip|Flip the layout 180 degrees (with the glissando button also held: debug mode on/off)|',
+  'X 13 switch voice brass 402800 k brass|Voice: brass|step through its presets (the up/down leds show which)',
+  'X 15 switch voice trumpet 003030 k tpt|Voice: trumpet|step through its presets (the up/down leds show which)',
+  'X 17 dial sens - - - Thres|Note-on threshold|how light a touch starts a note (led dial 0 to 15)',
+  'X 18 switch voice strisy 282828 k strisy|Voice: strisy|step through its presets (the up/down leds show which)',
+  'X 19 dial sens - - - Press|Pressure sensitivity|0 to 3, steps of 1/8',
+  'X 20 switch voice va 401400 k va|Voice: va|step through its presets (the up/down leds show which)',
+  'X 21 dial sens - - - Velo|Velocity sensitivity|0 to 2, steps of 1/8',
+  'X 22 switch voice modal 001840 k modal|Voice: modal|step through its presets (the up/down leds show which)',
+  'X 23 switch tuning - - k Pyth|Tuning 3: Pythagorean|fine tuning offset, 1/32 semitone per step',
+  'X 24 switch voice bowed 400000 k bowed|Voice: bowed|step through its presets (the up/down leds show which)',
+  'X 25 switch tuning - - k 5TET|Tuning 4: 5-TET|fine tuning offset, 1/32 semitone per step',
+  'X 26 switch voice wind 004000 k wind|Voice: wind|step through its presets (the up/down leds show which)',
+  'X 27 switch tuning - - k 7TET|Tuning 5: 7-TET|fine tuning offset, 1/32 semitone per step',
+  'X 28 switch voice ep 280040 k ep|Voice: ep|step through its presets (the up/down leds show which)',
+  'X 29 switch tuning - - k BP1|Tuning 6: Bohlen-Pierce 1|fine tuning offset, 1/32 semitone per step',
+  'X 30 switch preset - - k P7|Load settings preset 7|',
+  'X 31 switch tuning - - k BP2|Tuning 7: Bohlen-Pierce 2|fine tuning offset, 1/32 semitone per step',
+  'X 32 switch preset - - k P8|Load settings preset 8|',
+  'X 33 switch tuning - - k Just|Tuning 8: Just 7-limit|fine tuning offset, 1/32 semitone per step',
+  'X 34 switch tuning - - k 12TET|Tuning 0: 12-TET|fine tuning offset, 1/32 semitone per step',
+  'X 35 switch preset - - k P1|Load settings preset 1|',
+  'X 36 switch tuning - - k 31TET|Tuning 1: 31-TET|fine tuning offset, 1/32 semitone per step',
+  'X 37 switch preset - - k P2|Load settings preset 2|',
+  'X 38 switch tuning - - k 19TET|Tuning 2: 19-TET|fine tuning offset, 1/32 semitone per step',
+  'X 39 switch preset - - k P3|Load settings preset 3|',
+  'X 41 switch preset - - k P4|Load settings preset 4|',
+  'X 43 switch preset - - k P5|Load settings preset 5|',
+  'X 45 switch preset - - k P6|Load settings preset 6|',
+  'X 51 dial midi2 - - - Vol|Volume (MIDI CC7)|volume, 0 to 127',
+  'X 53 dial midi2 - - - Sust|Sustain / decay (pedal)|release length, 0 to 1',
+  'X 56 dial midi2 - - - MPEbd|MPE pitch bend range|12, 24, 48 or 96 semitones',
+  'X 58 dial midi2 - - - Rate|MIDI message interval|1 to 15 ms',
+  'X 63 switch system - - k Panic|Panic: all MIDI notes off|',
+  'X 65 action system - - - Cfg|Send the MPE and pitch bend configuration over MIDI|',
+  'X 67 action system - - d Reset|System reset: restarts the Striso|',
+  'X end',
+];
+
+final SettingsLayout mockSettingsLayout = parseSettingsLayout(mockSettingsLayoutReply)!;
+
 class MockBoard implements PlayableBoard {
   final String firmware;
   final _entries = <_Entry>[];
@@ -449,6 +500,15 @@ class MockBoard implements PlayableBoard {
       _rxPayload.clear();
     } else if (ch == 'N') {
       _printTuning();
+    } else if (ch == 'X') {
+      for (final l in mockSettingsLayoutReply) {
+        _print('$l\r\n');
+      }
+    } else if (ch == 'Y') {
+      _print('${_stateLine()}\r\n');
+    } else if (ch == 'y') {
+      _stateLine();
+      _print('y $_stateCount\r\n');
     } else if (ch == 'U') {
       _printUsbAudio();
     } else if (ch == 't') {
@@ -552,23 +612,42 @@ class MockBoard implements PlayableBoard {
   /// The fine tune in cents (the knob on the tuning keys), e.g. -31.77 for A = 432 Hz.
   void fineTune(double cents) => noteOffset = toFloat32(cents / 100);
 
+  int _stateCount = 0;
+  String _stateSeen = '';
+
+  /// StcY's line from this mock's state; the counter goes up when it differs from the last look.
+  String _stateLine() {
+    String f3(double v) => v.toStringAsFixed(3);
+    final body =
+        'voice=$voice midi=$midiMode ch=${midiMode == 'mpe' ? 2 : 1} voices=10 bend=48 tuning=$tuning '
+        'fine=${(noteOffset * 100).toStringAsFixed(2)} transpose=0.000 pres=${f3(touch[0])} velo=${f3(touch[1])} '
+        'tilt=${f3(touch[2])} bendsens=${f3(touch[3])} thres=${f3(touch[4])} vol=90 sustain=0.188 rate=1 '
+        'alt=${(controlsDown[3]) != 0 ? 1 : 0} porta=0 flip=0 led=00AA00 updown=0000';
+    final snap = '$body ${values.join(',')} ${keyFactors.join(',')}';
+    if (snap != _stateSeen) {
+      if (_stateSeen.isNotEmpty) _stateCount++;
+      _stateSeen = snap;
+    }
+    return 'Y $_stateCount $body';
+  }
+
   /// StcK: a settings key pressed over USB (config_but with type 0). True when the key is one the
   /// board switches: MIDI modes, tunings, settings presets, voices, Panic; dials and system keys
   /// are refused.
   bool settingsKey(int id) {
-    final f = settingsKeys[id];
+    final f = mockSettingsLayout[id];
     if (f == null || !f.switchable) return false;
     if (f.group == SettingsGroup.midi) {
       midiMode = const {0: 'mpe', 2: 'poly', 4: 'mono'}[id]!;
       return true;
     }
     if (f.group == SettingsGroup.tuning) {
-      loadTuning(tuningKeyIds.indexOf(id));
+      loadTuning(int.parse(RegExp(r'Tuning (\d)').firstMatch(f.title)!.group(1)!));
       return true;
     }
     if (f.group == SettingsGroup.preset) {
       // a stored preset: the touch settings as saved (preset 1), the defaults for the others
-      settingsPreset = presetKeyIds.indexOf(id) + 1;
+      settingsPreset = int.parse(f.short.substring(1));
       final saved = _config?.touch;
       for (var i = 0; i < _touch.length; i++) {
         touch[i] = settingsPreset == 1 && saved != null && i < saved.length ? saved[i] : _touch[i].$6;

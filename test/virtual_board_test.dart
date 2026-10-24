@@ -136,6 +136,26 @@ void main() {
     expect(await run(tester, ctl.pressSettingsKey(63)), isTrue);
     ctl.toggleSettings(false);
 
+    // the board changes behind the app's back (a console write the app does not interpret, the
+    // instrument's own buttons): the app shows what the board then reports, by its change counter
+    expect(ctl.settingsLayout[24]!.engine, 'bowed', reason: 'the overlay is the firmware\u2019s (StcX)');
+    final cello = ctl.voices.firstWhere((v) => v.name == 'bowed:cello');
+    await run(tester, ctl.client!.send(selectVoiceCommand(cello.index)));
+    await waitFor(tester, () => ctl.voiceName == 'bowed:cello' && ctl.boardState?.voice == cello.index);
+    await run(tester, ctl.client!.send(settingsKeyCommand(36))); // tuning 1, pressed by someone else
+    await waitFor(tester, () => ctl.boardState?.tuning == 1 && ctl.tuning?.index == 1);
+    await tester.runAsync(() async {
+      final pl = VirtualPlayer(b);
+      pl.control(Idc.alt, true);
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      pl.control(Idc.octUp, true);
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      pl.control(Idc.octUp, false);
+      pl.control(Idc.alt, false);
+    });
+    await waitFor(tester, () => ctl.live.transpose == 1, ms: 4000);
+    expect(ctl.boardState!.transpose, greaterThan(0.5), reason: 'a semitone up, as the board says (31-TET: 1.161)');
+
     // a reset of the board: the app sees it go and comes back to it
     await tester.runAsync(() async {
       final pl = VirtualPlayer(b);

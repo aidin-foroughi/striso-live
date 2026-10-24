@@ -116,8 +116,8 @@ void main() {
     expect(engineColor('trumpet'), const Color(0xFF2BB7C9));
     expect(engineInfo('trumpet').label, 'Trumpet');
     expect(engineInfo('trumpet').blurb, 'physical model, valves and mutes');
-    expect(settingsKeys[15]!.engine, 'trumpet');
-    expect(settingsKeys[15]!.switchable, isTrue);
+    expect(ctl.settingsLayout[15]!.engine, 'trumpet', reason: 'the board lists its voice keys (StcX)');
+    expect(ctl.settingsLayout[15]!.switchable, isTrue);
     ctl.selectEngine('trumpet');
     await waitFor(tester, () => ctl.voiceName == 'trumpet:bb classical' && ctl.mainKnobs().isNotEmpty);
     expect(ctl.mainKnobs().map((p) => p.name), ['brassy', 'bell', 'attack', 'p_loud', 'breath', 'vibrato', 'release', 'room']);

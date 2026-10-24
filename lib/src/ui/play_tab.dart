@@ -526,11 +526,13 @@ class PlayToolbar extends StatelessWidget {
                 TuningChip(ctl),
                 if (t != 0) ...[
                   const SizedBox(width: Space.s),
-                  Btn(
-                    'Transposed ${t > 0 ? '+' : '−'}${t.abs() % 12 == 0 ? '${t.abs() ~/ 12} oct' : '${t.abs()} st'}  ✕',
-                    kind: BtnKind.ghost,
-                    tooltip: 'Guessed from the octave buttons. Click to reset to D4 in the middle.',
-                    onPressed: ctl.resetTranspose,
+                  Tooltip(
+                    message: 'As the Striso reports it. Both octave buttons with Settings held reset it.',
+                    child: Text(
+                      'Transposed ${t > 0 ? '+' : '−'}${t.abs() % 12 == 0 ? '${t.abs() ~/ 12} oct' : '${t.abs()} st'}',
+                      key: const Key('transposed'),
+                      style: ui(TypeSize.small, color: Pal.text2),
+                    ),
                   ),
                 ],
               ],

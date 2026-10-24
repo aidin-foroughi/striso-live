@@ -37,7 +37,6 @@ class LiveState {
   final motion = Motion();
   int transpose = 0; // semitones
   int transposeFifths = 0; // spelling shift on the line of fifths (a semitone up is 5 fifths down)
-  (int, int)? _transposeOld;
   int messages = 0;
   double rate = 0;
   int _rateCount = 0;
@@ -98,7 +97,6 @@ class LiveState {
       final before = controls[id] == 1;
       controls[id] = isDown ? 1 : 0;
       controlT[id] = now;
-      if (isDown && !before) _transpose(id);
       for (final f in controlListeners) {
         f(id, isDown, before);
       }
@@ -115,35 +113,19 @@ class LiveState {
     }
   }
 
-  // synth_control.cpp: octave buttons move by an octave, by a semitone while settings is held, and
-  // both together undo the last move. The board may start transposed: this is a guess.
-  void _transpose(int id) {
-    if (id != Idc.octUp && id != Idc.octDown) return;
-    if (controls[Idc.octUp] == 1 && controls[Idc.octDown] == 1) {
-      final old = _transposeOld;
-      if (old != null) {
-        transpose = old.$1;
-        transposeFifths = old.$2;
-      }
-      return;
+  /// The transposition as the board reports it (StcY transpose, in semitones): the labels follow
+  /// it. A semitone moves the spelling 5 fifths down (D -> Eb -> E), as the firmware's semitone
+  /// step is 3 octaves less 5 fifths; kept in a sane range.
+  void setTranspose(int semitones) {
+    transpose = semitones;
+    var f = -5 * (semitones % 12);
+    while (f > 5) {
+      f -= 12;
     }
-    _transposeOld = (transpose, transposeFifths);
-    final semitone = controls[Idc.alt] == 1;
-    final dir = id == Idc.octUp ? 1 : -1;
-    final nextT = transpose + dir * (semitone ? 1 : 12);
-    if (nextT < -30 || nextT > 30) return;
-    transpose = nextT;
-    if (semitone) {
-      // the firmware moves 3 octaves and 5 fifths: re-spell into a sane range (D -> Eb -> E)
-      var f = transposeFifths - 5 * dir;
-      while (f > 5) {
-        f -= 12;
-      }
-      while (f < -6) {
-        f += 12;
-      }
-      transposeFifths = f;
+    while (f < -6) {
+      f += 12;
     }
+    transposeFifths = f;
   }
 
   void resetTranspose() {

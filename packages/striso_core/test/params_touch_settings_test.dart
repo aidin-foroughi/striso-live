@@ -244,64 +244,63 @@ void main() {
     });
   });
 
-  group('settings', () {
-    test('every settings key is a key on the board', () {
-      for (final id in settingsKeys.keys) {
-        expect(keyIds, contains(id), reason: 'key $id');
+  group('settings layout (StcX) and state (StcY, Stcy): what the board reports', () {
+    test('the StcX reply parses: kinds, groups, engines, led colours, what K takes', () {
+      final l = parseSettingsLayout(mockSettingsLayoutReply)!;
+      expect(l.keys.length, int.parse(mockSettingsLayoutReply.first.split(' ').last));
+      for (final id in l.keys.keys) {
+        expect(keyIds, contains(id), reason: 'key $id is a key on the board');
       }
+      expect(l[0]!.group, SettingsGroup.midi);
+      expect(l[0]!.switchable, isTrue);
+      expect(l[6]!.kind, 'dial');
+      expect(l[6]!.switchable, isFalse);
+      expect(l[24]!.engine, 'bowed');
+      expect(l[24]!.led, [0x40, 0, 0]);
+      expect(l[36]!.title, startsWith('Tuning 1: '));
+      expect(l[67]!.danger, isTrue);
+      expect(l[67]!.switchable, isFalse);
+      expect(l.voiceKeyOf('trumpet'), 15);
+      expect(l.voiceKeys.map((v) => v.$2), containsAll(['strisy', 'va', 'modal', 'bowed', 'wind', 'ep', 'brass', 'trumpet']));
+      expect(ledColor(l[20]!.led!), 0xff5000);
     });
 
-    final fw = firmwareSource();
-    test('the table matches config_but() and config_voice() in the firmware', () {
-      final src = fw!.readAsStringSync();
-      final start = src.indexOf('#else // !OLD_CONFIG_LAYOUT');
-      final body = src.substring(start, src.indexOf('#endif // !OLD_CONFIG_LAYOUT', start));
-      final fn = body.substring(body.indexOf('float config_but('));
-      final live = fn.split('\n').where((l) => !RegExp(r'^\s*//').hasMatch(l)).join('\n');
-      final cases = {for (final m in RegExp(r'case \((\d+)\)').allMatches(live)) int.parse(m[1]!)}.toList()..sort();
-      // keys of engines this checkout predates (trumpet before its merge) are the only difference
-      final missing = settingsKeys.keys.toSet().difference(cases.toSet());
-      expect(missing.difference(newerVoiceKeys), isEmpty, reason: 'keys the app has and the firmware does not');
-      if (missing.isNotEmpty) {
-        // ignore: avoid_print
-        print('firmware (${firmwareLayout()}) has no voice key ${missing.join(', ')} yet (${[for (final k in missing) voiceKeys[k]!.$1].join(', ')}): checked against a firmware that has it');
-      }
-      expect(cases, (settingsKeys.keys.toSet().difference(missing).toList()..sort()));
-      final voices = RegExp(r'case \((\d+)\): return config_voice\("(\w+)", (\d+), (\d+), (\d+)').allMatches(live).toList();
-      expect(voices.length, voiceKeys.length - missing.length);
-      for (final m in voices) {
-        final v = voiceKeys[int.parse(m[1]!)]!;
-        expect([v.$1, ...v.$2], [m[2], int.parse(m[3]!), int.parse(m[4]!), int.parse(m[5]!)], reason: 'voice key ${m[1]}');
-      }
-      final tunings = RegExp(r'case \((\d+)\): // (?:set 12tet tuning|load tuning (\d))').allMatches(live);
-      expect(tunings.length, 9);
-      for (final m in tunings) {
-        final n = m[2] != null ? int.parse(m[2]!) : 0;
-        expect(settingsKeys[int.parse(m[1]!)]!.title, startsWith('Tuning $n: '), reason: 'tuning key ${m[1]}');
-      }
-      final presets = RegExp(r'case \((\d+)\):\s*\n\s*if \(type == 0\) \{\s*\n\s*load_preset\((\d)\)').allMatches(live).toList();
-      expect(presets.length, 8);
-      for (final m in presets) {
-        expect(settingsKeys[int.parse(m[1]!)]!.short, 'P${m[2]}', reason: 'preset key ${m[1]}');
-      }
-    }, skip: fw == null ? firmwareMissing : false);
+    test('a reply cut short is no layout (the firmware must answer all of it)', () {
+      expect(parseSettingsLayout(mockSettingsLayoutReply.sublist(0, 5)), isNull);
+      expect(parseSettingsLayout(const []), isNull);
+    });
 
-    test('voice keys: select with the remembered preset, then step through the presets', () {
-      const voices = [
-        VoiceEntry(index: 0, name: 'strisy', engine: 'strisy'),
-        VoiceEntry(index: 1, name: 'va:classic', engine: 'va'),
-        VoiceEntry(index: 2, name: 'va:pad', engine: 'va'),
-        VoiceEntry(index: 3, name: 'va:lead', engine: 'va'),
-        VoiceEntry(index: 4, name: 'modal:bell', engine: 'modal'),
-      ];
-      expect(voiceKeyAction(voices, 0, 'va'), (index: 1, name: 'va:classic', presetIndex: 0, count: 3));
-      expect(voiceKeyAction(voices, 0, 'va', {'va': 2})!.name, 'va:lead');
-      expect(voiceKeyAction(voices, 1, 'va')!.name, 'va:pad');
-      expect(voiceKeyAction(voices, 3, 'va')!.name, 'va:classic');
-      expect(voiceKeyAction(voices, 1, 'va', {}, -1)!.name, 'va:lead');
-      expect(voiceKeyAction(voices, 4, 'strisy')!.name, 'strisy');
-      expect(voiceKeyAction(voices, 4, 'wind'), isNull);
-      expect(ledColor([64, 20, 0]), 0xff5000);
+    test('StcY and Stcy lines', () {
+      final b = parseBoardState(
+        'Y 17 voice=1 midi=mpe ch=2 voices=10 bend=48 tuning=2 fine=-31.77 transpose=1.161 pres=1.000 velo=1.000 tilt=1.000 '
+        'bendsens=0.500 thres=0.000 vol=90 sustain=0.188 rate=1 alt=1 porta=0 flip=0 led=00AA00 updown=0120',
+      )!;
+      expect(b.counter, 17);
+      expect(b.voice, 1);
+      expect(b.midi, 'mpe');
+      expect(b.tuning, 2);
+      expect(b.fineCents, closeTo(-31.77, 1e-9));
+      expect(b.transpose, closeTo(1.161, 1e-9));
+      expect(b.settingsHeld, isTrue);
+      expect(b.led, 0x00AA00);
+      expect(b.updown, [0, 1, 2, 0]);
+      expect(parseChangeCount('y 42'), 42);
+      expect(parseChangeCount('Y 42 voice=1'), isNull);
+      expect(parseBoardState('y 4'), isNull);
+    });
+
+    test('the mock answers X, Y and y; y goes up when its state changes, not between idle reads', () async {
+      final board = MockBoard(autoplay: false, idleFrames: 0);
+      final c = StrisoClient(MockTransport(board: board));
+      await c.connect();
+      expect((await c.getSettingsLayout())!.keys.length, greaterThan(30));
+      final n0 = (await c.getChangeCount())!;
+      expect(await c.getChangeCount(), n0);
+      expect((await c.pressSettingsKey(36))!.ok, isTrue); // tuning 1
+      final n1 = (await c.getChangeCount())!;
+      expect(n1, greaterThan(n0));
+      expect((await c.getState())!.tuning, 1);
+      await c.disconnect();
     });
   });
 }

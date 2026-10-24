@@ -4,6 +4,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'board_state.dart';
 import 'protocol.dart';
 import 'transport.dart';
 import 'tuning.dart';
@@ -308,6 +309,43 @@ class StrisoClient {
       return Take.done;
     }, timeout: timeout);
     return r.state['k'] as ({bool ok, int id})?;
+  }
+
+  /// The settings-key layout (StcX): what every key does with Settings held. Null when the
+  /// firmware does not answer (then it needs an update).
+  Future<SettingsLayout?> getSettingsLayout() async {
+    final r = await request(
+      commandChar('X'),
+      (l, s) {
+        final t = l.trim();
+        if (!t.startsWith('X ')) return Take.no;
+        return t == 'X end' ? Take.done : Take.more;
+      },
+      timeout: const Duration(milliseconds: 1200),
+    );
+    return parseSettingsLayout(r.lines);
+  }
+
+  /// The board's state in one line (StcY); null without a reply.
+  Future<BoardState?> getState({Duration timeout = const Duration(milliseconds: 500)}) async {
+    final r = await request(commandChar('Y'), (l, s) {
+      final b = parseBoardState(l);
+      if (b == null) return Take.no;
+      s['y'] = b;
+      return Take.done;
+    }, timeout: timeout);
+    return r.state['y'] as BoardState?;
+  }
+
+  /// The state's change counter (Stcy): it goes up whenever anything the board reports changed.
+  Future<int?> getChangeCount({Duration timeout = const Duration(milliseconds: 400)}) async {
+    final r = await request(commandChar('y'), (l, s) {
+      final n = parseChangeCount(l);
+      if (n == null) return Take.no;
+      s['n'] = n;
+      return Take.done;
+    }, timeout: timeout);
+    return r.state['n'] as int?;
   }
 
   /// The board's USB audio counters since the last call (StcU); they reset on every call. Null when

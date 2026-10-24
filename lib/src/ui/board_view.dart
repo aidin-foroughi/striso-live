@@ -137,7 +137,7 @@ class _BoardViewState extends State<BoardView> with SingleTickerProviderStateMix
   bool get _clickable {
     if (ctl.hoverControl >= 0) return ctl.playable || widget.overlays;
     if (ctl.hover < 0) return false;
-    if (widget.overlays && ctl.settingsOn) return settingsKeys[ctl.hover]?.switchable == true && ctl.canSend;
+    if (widget.overlays && ctl.settingsOn) return ctl.settingsLayout[ctl.hover]?.switchable == true && ctl.canSend;
     return ctl.playable || widget.overlays;
   }
 
@@ -483,7 +483,7 @@ class BoardPainter extends CustomPainter {
     final voices = ctl.settingsVoices();
     for (final k in boardKeys) {
       final center = g.at(k.x, k.y);
-      final f = settingsKeys[k.id];
+      final f = ctl.settingsLayout[k.id];
       if (f == null) {
         c.drawCircle(center, r + 0.5, Paint()..color = _a(Pal.bg0, 0.78));
         continue;
@@ -491,8 +491,8 @@ class BoardPainter extends CustomPainter {
       final v = f.engine != null ? voices[f.engine] : null;
       final col = f.engine != null ? engineColor(f.engine!) : (f.danger ? Pal.error : rgb(groupColors[f.group] ?? 0xffffff));
       // the tuning the board plays now, named from its values when it reports them
-      final tuningIndex = f.group == SettingsGroup.tuning ? tuningKeyIds.indexOf(k.id) : -1;
-      final currentTuning = tuningIndex >= 0 && ctl.tuning != null && ctl.tuning!.index == tuningIndex;
+      final tuningIndex = f.tuningIndex;
+      final currentTuning = tuningIndex >= 0 && ctl.boardState?.tuning == tuningIndex;
       c.drawCircle(center, r, Paint()..color = BoardPal.natural);
       if ((v != null && v.current) || currentTuning) c.drawCircle(center, r, Paint()..color = _a(col, 0.15));
       // switch keys (clickable) get the full rim; dial keys, set from the app's own controls, a quiet one

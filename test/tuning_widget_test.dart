@@ -87,7 +87,7 @@ void main() {
     expect(ctl.canSend, isFalse);
     final pulse = ctl.ledPulseT;
     // a tuning key, a MIDI key, a settings preset, a voice key
-    for (final id in [36, 4, 37, settingsKeys.entries.firstWhere((e) => e.value.engine != null).key]) {
+    for (final id in [36, 4, 37, mockSettingsLayout.keys.entries.firstWhere((e) => e.value.engine != null).key]) {
       expect(ctl.settingsClick(id), isTrue, reason: 'the click is taken (and nothing else happens)');
       expect(ctl.settingsSelected, -1, reason: 'no selection ring on key $id');
     }
@@ -99,16 +99,17 @@ void main() {
     ctl.hover = 36;
     ctl.stats.ping();
     await settle(tester, 200);
-    expect(tester.widget<Text>(find.byKey(const Key('hover-readout'))).data, endsWith('Connect to switch this from the app'));
-    expect(find.byKey(const Key('settings-send-hint')), findsOneWidget);
-    // a dial key still shows its information when clicked
+    // the layout is the board's (StcX): without one there is none to show
+    expect(ctl.settingsLayout.isEmpty, isTrue);
+    expect(tester.widget<Text>(find.byKey(const Key('hover-readout'))).data, startsWith('Connect to see what each key does'));
     expect(ctl.settingsClick(19), isTrue);
-    expect(ctl.settingsSelected, 19);
+    expect(ctl.settingsSelected, -1);
 
     // the demo: the same keys act on the mock board, labelled as the demo
     await startDemo(tester, ctl);
     await waitFor(tester, () => ctl.tuningSupported == true);
     expect(ctl.canSend, isTrue);
+    expect(ctl.settingsLayout[36]!.title, startsWith('Tuning 1'), reason: 'the layout the board listed');
     ctl.hover = 36;
     ctl.stats.ping();
     await settle(tester, 200);

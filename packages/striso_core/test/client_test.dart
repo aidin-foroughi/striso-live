@@ -378,22 +378,20 @@ void main() {
       expect(gyroFull, 8192);
     });
 
-    test('transposition: octave buttons, semitones with settings held, both undo', () {
+    test('transposition: as the board reports it (no guess from the octave buttons)', () {
       final live = LiveState();
       void ctl(int id, int v) => live.apply(Src.control, id, Int32List.fromList([v]), 1, 1);
       ctl(Idc.octUp, 1);
       ctl(Idc.octUp, 0);
-      expect(live.transpose, 12);
-      ctl(Idc.alt, 1);
-      ctl(Idc.octDown, 1);
-      ctl(Idc.octDown, 0);
-      ctl(Idc.alt, 0);
-      expect(live.transpose, 11);
-      ctl(Idc.octUp, 1);
-      ctl(Idc.octDown, 1); // both: undo the last move
-      expect(live.transpose, 11);
-      ctl(Idc.octDown, 0);
-      ctl(Idc.octUp, 0);
+      expect(live.transpose, 0, reason: 'the buttons alone say nothing: the board reports it');
+      live.setTranspose(12);
+      expect((live.transpose, live.transposeFifths), (12, 0));
+      live.setTranspose(1);
+      expect(live.transposeFifths, -5); // D -> Eb
+      live.setTranspose(2);
+      expect(live.transposeFifths, 2); // D -> E
+      live.setTranspose(-1);
+      expect(live.transposeFifths, 5); // D -> C#
     });
   });
 }

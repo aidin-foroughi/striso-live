@@ -296,13 +296,14 @@ void main() {
       await c.disconnect();
     });
 
-    test('the whitelist: switch keys and dial keys', () {
-      final sw = settingsKeys.entries.where((e) => e.value.switchable).map((e) => e.key).toSet();
-      expect(sw, containsAll([0, 2, 4, ...tuningKeyIds, ...presetKeyIds, ...voiceKeys.keys, 63]));
+    test('the whitelist is the one the board lists (StcX k flags): switch keys yes, dials and reset no', () {
+      final l = mockSettingsLayout;
+      final sw = l.keys.entries.where((e) => e.value.switchable).map((e) => e.key).toSet();
+      expect(sw, containsAll([0, 2, 4, 34, 36, 35, 63, ...l.voiceKeys.map((v) => v.$1)]));
       expect(sw, isNot(contains(67)));
       expect(sw, isNot(contains(65)));
       for (final id in [17, 19, 21, 6, 8, 51, 53, 56, 58, 11]) {
-        expect(settingsKeys[id]!.switchable, isFalse, reason: 'key $id is a dial or flip');
+        expect(l[id]!.switchable, isFalse, reason: 'key $id is a dial or flip');
       }
     });
   });

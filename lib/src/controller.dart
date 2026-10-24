@@ -224,6 +224,15 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
 
   bool saving = false, listsLoading = false;
   VersionInfo? version;
+
+  /// What every key does with Settings held, as the board lists it (StcX).
+  SettingsLayout settingsLayout = SettingsLayout.empty;
+
+  /// The board's state as it last reported it (StcY), and its change counter (Stcy).
+  BoardState? boardState;
+  int? _stateCount;
+  bool _stateBusy = false;
+  double _editT = -1e9; // the last edit from the app (the read-back waits for the gesture)
   Banner? banner;
   Future<void>? listsReady;
   Map<String, int>? trace;
@@ -253,7 +262,6 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
   MusicKey? currentKey;
   bool settingsOn = false;
   int settingsSelected = -1;
-  final Map<String, int> _remembered = {};
   int hover = -1, hoverControl = -1;
   double waveT = -1e9;
 
@@ -319,15 +327,6 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
       if (eqFollow) eqSelect(id);
     });
     live.releaseListeners.add((_, _) => values.ping());
-    live.controlListeners.add((id, down, before) {
-      // the settings button is how voices and tunings change on the instrument: check after it is released
-      if (id == Idc.alt && !down && before) {
-        Timer(const Duration(milliseconds: 350), () {
-          syncVoice();
-          refreshTuning();
-        });
-      }
-    });
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -692,6 +691,21 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
     version = v;
     log('connected: ${v.line}');
     if (usbBoard) _trace('version');
+    // the app needs the current firmware: it reports its settings layout and its state
+    final layout = await c.getSettingsLayout();
+    final count = layout == null ? null : await c.getChangeCount();
+    if (!current()) return null;
+    if (layout == null || count == null) {
+      return FailEv(
+        FailKind.needsUpdate,
+        b.mode == Mode.virtual
+            ? 'This virtual firmware build is too old for Striso Live (found ${v.fw}): pick a newer one in Setup.'
+            : 'This Striso needs a firmware update to work with Striso Live (found ${v.fw}).',
+      );
+    }
+    settingsLayout = layout;
+    _stateCount = count;
+    _applyState(await c.getState());
     await refreshVoices();
     if (!current()) return null;
     if (usbBoard) _trace('voice list (${voices.length})');
@@ -722,9 +736,9 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
           }
         });
     session.every(Res.loadPoll, const Duration(seconds: 1), () => _loadOnce(c));
-    session.every('voice sync', const Duration(seconds: 6), () {
-      if (same() && canSend) syncVoice();
-    });
+    // the board's change counter: anything that changed on the instrument (Settings + a key, the
+    // octave buttons) or anywhere else is read again from the board
+    session.every(Res.statePoll, const Duration(milliseconds: 250), () => _pollState(c), what: 'Stcy every 250 ms');
     if (b.mode == Mode.striso) unawaited(_pollUsbAudio(c));
     _scheduleTuningPoll();
     // the first time Virtual plays: every MIDI input there is plays it (the picker changes that)
@@ -740,7 +754,73 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
   @override
   void boardDown() {
     listsLoading = false;
+    settingsLayout = SettingsLayout.empty;
+    boardState = null;
+    _stateCount = null;
     _resetUi();
+  }
+
+  void _applyState(BoardState? st) {
+    if (st == null) return;
+    boardState = st;
+    final t = st.transpose;
+    if (t != null) live.setTranspose(t.round());
+  }
+
+  /// One round of the state poll: the counter moved, so the state, the voice and the values are
+  /// read again (the app shows what the board says, never what it guessed).
+  Future<void> _pollState(StrisoClient c) async {
+    if (_stateBusy || !identical(client, c) || state is! Live || saving) return;
+    _stateBusy = true;
+    try {
+      final n = await c.getChangeCount();
+      if (n == null || !identical(client, c) || n == _stateCount) return;
+      // an edit in progress: its own read-back comes after the gesture
+      if (clockMs() - _editT < 400) return;
+      _stateCount = n;
+      await _readBoard(c);
+    } finally {
+      _stateBusy = false;
+    }
+  }
+
+  /// The state, the voice list and every parameter value, as the board has them now.
+  Future<void> _readBoard(StrisoClient c) async {
+    _applyState(await c.getState());
+    if (!identical(client, c)) return;
+    await _voiceBusy;
+    final before = current;
+    await refreshVoices();
+    if (!identical(client, c)) return;
+    if (current != before) {
+      lastSound = null;
+      await refreshParams([0, 1], voiceChanged: true);
+      await readBack([2, 3]);
+    } else {
+      await readBack(allTargets);
+    }
+    await refreshTuning();
+    notifyListeners();
+  }
+
+  /// The values as the board reports them, into the parameters the UI holds (their preset values
+  /// stay): after every write, and whenever the board's counter moved.
+  Future<void> readBack(List<int> targets) async {
+    final c = client;
+    if (c == null) return;
+    for (final t in targets) {
+      final r = await c.getParams(t);
+      if (!identical(c, client) || r == null) continue;
+      final have = params[t]!;
+      if (have.params.length != r.params.length || (t <= 1 && r.name != have.name)) {
+        params[t] = ParamSet(r.name, [for (final p in r.params) p..loadValue = p.value], complete: r.complete);
+        continue;
+      }
+      for (var i = 0; i < r.params.length; i++) {
+        have.params[i].value = r.params[i].value;
+      }
+    }
+    values.ping();
   }
 
   void _resetUi() {
@@ -760,7 +840,6 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
     tuning = null;
     tuningSupported = null;
     _tuningSuggested = false;
-    _tuningHinted = false;
     harmony.reset();
     if (_disposed) return;
     notifyListeners();
@@ -809,18 +888,11 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
     await refreshParams([0, 1], voiceChanged: true);
   }
 
-  /// The voice can also change on the instrument (settings + row 4 keys).
+  /// The voice as the board reports it (it can change on the instrument: Settings + a voice key).
   Future<void> syncVoice() async {
     final c = client;
     if (c == null || connecting) return;
-    await _voiceBusy;
-    final before = current;
-    await refreshVoices();
-    if (identical(client, c) && current != before) {
-      lastSound = null;
-      await refreshParams([0, 1], voiceChanged: true);
-      toast('Voice changed on the instrument: $voiceName');
-    }
+    await _readBoard(c);
   }
 
   void stepVoice(int dir) {
@@ -908,6 +980,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
     }
     if (phase == 'begin') history.begin(label ?? 'Edit', key);
     setValue(t, p, v);
+    _editT = clockMs();
     if (phase == 'end') history.commit();
     _flushValues();
   }
@@ -1235,7 +1308,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
 
   /// null: not asked yet; false: the firmware gave no reply (no N command); true: it answers.
   bool? tuningSupported;
-  bool _tuningSuggested = false, _tuningHinted = false, _tuningBusy = false;
+  bool _tuningSuggested = false, _tuningBusy = false;
 
   /// Pitch labels want the tuning: N is asked for on connect, after the Settings button is
   /// released, and every 2 s while pitch or cents labels show (a cheap one-line poll).
@@ -1342,7 +1415,8 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
     final b = playBoard;
     if (b is! MockBoard) {
       // the virtual board: the settings card's tuning keys (12-TET, tunings 1..8)
-      if (b != null && n >= 0 && n < 9) unawaited(pressSettingsKey(const [34, 36, 38, 23, 25, 27, 29, 31, 33][n]));
+      final key = settingsLayout.keys.entries.where((e) => e.value.tuningIndex == n).firstOrNull?.key;
+      if (b != null && key != null) unawaited(pressSettingsKey(key));
       return;
     }
     b.loadTuning(n);
@@ -1370,11 +1444,6 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
     if (est == null) return;
     setKey(root: est.pc, scale: est.mode == 'major' ? 'major' : 'minor');
     toast('Key set to ${est.name}');
-  }
-
-  void resetTranspose() {
-    live.resetTranspose();
-    notifyListeners();
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -1597,12 +1666,11 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
 
   Map<String, SettingsVoice> settingsVoices() {
     final out = <String, SettingsVoice>{};
-    for (final f in settingsKeys.values) {
+    for (final f in settingsLayout.keys.values) {
       final e = f.engine;
       if (e == null) continue;
       final list = voices.where((v) => v.engine == e).toList();
       final at = list.indexWhere((v) => v.index == current);
-      if (at >= 0) _remembered[e] = at; // like remembered[] in config_voice
       out[e] = SettingsVoice(list.length, at >= 0, at >= 0 ? (list[at].preset ?? '') : '', list);
     }
     return out;
@@ -1612,20 +1680,12 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
   /// Striso does. Returns true when the click was taken.
   bool settingsClick(int id) {
     if (!settingsOn) return false;
-    final f = settingsKeys[id];
-    // a key that acts on the board does nothing at all without one: no selection, no pulse
-    if (f != null && (f.engine != null || f.switchable) && !canSend) return true;
+    final f = settingsLayout[id];
+    // without a board there is no layout (the board lists it): nothing to select, no pulse
+    if (!canSend) return true;
     settingsSelected = id;
-    if (f?.engine != null) {
-      final a = voiceKeyAction(voices, current, f!.engine!, _remembered);
-      if (a == null) {
-        toast('This firmware has no ${f.engine} voice', 'warn');
-      } else {
-        selectVoice(a.index);
-      }
-    } else if (f != null && f.switchable) {
-      unawaited(pressSettingsKey(id));
-    }
+    // a switch key (voice keys too) is pressed on the board: the firmware does what it does
+    if (f != null && f.switchable) unawaited(pressSettingsKey(id));
     notifyListeners();
     return true;
   }
@@ -1635,38 +1695,26 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
   /// settings preset). Firmware without K gets a one-time hint.
   Future<bool> pressSettingsKey(int id) async {
     final c = client;
-    final f = settingsKeys[id];
+    final f = settingsLayout[id];
     if (c == null || !canSend || f == null || !f.switchable) return false;
     ledPulseT = clockMs();
     notifyListeners();
     final r = await c.pressSettingsKey(id);
     if (!identical(c, client)) return false;
-    if (r == null) {
-      if (!_tuningHinted) {
-        _tuningHinted = true;
-        toast("This firmware can't switch tunings from the app yet. Use Settings + the key on the instrument.", 'warn');
-      }
-      log('K $id: no reply', LogKind.err);
-      return false;
-    }
-    if (!r.ok) {
+    if (r == null || !r.ok) {
       toast('The board refused: ${f.title}', 'warn');
-      log('K err $id', LogKind.err);
+      log('K ${r == null ? 'no reply' : 'err'} $id', LogKind.err);
       return false;
     }
     log('K ok $id: ${f.title}');
-    if (f.group == SettingsGroup.tuning) {
-      await refreshTuning();
-    } else if (f.group == SettingsGroup.preset) {
-      await refreshParams([2]);
-      await syncVoice();
-      await refreshTuning();
-      toast('Loaded settings preset ${presetKeyIds.indexOf(id) + 1}');
-    } else if (f.group == SettingsGroup.midi) {
-      toast(f.title);
-    } else if (id == 63) {
-      toast('All notes off');
-    }
+    // what it changed, as the board reports it
+    final n = await c.getChangeCount();
+    if (!identical(c, client)) return false;
+    _stateCount = n ?? _stateCount;
+    await _readBoard(c);
+    if (f.group == SettingsGroup.preset) toast('Loaded ${f.title.replaceFirst('Load ', '')}');
+    if (f.group == SettingsGroup.midi) toast(f.title);
+    if (id == 63) toast('All notes off');
     notifyListeners();
     return true;
   }
@@ -1702,41 +1750,43 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
     notifyListeners();
   }
 
-  /// The engine buttons: the eight of the Striso's voice keys in key order with their led
-  /// colours, then any other engine this firmware lists.
+  /// The engine buttons, as the board lists its voices.
   List<EngineButton> engines() {
+    // the engines in the board's voice order (Stcv), each in its voice key's led colour (StcX);
+    // an engine without a voice key gets a colour of its own
     final out = <EngineButton>[];
     final seen = <String>{};
-    for (final e in voiceKeys.values) {
-      final (engine, led) = e;
-      if (!seen.add(engine)) continue;
-      out.add(EngineButton(engine, ledColor(led), voices.where((v) => v.engine == engine).length));
-    }
+    final leds = {for (final (_, engine, led) in settingsLayout.voiceKeys) engine: led};
     var k = 0;
     for (final v in voices) {
-      if (seen.add(v.engine)) {
-        final hue = engineInfo(v.engine, k++).hue;
-        out.add(EngineButton(v.engine, HSLColorInt.of(hue), voices.where((x) => x.engine == v.engine).length));
-      }
+      if (!seen.add(v.engine)) continue;
+      final led = leds[v.engine];
+      final colour = led != null ? ledColor(led) : HSLColorInt.of(engineInfo(v.engine, k++).hue);
+      out.add(EngineButton(v.engine, colour, voices.where((x) => x.engine == v.engine).length));
     }
     return out;
   }
 
   String get currentEngine => voices.where((v) => v.index == current).firstOrNull?.engine ?? (voiceName.isEmpty ? '' : voiceName.split(':').first);
 
-  /// The engine button: like a voice key on the Striso, the engine with the preset it had last.
+  /// The engine button: the engine's voice key pressed on the board (StcK), so the firmware picks
+  /// the preset it remembers; an engine without a voice key: its first preset.
   void selectEngine(String engine) {
     if (!canSend) {
       toast(connecting ? 'Connecting…' : 'Connect to switch voices', 'warn');
       return;
     }
-    settingsVoices(); // remembers the current preset per engine
-    final a = voiceKeyAction(voices, current, engine, _remembered, 0);
-    if (a == null) {
+    final key = settingsLayout.voiceKeyOf(engine);
+    if (key != null) {
+      unawaited(pressSettingsKey(key));
+      return;
+    }
+    final first = voices.where((v) => v.engine == engine).firstOrNull;
+    if (first == null) {
       toast('This firmware has no ${engineInfo(engine).label} voice', 'warn');
       return;
     }
-    if (a.index != current) selectVoice(a.index);
+    if (first.index != current) selectVoice(first.index);
   }
 
   /// About eight knobs that matter most for the current voice, then the effect amounts.
