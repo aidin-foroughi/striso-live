@@ -10,3 +10,6 @@ export 'src/backend.dart';
 export 'src/fake.dart';
 export 'src/native.dart' show NativeAudioBackend, StrisoAudioLib, strisoAudioCandidates, backendSystem, backendNull, MarkKind, ProbeMark;
 export 'src/through_pc.dart';
+export 'src/midi.dart';
+export 'src/midi_inputs.dart';
+export 'src/midi_native.dart';

@@ -1,0 +1,3 @@
+# native_test.dart and midi_test.dart use the same native library, loaded once per test process
+# (its self-test sets the MIDI sink and opens null-backend sessions): one test file at a time.
+concurrency: 1
