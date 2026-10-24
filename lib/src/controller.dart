@@ -16,6 +16,7 @@ import 'app_log.dart';
 import 'firmware_library.dart';
 import 'harmony_tracker.dart';
 import 'morph_model.dart';
+import 'params_model.dart';
 import 'store.dart';
 import 'session/board.dart';
 import 'session/resources.dart';
@@ -24,6 +25,7 @@ import 'session/session_machine.dart';
 import 'session/sound_routing.dart';
 import 'virtual_support.dart';
 
+export 'params_model.dart' show ParamSet, allTargets, targetNames;
 export 'session/session.dart' show UsbBackend, reconnectDelay;
 export 'session/session_machine.dart' show Mode, SessionState, Idle, Waiting, Connecting, Live, Rebooting, Failed, FailKind, IdleWhy;
 
@@ -102,14 +104,6 @@ const _engineInfo = {
 EngineInfo engineInfo(String e, [int k = 0]) =>
     _engineInfo[e] ?? EngineInfo(e.isEmpty ? e : e[0].toUpperCase() + e.substring(1), '', ((k * 67 + 30) % 360).toDouble());
 
-class ParamSet {
-  final String name;
-  final List<Param> params;
-  final bool missing, complete;
-  const ParamSet(this.name, this.params, {this.missing = false, this.complete = true});
-  static const empty = ParamSet('', []);
-}
-
 class ToastMsg {
   final int id;
   final String text, kind; // '' | 'warn' | 'error'
@@ -178,10 +172,7 @@ class AppOptions {
   }
 }
 
-const allTargets = [0, 1, 2, 3];
-const targetNames = ['voice', 'effect', 'touch', 'key'];
-
-class AppController extends ChangeNotifier implements MorphHost, SessionHost {
+class AppController extends ChangeNotifier implements MorphHost, SessionHost, ParamsHost {
   final AppOptions options;
   final Store store;
   final UsbBackend? usb;
@@ -198,7 +189,38 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
   final audioLevels = Pulse();
 
   final live = LiveState();
-  final history = History();
+
+  /// The live parameters with undo, A/B, Mutate (params_model.dart).
+  late final ParamsModel sound = ParamsModel(this, clock: clockMs);
+  History get history => sound.history;
+  Map<int, ParamSet> get params => sound.params;
+  Map<int, Set<String>> get locks => sound.locks;
+  bool get abOn => sound.abOn;
+  bool get edited => sound.edited;
+  bool get hasSound => sound.hasSound;
+  String get mutateScope => sound.mutateScope;
+  double get mutateAmount => sound.mutateAmount;
+  set mutateAmount(double v) => sound.mutateAmount = v;
+  Param? findParam(int t, String name) => sound.findParam(t, name);
+  bool setValue(int t, Param p, double v, {bool record = true, bool send = true}) => sound.setValue(t, p, v, record: record, send: send);
+  void onEdit(int t, Param p, double v, String phase, [String? label, String? key]) => sound.onEdit(t, p, v, phase, label, key);
+  void undo() => sound.undo();
+  void redo() => sound.redo();
+  void setMutateScope(String s) => sound.setMutateScope(s);
+  void mutate() => sound.mutate();
+  void resetAll() => sound.resetAll();
+  void toggleLock(int t, Param p) => sound.toggleLock(t, p);
+  void setAB(bool on) => sound.setAB(on);
+  Future<void> readBack(List<int> targets) => sound.readBack(targets);
+  void _flushValues() => sound.flush();
+
+  // ParamsHost
+  @override
+  void valuesChanged() => values.ping();
+  @override
+  void stateChanged() => notifyListeners();
+  @override
+  void editedByUser() => _rememberEditsSoon();
   late final harmony = HarmonyTracker(live);
   late final morph = MorphModel(this);
 
@@ -232,7 +254,6 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
   BoardState? boardState;
   int? _stateCount;
   bool _stateBusy = false;
-  double _editT = -1e9; // the last edit from the app (the read-back waits for the gesture)
   Banner? banner;
   Future<void>? listsReady;
   Map<String, int>? trace;
@@ -242,8 +263,6 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
   List<VoiceEntry> voices = const [];
   int current = -1;
   String voiceName = '';
-  final Map<int, ParamSet> params = {for (final t in allTargets) t: ParamSet.empty};
-  final Map<int, Set<String>> locks = {0: <String>{}, 1: <String>{}};
   Future<void> _voiceBusy = Future.value();
   String? lastSound;
 
@@ -416,6 +435,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
     notifyListeners();
   }
 
+  @override
   void toast(String text, [String kind = '']) => _toast(text, kind);
 
   void toastAction(String text, String action, VoidCallback onAction) => _toast(text, '', action: action, onAction: onAction);
@@ -453,6 +473,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
   bool get isVirtual => mode == Mode.virtual;
 
   /// The console of the active board.
+  @override
   StrisoClient? get client => session.client;
 
   bool get connecting => state is Connecting;
@@ -776,7 +797,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
       final n = await c.getChangeCount();
       if (n == null || !identical(client, c) || n == _stateCount) return;
       // an edit in progress: its own read-back comes after the gesture
-      if (clockMs() - _editT < 400) return;
+      if (clockMs() - sound.editT < 400) return;
       _stateCount = n;
       await _readBoard(c);
     } finally {
@@ -803,35 +824,12 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
     notifyListeners();
   }
 
-  /// The values as the board reports them, into the parameters the UI holds (their preset values
-  /// stay): after every write, and whenever the board's counter moved.
-  Future<void> readBack(List<int> targets) async {
-    final c = client;
-    if (c == null) return;
-    for (final t in targets) {
-      final r = await c.getParams(t);
-      if (!identical(c, client) || r == null) continue;
-      final have = params[t]!;
-      if (have.params.length != r.params.length || (t <= 1 && r.name != have.name)) {
-        params[t] = ParamSet(r.name, [for (final p in r.params) p..loadValue = p.value], complete: r.complete);
-        continue;
-      }
-      for (var i = 0; i < r.params.length; i++) {
-        have.params[i].value = r.params[i].value;
-      }
-    }
-    values.ping();
-  }
-
   void _resetUi() {
-    history.clear();
+    sound.clear();
     live.clear();
     voices = const [];
     current = -1;
     voiceName = '';
-    for (final t in allTargets) {
-      params[t] = ParamSet.empty;
-    }
     morph.load(null);
     version = null;
     load = null;
@@ -925,15 +923,11 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
       if (r != null && !r.complete && identical(c, client)) r = (await c.getParams(t)) ?? r;
       if (!identical(c, client)) return;
       if (r == null) {
-        params[t] = const ParamSet('', [], missing: true);
+        sound.load(t, const ParamSet('', [], missing: true));
       } else {
-        params[t] = ParamSet(r.name, [for (final p in r.params) p..loadValue = p.value], complete: r.complete);
+        sound.load(t, ParamSet(r.name, [for (final p in r.params) p..loadValue = p.value], complete: r.complete));
         if (!r.complete) toast('Only ${r.params.length} of ${r.count} ${targetNames[t]} parameters arrived', 'warn');
       }
-    }
-    if (abOn) {
-      abOn = false;
-      _abEdits = [];
     }
     if (targets.contains(0)) {
       voiceName = params[0]!.name.isNotEmpty ? params[0]!.name : (voices.where((v) => v.index == current).firstOrNull?.name ?? '');
@@ -953,122 +947,6 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
       }
     }
     notifyListeners();
-    values.ping();
-  }
-
-  Param? findParam(int t, String name) => params[t]!.params.where((q) => q.name == name).firstOrNull;
-
-  /// The one place values change: model, board (throttled by the client) and history.
-  bool setValue(int t, Param p, double v, {bool record = true, bool send = true}) {
-    v = conformValue(p, v);
-    if (v == p.value) return false;
-    if (record) history.record(t, p.name, p.value, v);
-    p.value = v;
-    if (send) client?.setParam(t, p.index, v);
-    _valuesDirty = true;
-    return true;
-  }
-
-  bool _valuesDirty = false;
-
-  /// phase: 'begin' | 'change' | 'end'
-  void onEdit(int t, Param p, double v, String phase, [String? label, String? key]) {
-    if (abOn) {
-      abOn = false;
-      _abEdits = [];
-      notifyListeners();
-    }
-    if (phase == 'begin') history.begin(label ?? 'Edit', key);
-    setValue(t, p, v);
-    _editT = clockMs();
-    if (phase == 'end') history.commit();
-    _flushValues();
-  }
-
-  (bool, bool) _undoState = (false, false);
-
-  void _flushValues() {
-    if (!_valuesDirty) return;
-    _valuesDirty = false;
-    values.ping();
-    _rememberEditsSoon();
-    final u = (history.canUndo, history.canRedo);
-    if (u != _undoState) {
-      _undoState = u;
-      notifyListeners(); // undo/redo buttons
-    }
-  }
-
-  void _applyChanges(List<(int, String, double)> changes) {
-    for (final (t, name, v) in changes) {
-      final p = findParam(t, name);
-      if (p != null) setValue(t, p, v, record: false);
-    }
-  }
-
-  String _lc(String s) => s.isEmpty ? s : s[0].toLowerCase() + s.substring(1);
-
-  void undo() {
-    final e = history.undo();
-    if (e == null) return;
-    _applyChanges(e.changes);
-    _flushValues();
-    notifyListeners();
-    toast('Undid ${_lc(e.label)}');
-  }
-
-  void redo() {
-    final e = history.redo();
-    if (e == null) return;
-    _applyChanges(e.changes);
-    _flushValues();
-    notifyListeners();
-    toast('Redid ${_lc(e.label)}');
-  }
-
-  bool get hasSound => params[0]!.params.isNotEmpty || params[1]!.params.isNotEmpty;
-
-  String mutateScope = '0';
-  double mutateAmount = 0.12;
-
-  void setMutateScope(String s) {
-    mutateScope = s;
-    notifyListeners();
-  }
-
-  final _random = math.Random();
-
-  void mutate() {
-    final targets = mutateScope == 'both' ? [0, 1] : [int.parse(mutateScope)];
-    history.begin('Mutate');
-    var n = 0;
-    for (final t in targets) {
-      for (final (p, v) in mutateValues(params[t]!.params, mutateAmount, _random, locked: locks[t]!)) {
-        if (setValue(t, p, v)) n++;
-      }
-    }
-    history.commit();
-    _flushValues();
-    notifyListeners();
-    toast(n > 0 ? 'Mutated $n parameters. Undo brings them back.' : 'Nothing to mutate', n > 0 ? '' : 'warn');
-  }
-
-  void resetAll() {
-    history.begin('Reset all');
-    for (final t in soundTargets) {
-      for (final p in params[t]!.params) {
-        setValue(t, p, p.loadValue);
-      }
-    }
-    history.commit();
-    _flushValues();
-    notifyListeners();
-  }
-
-  void toggleLock(int t, Param p) {
-    final set = locks[t]!;
-    if (!set.remove(p.name)) set.add(p.name);
-    toast(set.contains(p.name) ? '${p.name} locked against Mutate' : '${p.name} unlocked');
     values.ping();
   }
 
@@ -1823,41 +1701,6 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost {
     store.set('eq', {'on': eqOn, 'follow': eqFollow});
     notifyListeners();
     values.ping();
-  }
-
-  // ---------------------------------------------------------------------------------------------
-  // A/B: the preset's values (A) against the edits (B), without touching the history
-
-  bool abOn = false;
-  List<(int, Param, double)> _abEdits = [];
-
-  bool get edited => soundTargets.any((t) => params[t]!.params.any((p) => p.value != p.loadValue));
-
-  void setAB(bool on) {
-    if (on == abOn || client == null) return;
-    if (on) {
-      _abEdits = [
-        for (final t in soundTargets)
-          for (final p in params[t]!.params)
-            if (p.value != p.loadValue) (t, p, p.value),
-      ];
-      if (_abEdits.isEmpty) {
-        toast('Nothing edited yet: A and B are the same');
-        return;
-      }
-      abOn = true;
-      for (final (t, p, _) in _abEdits) {
-        setValue(t, p, p.loadValue, record: false);
-      }
-    } else {
-      abOn = false;
-      for (final (t, p, v) in _abEdits) {
-        setValue(t, p, v, record: false);
-      }
-      _abEdits = [];
-    }
-    _flushValues();
-    notifyListeners();
   }
 
   // ---------------------------------------------------------------------------------------------
