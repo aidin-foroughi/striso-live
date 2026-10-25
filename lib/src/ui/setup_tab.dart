@@ -1,7 +1,7 @@
 // Setup (DESIGN.md 3): a mode control (Sensitivity, Key equalizer, Settings keys) changes the
 // board's overlay and the right column; Save to Striso, Audio (Through PC, devices, Record), the
 // motion sensor and the firmware that plays are always at the lower right. The firmware builds
-// Virtual can run are chosen in Play (docs/flows.md 5), not here.
+// Virtual can run are chosen from the header's Virtual control (docs/flows.md 5), not here.
 
 import 'dart:math' as math;
 
@@ -692,11 +692,6 @@ class FirmwareRow extends StatelessWidget {
               ),
           ],
         ),
-        if (virtual)
-          Padding(
-            padding: const EdgeInsets.only(top: Space.xs),
-            child: Text('Other builds: Play, the build row.', style: ui(TypeSize.small, color: Pal.text3)),
-          ),
       ],
     );
   }

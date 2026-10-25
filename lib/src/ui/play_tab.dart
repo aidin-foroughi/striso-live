@@ -12,7 +12,6 @@ import 'package:striso_core/striso_core.dart';
 import '../controller.dart';
 import '../theme.dart';
 import 'board_view.dart';
-import 'build_picker.dart';
 import 'chrome.dart';
 import 'knobs.dart';
 import 'live_panel.dart';
@@ -173,8 +172,6 @@ class EnginePanel extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Virtual: the build it runs, as a sound to try (docs/flows.md 5)
-            if (ctl.isVirtual && ctl.connected) ...[BuildRow(ctl), const SizedBox(height: Space.m)],
             SizedBox(
               height: Sizes.toolbar,
               child: Row(
@@ -527,6 +524,7 @@ class PlayToolbar extends StatelessWidget {
                 if (ctl.colour != KeyColour.off && wide) ...[const SizedBox(width: Space.s), ColourLegend(ctl)],
                 const SizedBox(width: Space.s),
                 TuningChip(ctl),
+                if (ctl.legato != null) ...[const SizedBox(width: Space.m), LegatoToggle(ctl)],
                 if (t != 0) ...[
                   const SizedBox(width: Space.s),
                   Tooltip(
@@ -623,6 +621,41 @@ class ColourLegend extends StatelessWidget {
 /// The active tuning, named from the board's N reply ("31-TET", "custom: fifth 696.8 ¢"), and the
 /// fine tune as a reference pitch ("A = 432.0 Hz (−32 ¢)"). The menu holds the pitch reference
 /// and, in the demo, the simulated board's tunings.
+/// Mono legato, as the board reports it (StcY legato=): the toggle presses settings key 9 over
+/// USB (StcK) and the state is read back; nothing is kept in the app. Shown only when the firmware
+/// reports the field.
+class LegatoToggle extends StatelessWidget {
+  final AppController ctl;
+  const LegatoToggle(this.ctl, {super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final f = ctl.settingsLayout[AppController.legatoKey];
+    final on = ctl.legato == true;
+    final can = ctl.legatoSwitchable;
+    return Tooltip(
+      message: '${f?.title ?? 'Mono legato'}: ${f?.detail ?? 'one internal voice, a key pressed while one is held slurs to it'}'
+          '${can ? '' : '\n${ctl.sendHint}'}',
+      waitDuration: const Duration(milliseconds: 700),
+      child: Opacity(
+        opacity: can ? 1 : 0.5,
+        child: Toggle(
+          key: const Key('legato-toggle'),
+          value: on,
+          label: 'Legato',
+          onChanged: (_) {
+            if (can) {
+              ctl.toggleLegato();
+            } else {
+              ctl.toast(ctl.sendHint, 'warn');
+            }
+          },
+        ),
+      ),
+    );
+  }
+}
+
 class TuningChip extends StatelessWidget {
   final AppController ctl;
   const TuningChip(this.ctl, {super.key});

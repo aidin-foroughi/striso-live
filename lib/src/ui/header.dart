@@ -10,6 +10,8 @@ import 'package:flutter/material.dart';
 import 'package:striso_core/striso_core.dart';
 
 import '../controller.dart';
+import '../firmware_library.dart';
+import 'build_picker.dart';
 import 'midi_picker.dart';
 import '../theme.dart';
 import 'audio.dart';
@@ -32,6 +34,7 @@ class TopBar extends StatelessWidget {
           final rightRoom = box.maxWidth / 2 - 110 - Space.gutter;
           final others =
               (ctl.connected && box.maxWidth >= 1000 ? 56 + Space.s + 32 + Space.xl : 0) +
+              (ctl.playing == Mode.virtual && !narrow ? 40 : 0) +
               150 +
               (throughLabel ? 118 : 46) +
               Space.l +
@@ -56,7 +59,7 @@ class TopBar extends StatelessWidget {
                       Text(' Live', style: ui(TypeSize.title, color: Pal.text2)),
                     ],
                     const SizedBox(width: Space.l),
-                    ModeControl(ctl),
+                    ModeControl(ctl, compact: narrow),
                     const Spacer(),
                     if (ctl.connected && box.maxWidth >= 1000) ...[CpuIndicator(ctl), const SizedBox(width: Space.xl)],
                     if (ctl.playing == Mode.virtual) InputPicker(ctl, label: throughLabel) else if (ctl.playing == Mode.striso) ThroughToggle(ctl, label: throughLabel),
@@ -281,42 +284,61 @@ class LoadSparkline extends CustomPainter {
   bool shouldRepaint(covariant LoadSparkline old) => true;
 }
 
-/// Striso | Virtual: what plays. A click on the other one ends this instrument completely and
-/// starts that one; while nothing plays neither is filled and a click starts that instrument.
+/// Striso | Virtual: what plays. Striso connects the board (a click on it while it plays does
+/// nothing). Virtual opens the build chooser, the next thing to choose; while Virtual plays the
+/// button carries the build's title and reopens the chooser; ⇄ next to it goes back to the build
+/// played before, on the same key.
 class ModeControl extends StatelessWidget {
   final AppController ctl;
-  const ModeControl(this.ctl, {super.key});
+  final bool compact;
+  const ModeControl(this.ctl, {super.key, this.compact = false});
 
   @override
   Widget build(BuildContext context) {
     final busy = ctl.saving;
+    final playing = ctl.playing;
+    final prev = ctl.previousBuild;
     return Opacity(
       opacity: busy ? 0.35 : 1,
       child: IgnorePointer(
         ignoring: busy,
-        child: Seg<Mode?>(
-          keys: const {Mode.striso: Key('mode-striso'), Mode.virtual: Key('mode-virtual')},
-          items: [
-            (
-              Mode.striso,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Btn(
               'Striso',
-              ctl.playing == Mode.striso
+              key: const Key('mode-striso'),
+              kind: BtnKind.ghost,
+              pressed: playing == Mode.striso,
+              tooltip: playing == Mode.striso
                   ? 'Your Striso over USB plays: its own sound, its voices and settings'
                   : ctl.boardPresent
                   ? 'Connect your Striso over USB (it is plugged in)'
                   : 'Your Striso over USB (none is plugged in)',
+              onPressed: () {
+                if (playing != Mode.striso) ctl.userConnect();
+              },
             ),
-            (
-              Mode.virtual,
-              'Virtual',
-              'The Striso firmware on this computer, played from MIDI controllers (your Striso too) and the on-screen board'
-                  '${ctl.virtual.buildTitle != null ? ': ${ctl.virtual.buildTitle}' : ''}',
+            Builder(
+              builder: (ctx) => Btn(
+                virtualLabel(ctl, compact: compact),
+                key: const Key('mode-virtual'),
+                kind: BtnKind.ghost,
+                pressed: playing == Mode.virtual,
+                tooltip: playing == Mode.virtual
+                    ? 'Virtual plays ${ctl.virtual.isMock ? 'the Dart mock' : (ctl.virtual.buildTitle ?? 'a build')}: pick another build'
+                    : 'Virtual: the Striso firmware on this computer, played from MIDI controllers (your Striso too) and the on-screen board. Pick the build to play.',
+                onPressed: () => showBuildChooser(ctx, ctl),
+              ),
             ),
+            if (playing == Mode.virtual && prev != null)
+              IconBtn(
+                Icons.swap_horiz,
+                key: const Key('build-swap'),
+                tooltip: 'Back to ${buildOf(prev).title}, on the same key',
+                onPressed: ctl.swapBuild,
+              ),
           ],
-          value: ctl.playing,
-          onChanged: (m) {
-            if (m != null && m != ctl.playing) ctl.setMode(m);
-          },
         ),
       ),
     );

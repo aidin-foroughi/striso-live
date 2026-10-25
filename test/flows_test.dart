@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:striso_live/main.dart';
 import 'package:striso_live/src/controller.dart';
@@ -82,8 +83,21 @@ void main() {
     expect(ctl.status, 'USB is off in this run');
     expect(ctl.banner, isNull, reason: 'no prose banner for a session failure');
 
-    // the fix plays Virtual
+    // the fix opens the build chooser: the next thing to choose; choosing plays
     await tester.tap(find.byKey(const Key('fix-playVirtual')).first);
+    await settle(tester, 400);
+    expect(find.byKey(const Key('build-mock')), findsOneWidget, reason: 'the chooser');
+    expect(find.byKey(const Key('build-install')), findsOneWidget);
+    expect(find.byKey(const Key('build-folder')), findsOneWidget);
+    // Esc leaves things as they were
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester, 400);
+    expect(find.byKey(const Key('build-mock')), findsNothing);
+    expect(ctl.state, isA<Failed>(), reason: 'nothing started');
+    // the header's Virtual opens the same chooser
+    await tester.tap(find.byKey(const Key('mode-virtual')));
+    await settle(tester, 400);
+    await tester.tap(find.byKey(const Key('build-mock')));
     await untilLive(tester, ctl);
     await settle(tester);
     expect(ctl.problem, isNull);
@@ -93,15 +107,22 @@ void main() {
     expect(ctl.connectLabel, 'Stop');
     expect(find.widgetWithText(Btn, 'Stop'), findsOneWidget);
     expect(find.byKey(const Key('demo-chip')), findsOneWidget);
-    // Virtual's left column starts with the build it runs
-    expect(find.byKey(const Key('build-menu')), findsOneWidget);
-    expect(find.text('The Dart mock'), findsOneWidget);
+    // the header names the build and reopens the chooser
+    expect(tester.widget<Btn>(find.byKey(const Key('mode-virtual'))).label, 'Virtual · Dart mock ▾');
     expect(find.byKey(const Key('build-swap')), findsNothing, reason: 'no build played before this one');
+    // mono legato: the board's field, switched on the board (key 9), read back
+    expect(ctl.legato, isFalse);
+    expect(find.byKey(const Key('legato-toggle')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('legato-toggle')));
+    for (var i = 0; i < 40 && ctl.legato != true; i++) {
+      await runFor(tester, 50);
+    }
+    expect(ctl.legato, isTrue);
+    expect(tester.widget<Toggle>(find.byKey(const Key('legato-toggle'))).value, isTrue);
     // Setup: Save names the instrument; the firmware row says what plays
     await tester.tap(find.byKey(const Key('tab-setup')));
     await settle(tester, 300);
     expect(find.text('Save to Virtual'), findsOneWidget);
-    expect(find.text('Other builds: Play, the build row.'), findsOneWidget);
     await tester.tap(find.byKey(const Key('tab-play')));
     await settle(tester, 300);
 
@@ -161,18 +182,16 @@ void main() {
     expect(list.first.current, isTrue, reason: 'the newest build is the one chosen when none was');
 
     await boot(tester, ctl);
-    await tester.tap(find.byKey(const Key('fix-playVirtual')));
-    await untilLive(tester, ctl);
-    await settle(tester);
-    await tester.tap(find.byKey(const Key('build-menu')));
+    await tester.tap(find.byKey(const Key('mode-virtual')));
     await settle(tester, 400);
     expect(find.text('Sax v1'), findsOneWidget);
+    expect(find.textContaining('Soprano, alto'), findsOneWidget, reason: 'the description');
     final item = tester.widget<PopupMenuItem<String>>(find.byKey(const Key('build-2026-10-24_audition sax v1 (56f7266)')));
     expect(item.enabled, isFalse, reason: 'cannot be chosen: it does not load');
     expect(find.text('Install a release zip…'), findsOneWidget);
     expect(find.text('Open the firmware folder'), findsOneWidget);
-    await tester.tapAt(const Offset(5, 5)); // close the menu
-    await settle(tester, 400);
+    await tester.tap(find.byKey(const Key('build-mock')));
+    await untilLive(tester, ctl);
     await finish(tester, ctl);
   });
 }

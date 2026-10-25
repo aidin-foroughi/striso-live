@@ -365,12 +365,13 @@ const Map<String, String> mockHeroReplies = {
 /// The firmware's StcX reply, as recorded from the virtual board (striso-control-firmware's
 /// virtual/tests/transcripts/settings_layout.txt). The mock (widget tests only) answers with it.
 const mockSettingsLayoutReply = [
-  'X keys 41',
+  'X keys 42',
   'X 0 switch midi - - k MPE|MPE MIDI mode|number of MPE voices, 1 to 15',
   'X 2 switch midi - - k Poly|Normal MIDI mode (all notes on one channel)|MIDI channel, 1 to 16',
   'X 4 switch midi - - k Mono|Mono (glissando) MIDI mode|MIDI channel, 1 to 16',
   'X 6 dial sens - - - Bend|Pitch bend sensitivity (sideways tilt)|0 to 4, steps of 1/4',
   'X 8 dial sens - - - Tilt|Tilt (forward/back) sensitivity|0 to 3, steps of 1/8',
+  'X 9 switch layout - - k Legato|Mono legato: one internal voice, a key pressed while one is held slurs to it, its release returns to the held one (on/off)|on/off',
   'X 11 action layout - - - Flip|Flip the layout 180 degrees (with the glissando button also held: debug mode on/off)|',
   'X 13 switch voice brass 402800 k brass|Voice: brass|step through its presets (the up/down leds show which)',
   'X 15 switch voice trumpet 003030 k tpt|Voice: trumpet|step through its presets (the up/down leds show which)',
@@ -413,6 +414,9 @@ const mockSettingsLayoutReply = [
 final SettingsLayout mockSettingsLayout = parseSettingsLayout(mockSettingsLayoutReply)!;
 
 class MockBoard implements PlayableBoard {
+  /// Mono legato, as the firmware reports it (StcY legato=) and switches it (StcK on key 9).
+  int legato = 0;
+
   final String firmware;
   final _entries = <_Entry>[];
   late int voice;
@@ -717,7 +721,7 @@ class MockBoard implements PlayableBoard {
         'voice=$voice midi=$midiMode ch=${midiMode == 'mpe' ? 2 : 1} voices=10 bend=48 tuning=$tuning '
         'fine=${(noteOffset * 100).toStringAsFixed(2)} transpose=0.000 pres=${f3(touch[0])} velo=${f3(touch[1])} '
         'tilt=${f3(touch[2])} bendsens=${f3(touch[3])} thres=${f3(touch[4])} vol=90 sustain=0.188 rate=1 '
-        'alt=${(controlsDown[3]) != 0 ? 1 : 0} porta=0 flip=0 led=00AA00 updown=0000';
+        'alt=${(controlsDown[3]) != 0 ? 1 : 0} porta=0 flip=0 led=00AA00 updown=0000 legato=$legato';
     final snap = '$body ${values.join(',')} ${keyFactors.join(',')}';
     if (snap != _stateSeen) {
       if (_stateSeen.isNotEmpty) _stateCount++;
@@ -732,6 +736,10 @@ class MockBoard implements PlayableBoard {
   bool settingsKey(int id) {
     final f = mockSettingsLayout[id];
     if (f == null || !f.switchable) return false;
+    if (id == 9) {
+      legato = 1 - legato;
+      return true;
+    }
     if (f.group == SettingsGroup.midi) {
       midiMode = const {0: 'mpe', 2: 'poly', 4: 'mono'}[id]!;
       return true;

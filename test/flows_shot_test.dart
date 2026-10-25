@@ -115,11 +115,14 @@ void main() {
     await tester.tap(find.byKey(const Key('mode-striso')));
     await save('problem');
     await tester.tap(find.byKey(const Key('fix-playVirtual')).first);
+    await run(6);
+    await save('chooser');
+    await tester.tap(find.byKey(const Key('build-mock')));
     for (var i = 0; i < 60 && (ctl.listsLoading || ctl.dot != Dot.demo); i++) {
       await run(2);
     }
     await save('virtual');
-    await tester.tap(find.byKey(const Key('build-menu')));
+    await tester.tap(find.byKey(const Key('mode-virtual')));
     await save('builds');
     await tester.tapAt(const Offset(5, 5));
     await run(4);

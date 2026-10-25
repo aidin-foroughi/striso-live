@@ -1,8 +1,7 @@
-// The firmware builds Virtual can run, as sounds to try (docs/flows.md 5): the row at the top of
-// the Play tab's left column (the build's title, its description, the ⇄ back to the build played
-// before), the build menu (titles, the commit each reports, "on your Striso", the ones that cannot
-// load greyed with the reason, Install a release zip…, Open the firmware folder), and the fixes a
-// problem offers (docs/flows.md 7), run from the banner and the start screen.
+// The firmware builds Virtual can run, as sounds to try (docs/flows.md 5): the build chooser that a
+// click on Virtual opens (titles and descriptions, the commit each reports, "on your Striso", the
+// ones that cannot load greyed with the reason, Install a release zip…, Open the firmware folder),
+// and the fixes a problem offers (docs/flows.md 7), run from the banner and the start screen.
 
 import 'dart:io';
 
@@ -15,141 +14,119 @@ import '../firmware_library.dart';
 import '../theme.dart';
 import 'audio.dart';
 
-/// The build row of the Play tab's left column (Virtual only).
-class BuildRow extends StatelessWidget {
-  final AppController ctl;
-  const BuildRow(this.ctl, {super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final title = ctl.virtual.isMock ? 'The Dart mock' : (ctl.virtual.buildTitle ?? 'No build');
-    final desc = ctl.virtual.libPath == null ? null : buildOf(ctl.virtual.libPath!).description;
-    final prev = ctl.previousBuild;
-    final prevTitle = prev == null ? null : buildOf(prev).title;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const Micro('Virtual', color: Pal.demo),
-        const SizedBox(height: Space.xs),
-        Row(
-          children: [
-            Expanded(
-              child: BuildMenu(
-                ctl,
-                child: LayoutBuilder(builder: (context, box) => SelectFace(label: title, width: box.maxWidth)),
-              ),
-            ),
-            if (prevTitle != null) ...[
-              const SizedBox(width: Space.xs),
-              IconBtn(
-                Icons.swap_horiz,
-                key: const Key('build-swap'),
-                tooltip: 'Back to $prevTitle, on the same key',
-                onPressed: ctl.saving ? null : ctl.swapBuild,
-              ),
-            ],
-          ],
+/// The build chooser (docs/flows.md 5): what a click on Virtual opens, anchored under
+/// [anchor]'s widget. Every build by its title and description, the last played one focused
+/// (Enter plays it), the one on the Striso marked, the ones that cannot load greyed with why;
+/// Install a release zip… and Open the firmware folder at the bottom. Esc leaves things as they
+/// are. Choosing plays.
+Future<void> showBuildChooser(BuildContext anchor, AppController ctl) async {
+  if (ctl.saving) return;
+  final box = anchor.findRenderObject() as RenderBox?;
+  final overlay = Overlay.of(anchor).context.findRenderObject() as RenderBox?;
+  if (box == null || overlay == null) return;
+  final rect = Rect.fromPoints(box.localToGlobal(Offset.zero, ancestor: overlay), box.localToGlobal(box.size.bottomRight(Offset.zero), ancestor: overlay));
+  final position = RelativeRect.fromRect(Rect.fromLTWH(rect.left, rect.bottom + Space.xs, rect.width, 0), Offset.zero & overlay.size);
+  final list = ctl.buildList();
+  final mock = ctl.virtual.mockOnly;
+  final current = mock ? _mock : ctl.virtual.libPath;
+  final chosen = await showMenu<String>(
+    context: anchor,
+    position: position,
+    color: Pal.bg1,
+    initialValue: list.any((b) => b.path == current && b.loadable) || (mock && current == _mock) ? current : null,
+    constraints: const BoxConstraints(minWidth: 360, maxWidth: 600, maxHeight: 640),
+    items: [
+      PopupMenuItem<String>(enabled: false, height: Sizes.row, child: Text('VIRTUAL · PLAY A BUILD', style: microStyle())),
+      if (mock)
+        PopupMenuItem<String>(
+          key: const Key('build-mock'),
+          value: _mock,
+          height: Sizes.row,
+          child: Text('The Dart mock', style: ui(TypeSize.body)),
         ),
-        if (desc != null) ...[
-          const SizedBox(height: Space.xs),
-          Tooltip(
-            message: desc,
-            waitDuration: Timing.tooltipWait,
-            child: Text(desc, key: const Key('build-description'), maxLines: 2, overflow: TextOverflow.ellipsis, style: ui(TypeSize.small, color: Pal.text3)),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-/// The build menu around [child]: choosing a build plays it.
-class BuildMenu extends StatelessWidget {
-  final AppController ctl;
-  final Widget child;
-  final String? tooltip;
-  const BuildMenu(this.ctl, {super.key, required this.child, this.tooltip});
-
-  static const _install = '\u0000install', _folder = '\u0000folder';
-
-  @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<String>(
-      key: const Key('build-menu'),
-      tooltip: tooltip ?? 'The firmware build Virtual runs: pick one to play it (the same key, its sound)',
-      color: Pal.bg1,
-      position: PopupMenuPosition.under,
-      constraints: const BoxConstraints(minWidth: 320, maxWidth: 560, maxHeight: 600),
-      enabled: !ctl.saving,
-      onSelected: (v) async {
-        if (v == _install) return installBuild(context, ctl);
-        if (v == _folder) return openFirmwareFolder(ctl);
-        await ctl.useBuild(v);
-      },
-      itemBuilder: (context) {
-        final list = ctl.buildList();
-        return [
-          PopupMenuItem<String>(enabled: false, height: Sizes.row, child: Text('BUILDS', style: microStyle())),
-          if (list.isEmpty)
-            PopupMenuItem<String>(
-              enabled: false,
-              height: Sizes.row,
-              child: Text('No builds in the firmware folder yet', key: const Key('build-none'), style: ui(TypeSize.body, color: Pal.text3)),
-            ),
-          for (final b in list)
-            PopupMenuItem<String>(
-              key: Key('build-${b.build.name}'),
-              value: b.path,
-              enabled: b.loadable && !b.current,
-              height: Sizes.row,
-              child: Row(
-                children: [
-                  SizedBox(width: 14, child: b.current ? const Pip(Pal.demo, size: 6) : null),
-                  Expanded(
-                    child: Text(
+      if (list.isEmpty && !mock)
+        PopupMenuItem<String>(
+          enabled: false,
+          height: Sizes.row,
+          child: Text('No builds in the firmware folder yet', key: const Key('build-none'), style: ui(TypeSize.body, color: Pal.text3)),
+        ),
+      for (final b in list)
+        PopupMenuItem<String>(
+          key: Key('build-${b.build.name}'),
+          value: b.path,
+          enabled: b.loadable,
+          height: b.build.description != null ? Sizes.row + 16 : Sizes.row,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              SizedBox(width: 14, child: b.current && ctl.playing == Mode.virtual ? const Pip(Pal.demo, size: 6) : null),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
                       b.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: ui(TypeSize.body, color: b.loadable ? Pal.text1 : Pal.text3, weight: b.current ? FontWeight.w500 : FontWeight.w400),
                     ),
-                  ),
-                  const SizedBox(width: Space.l),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 220),
-                    child: Text(
-                      b.reason ?? [?b.commit, if (b.onStriso) 'on your Striso'].join(' · '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.right,
-                      style: ui(TypeSize.small, color: b.onStriso && b.reason == null ? Pal.ok : Pal.text3),
-                    ),
-                  ),
-                ],
+                    if (b.build.description != null)
+                      Text(b.build.description!, maxLines: 1, overflow: TextOverflow.ellipsis, style: ui(TypeSize.small, color: Pal.text3)),
+                  ],
+                ),
               ),
-            ),
-          PopupMenuItem<String>(
-            enabled: false,
-            height: 9,
-            padding: EdgeInsets.zero,
-            child: Container(height: 1, color: Pal.hairline),
+              const SizedBox(width: Space.l),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 220),
+                child: Text(
+                  b.reason ?? [?b.commit, if (b.onStriso) 'on your Striso'].join(' · '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: ui(TypeSize.small, color: b.onStriso && b.reason == null ? Pal.ok : Pal.text3),
+                ),
+              ),
+            ],
           ),
-          PopupMenuItem<String>(
-            value: _install,
-            height: Sizes.row,
-            enabled: ctl.firmwareDir != null,
-            child: Text('Install a release zip…', style: ui(TypeSize.body, color: Pal.text2)),
-          ),
-          PopupMenuItem<String>(
-            value: _folder,
-            height: Sizes.row,
-            enabled: ctl.firmwareDir != null,
-            child: Text('Open the firmware folder', style: ui(TypeSize.body, color: Pal.text2)),
-          ),
-        ];
-      },
-      child: child,
-    );
+        ),
+      PopupMenuItem<String>(enabled: false, height: 9, padding: EdgeInsets.zero, child: Container(height: 1, color: Pal.hairline)),
+      PopupMenuItem<String>(
+        key: const Key('build-install'),
+        value: _install,
+        height: Sizes.row,
+        enabled: ctl.firmwareDir != null,
+        child: Text('Install a release zip…', style: ui(TypeSize.body, color: Pal.text2)),
+      ),
+      PopupMenuItem<String>(
+        key: const Key('build-folder'),
+        value: _folder,
+        height: Sizes.row,
+        enabled: ctl.firmwareDir != null,
+        child: Text('Open the firmware folder', style: ui(TypeSize.body, color: Pal.text2)),
+      ),
+    ],
+  );
+  if (chosen == null) return; // Esc, a click outside: as it was
+  if (!anchor.mounted) return;
+  if (chosen == _install) return installBuild(anchor, ctl);
+  if (chosen == _folder) return openFirmwareFolder(ctl);
+  if (chosen == _mock) {
+    await ctl.playVirtual();
+    return;
   }
+  await ctl.useBuild(chosen);
+}
+
+const _install = '\u0000install', _folder = '\u0000folder', _mock = '\u0000mock';
+
+/// The Virtual control's label while it plays: "Virtual · Sax v1 ▾" (a long folder name cut;
+/// [compact], a narrow window: "Virtual ▾", the title in the tooltip and the status).
+String virtualLabel(AppController ctl, {bool compact = false}) {
+  if (ctl.playing != Mode.virtual || compact) return 'Virtual ▾';
+  var t = ctl.virtual.isMock ? 'Dart mock' : (ctl.virtual.buildTitle ?? '…');
+  if (t.length > 30) t = '${t.substring(0, 29)}…';
+  return 'Virtual · $t ▾';
 }
 
 /// A file dialog for a release zip (`striso_virtual-<version>-<platform>.zip`) or a library; what
@@ -197,8 +174,8 @@ Future<void> runFix(BuildContext context, AppController ctl, Fix f) async {
       ctl.toast('Copied to the clipboard');
     case Fix.getRuntime:
       await openUrl('https://aka.ms/vs/17/release/vc_redist.x64.exe');
-    case Fix.pickBuild:
-      break; // a BuildMenu button
+    case Fix.pickBuild || Fix.playVirtual:
+      await showBuildChooser(context, ctl); // the one place a build is chosen
     default:
       await ctl.fix(f);
   }
@@ -219,19 +196,14 @@ class FixButtons extends StatelessWidget {
       children: [
         for (final (i, f) in fixes.indexed) ...[
           if (i > 0) const SizedBox(width: Space.s),
-          if (f == Fix.pickBuild)
-            BuildMenu(
-              ctl,
-              tooltip: 'Pick a build to play',
-              child: Btn(f.label, key: Key('fix-${f.name}'), kind: i == 0 && lead ? BtnKind.primary : BtnKind.ghost, onPressed: null, pressed: false),
-            )
-          else
-            Btn(
+          Builder(
+            builder: (ctx) => Btn(
               f.label,
               key: Key('fix-${f.name}'),
               kind: i == 0 && lead ? BtnKind.primary : BtnKind.ghost,
-              onPressed: ctl.saving ? null : () => runFix(context, ctl, f),
+              onPressed: ctl.saving ? null : () => runFix(ctx, ctl, f),
             ),
+          ),
         ],
       ],
     );

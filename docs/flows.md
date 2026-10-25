@@ -71,7 +71,7 @@ Striso plays
 └────────────────────────────────────────────────────────────────────────────────────────────────┘
 Virtual plays
 ┌────────────────────────────────────────────────────────────────────────────────────────────────┐
-│ ◉ Striso Live  [Striso][Virtual]      Play  Sound  Setup   ▁▂▃  4%  Input: Striso ▾  ● Virtual · Sax v1 → Headphones     [Stop]  │
+│ ◉ Striso Live  [Striso][Virtual · Sax v1 ▾] ⇄   Play  Sound  Setup   ▁▂▃  4%  Input: Striso ▾  ● Virtual · Sax v1 → Headphones  [Stop] │
 └────────────────────────────────────────────────────────────────────────────────────────────────┘
 Nothing plays
 ┌────────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -79,9 +79,12 @@ Nothing plays
 └────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- `[Striso][Virtual]`: ghost segments; the one that plays is filled (bg3). A click on the other
-  ends this instrument completely and starts that one. While nothing plays neither is filled, and
-  a click starts that instrument. The Striso segment's tooltip says whether a Striso is on USB.
+- `[Striso][Virtual ▾]`: ghost segments; the one that plays is filled (bg3). **Striso** connects
+  the board (its tooltip says whether one is on USB). **Virtual** never starts anything by itself:
+  it opens the build chooser (section 5), the next thing to choose; choosing plays. While Virtual
+  plays the segment reads `Virtual · Sax v1 ▾` (the build's title, always visible) and reopens the
+  chooser; **⇄** next to it goes back to the build played before, on the same key. Starting one
+  instrument ends the other completely.
 - The trailing button exists only when there is something to end: **Disconnect** (Striso: let go
   of the board; it stays away until you click Striso again), **Stop** (Virtual), **Cancel** (a
   connect is waiting). Otherwise there is no button: the segments are the actions.
@@ -124,38 +127,39 @@ first launch, nothing on USB                     first launch, Striso on USB
 │  It connects by itself. Or   │                 │  Connecting…                 │
 │  play Virtual: the Striso    │                 │                              │
 │  firmware on this computer.  │                 │                              │
-│        [Play Virtual]        │                 │                              │
+│       [Play Virtual…]        │                 │                              │
 └──────────────────────────────┘                 └──────────────────────────────┘
 
 plugged in later (4 s for a flash tool)          after Disconnect
 ┌──────────────────────────────┐                 ┌──────────────────────────────┐
 │     Striso found             │                 │     Disconnected             │
 │  Connecting in 4 s…          │                 │  You let go of the Striso.   │
-│  [Connect now] [Play Virtual]│                 │  [Connect Striso] [Play Virtual]│
+│  [Connect now] [Play Virtual…]│                 │  [Connect Striso] [Play Virtual…]│
 └──────────────────────────────┘                 └──────────────────────────────┘
 
 unplugged                                        Virtual stopped
 ┌──────────────────────────────┐                 ┌──────────────────────────────┐
 │     Striso unplugged         │                 │     Stopped                  │
 │  It reconnects by itself a   │                 │  Nothing plays.              │
-│  few seconds after it is back│                 │  [Connect Striso] [Play Virtual]│
-│        [Play Virtual]        │                 └──────────────────────────────┘
+│  few seconds after it is back│                 │  [Connect Striso] [Play Virtual…]│
+│       [Play Virtual…]        │                 └──────────────────────────────┘
 └──────────────────────────────┘
 ```
 
 Step by step:
 
 1. **First launch.** Striso on USB: it connects (about 0.3 s), the board lights up, done. Nothing
-   on USB: "Plug in your Striso" with `Play Virtual` as the only button. The presence poll runs.
+   on USB: "Plug in your Striso" with `Play Virtual…` as the only button; it opens the build
+   chooser (section 5), and choosing plays. The presence poll runs.
 2. **Plugged in later**: "Striso found · connecting in 4 s" (a flash tool gets the board first);
    `Connect now` skips the wait, `Cancel` in the header stops it. A busy board is retried quietly
    for 30 s, then becomes the *busy* problem (section 7).
 3. **Disconnect** (header): the console, the stream, Through PC's devices and every poller end.
    The Striso stays away, through restarts of the app, until you click `Striso` or
    `Connect Striso`. The presence poll is off: nothing watches USB.
-4. **Striso → Virtual** (header segment, or `Play Virtual`): the Striso session ends as in 3 (but
-   it does not count as a Disconnect), Virtual starts on the last build played, its output
-   opens, the chosen MIDI inputs open. The Striso's own synth keeps playing through its jack; as
+4. **Striso → Virtual** (header segment, or `Play Virtual…`): the build chooser opens; on the
+   choice the Striso session ends as in 3 (but it does not count as a Disconnect), Virtual starts
+   on that build, its output opens, the chosen MIDI inputs open. The Striso's own synth keeps playing through its jack; as
    a MIDI input it plays Virtual.
 5. **Virtual → Striso**: Virtual stops (output and MIDI closed, the board destroyed, its config
    flash kept), the Striso connects.
@@ -170,57 +174,45 @@ Step by step:
 
 ## 5. Virtual: builds as sounds to try
 
-In Virtual the Play tab's left column starts with the build. The engine row below it is the
-build's: an audition puts the new engine on a voice key (the sax on key 26, where the wind engine
-normally sits; the wind engine moves to key 16 so both are in the row).
+A click on **Virtual** (header), on **Play Virtual…** (start screen, a problem's fix) or on
+**Pick a build…** opens the build chooser, anchored under the control. It is the one place a
+build is chosen; nothing about firmware loading lives in Setup or in the Play columns.
 
 ```
-┌ Play, Virtual ────────────────────────────────────────┐
-│ VIRTUAL                                               │
-│ Sax v1                                        ▾   ⇄   │   the build; ⇄ back to the build played before
-│ Soprano, alto, tenor, baritone on the wind key        │   its description, when it has one
-│                                                       │
-│ ○ ● ○ ○ ○ ○ ○ ○                                       │   the engine row of this build
-│ Sax                                                   │
-│ saxophone                                             │
-│ soprano                                               │
-│ ● alto                                                │
-│ tenor                                                 │
-│ baritone                                              │
-│ MY SOUNDS                                             │
-│ …                                                     │
-└───────────────────────────────────────────────────────┘
-
-the build menu
-┌─────────────────────────────────────────────────────────────┐
-│ BUILDS                                                      │
-│ ● Sax v1                              56f7266              │
-│   Trumpet stage 2-3                   409b011              │
-│   Flute v1                            bee9528              │
-│   Double reed v1                      58e702f              │
-│   Clarinet v1                         7cd0c3a              │
-│   Accordion v3                        a6b2b05              │
-│   v2.2.4-308                          3e05282 · on your Striso │
-│   2026-10-24_audition trumpet (20a9151)   built for another Striso Live (API 1)   ← greyed │
-│ ─────────────────────────────────────────────────────────── │
-│   Install a release zip…                                    │
-│   Open the firmware folder                                  │
-└─────────────────────────────────────────────────────────────┘
+the build chooser (under the Virtual control)
+┌─────────────────────────────────────────────────────────────────┐
+│ VIRTUAL · PLAY A BUILD                                          │
+│ ● Sax v1                                           56f7266     │  ← plays now; focused: Enter plays it
+│   Soprano, alto, tenor, baritone on the wind key               │
+│   Trumpet stage 2-3                                409b011     │
+│   Flute v1                                         bee9528     │
+│   Double reed v1                                   58e702f     │
+│   Clarinet v1                                      7cd0c3a     │
+│   Accordion v3                                     a6b2b05     │
+│   v2.2.4-308                           3e05282 · on your Striso│
+│   2026-10-24_audition trumpet (20a9151)  built for another Striso Live (API 1) │  ← greyed
+│ ─────────────────────────────────────────────────────────────── │
+│   Install a release zip…                                        │
+│   Open the firmware folder                                      │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-- **A build is named by its `manifest.json` (`title`), else by its folder name.** Release zips
-  installed through the app carry a manifest; audition folders need one (section 8). The second
-  column is the commit from the firmware version the library reports, and `on your Striso` when it
-  is the version the connected Striso reported in this run.
-- **Choosing a build plays it.** From anywhere: Virtual (restarts on the build in about 0.3 s),
+- **One click plays** (or Enter on the focused one: the build that plays, else the last played).
+  **Esc** or a click outside leaves things exactly as they were: nothing starts, nothing stops.
+- **A build is named by its `manifest.json` (`title`, with `description` under it), else by its
+  folder name.** Release zips installed through the app carry a manifest; audition folders need
+  one (section 8). The right column is the commit from the firmware version the library reports,
+  and `on your Striso` when it is the version the connected Striso reported in this run.
+- **Choosing a build plays it** from anywhere: Virtual (restarts on the build in about 0.3 s),
   the Striso (its session ends, Virtual starts) or nothing. The build is remembered for the next
-  Virtual start.
+  Virtual start (a resume at launch is not a click: it does not open the chooser).
 - **The same key.** After the switch the app presses the voice key you were on (the firmware's
   own `K` command), so key 26 that played the wind engine now plays the sax. The firmware picks
   the preset it remembers for that key; the app reads the voice back as always. Nothing is
   emulated: it is the key press the user would make.
-- **⇄** goes back to the build played before this one (and forward again): the cross-build A/B in
-  one click, on the same key. Within one build the A/B is the engine row: click wind, click sax.
+- **⇄** (header, next to the Virtual control, once a second build has played) goes back to the
+  build played before this one, and forward again: the cross-build A/B in one click, on the same
+  key. Within one build the A/B is the engine row in Play: click wind, click sax.
 - **Builds that cannot load are listed greyed with the reason** (the app probes each library once:
   its C API and firmware version, without keeping it loaded) and cannot be chosen. The reasons:
   built for another Striso Live (API n), not a striso_virtual library, the Microsoft C++ runtime
@@ -229,21 +221,21 @@ the build menu
   manifest: platform, API, sha256), unpacks it into the firmware folder and plays it. A bare
   library file is copied in under its folder's name. **Open the firmware folder** shows where a
   build goes by hand.
-- In Striso mode the left column has no build row: the Striso's firmware is what is flashed on
-  it, shown in Setup › Firmware.
+- In the Dart mock (widget tests, `--mock-demo`) the chooser offers "The Dart mock".
 
 Setup › Firmware shows the running firmware: the Striso's version, or Virtual's build title with
-its version, with a copy button. The picker is not duplicated there.
+its version, with a copy button. Nothing is chosen there.
 
 ## 6. The audition loop
 
 1. Virtual plays the current build (or the Striso plays). The coordinator drops
    `firmware/<audition>/striso_virtual.dll` (+ `manifest.json`) into the firmware folder.
-2. Play › the build menu lists it by title. Click it. Virtual restarts on it; the same key plays
-   the new sound; the engine row shows the build's engines.
+2. Click **Virtual** in the header: the chooser lists it by title. Click it. Virtual restarts on
+   it; the same key plays the new sound; the engine row in Play shows the build's engines.
 3. Play. The hero knobs are the ones the build names (`StcH`).
-4. `⇄`: the previous build on the same key. `⇄` again: back. Within the build: the engine row.
-5. Verdict. A build that is rejected stays in the menu until its folder is deleted (Open the
+4. `⇄` (header): the previous build on the same key. `⇄` again: back. Within the build: the
+   engine row.
+5. Verdict. A build that is rejected stays in the chooser until its folder is deleted (Open the
    firmware folder).
 
 ## 7. Problems and their fixes
@@ -254,26 +246,33 @@ title, sentence and buttons. The same object renders both. The status line shows
 
 | problem | title | sentence | actions |
 |---|---|---|---|
-| no Striso (you clicked Striso) | No Striso on USB | Plug it in and switch it on; it connects by itself. | Play Virtual |
-| busy (after 30 s of quiet retries, or a direct click) | Your Striso is busy | Another program holds it: striso.py, the web app, a flash tool. Close it, then connect. | Connect Striso · Play Virtual |
+| no Striso (you clicked Striso) | No Striso on USB | Plug it in and switch it on; it connects by itself. | Play Virtual… |
+| busy (after 30 s of quiet retries, or a direct click) | Your Striso is busy | Another program holds it: striso.py, the web app, a flash tool. Close it, then connect. | Connect Striso · Play Virtual… |
 | no driver (Windows) | No driver for the Striso | Interface 2 needs the WinUSB driver. Zadig sets it: Options › List all devices, Striso (Interface 2), WinUSB. | Connect Striso |
-| Striso too old | This Striso needs a firmware update | Striso Live needs the current firmware; this Striso runs v2.2.3-…. Flash the latest release, then plug it in again. | Copy version · Play Virtual |
-| USB off (`--no-usb`) | USB is off in this run | The app was started with --no-usb. | Play Virtual |
-| connection lost (I/O error) | Connection lost | *the USB error* | Connect Striso · Play Virtual |
+| Striso too old | This Striso needs a firmware update | Striso Live needs the current firmware; this Striso runs v2.2.3-…. Flash the latest release, then plug it in again. | Copy version · Play Virtual… |
+| USB off (`--no-usb`) | USB is off in this run | The app was started with --no-usb. | Play Virtual… |
+| connection lost (I/O error) | Connection lost | *the USB error* | Connect Striso · Play Virtual… |
 | no builds | No firmware builds for Virtual | Install a release zip, or put a build in the firmware folder. | Install a release zip… · Open the firmware folder |
-| build built for another app | *Title* was built for another Striso Live | Its C API is 1; this app speaks 2. Ask for a rebuild, or pick another build. | Pick a build · Open the firmware folder |
-| not a library | *Title* is not a striso_virtual library | *the loader's word* | Pick a build · Open the firmware folder |
-| runtime missing (Windows) | Virtual needs the Microsoft C++ runtime | VCRUNTIME140.dll … missing: install the Visual C++ Redistributable 2015-2022 (x64). | Get the runtime · Pick a build |
-| quarantined (macOS) | macOS keeps *Title* in quarantine | Downloaded files are quarantined and refused by dlopen. Striso Live can clear it. | Clear quarantine · Pick a build |
-| build too old | *Title* is too old for Striso Live | It runs v…; the app needs StcX, Stcy and StcH. Pick a newer build. | Pick a build |
-| Virtual did not start / come back | Virtual did not start | *the reason* | Play Virtual · Pick a build |
+| build built for another app | *Title* was built for another Striso Live | Its C API is 1; this app speaks 2. Ask for a rebuild, or pick another build. | Pick a build… · Open the firmware folder |
+| not a library | *Title* is not a striso_virtual library | *the loader's word* | Pick a build… · Open the firmware folder |
+| runtime missing (Windows) | Virtual needs the Microsoft C++ runtime | VCRUNTIME140.dll … missing: install the Visual C++ Redistributable 2015-2022 (x64). | Get the runtime · Pick a build… |
+| quarantined (macOS) | macOS keeps *Title* in quarantine | Downloaded files are quarantined and refused by dlopen. Striso Live can clear it. | Clear quarantine · Pick a build… |
+| build too old | *Title* is too old for Striso Live | It runs v…; the app needs StcX, Stcy and StcH. Pick a newer build. | Pick a build… |
+| Virtual did not start / come back | Virtual did not start | *the reason* | Play Virtual… · Pick a build… |
 | no sound in Virtual | *(not a problem: the status line says "No sound: <why>")* | | Setup › Audio |
 | no MIDI input in Virtual | *(not a problem: the Input menu says "No MIDI inputs on this computer"; the status says "input: on-screen")* | | |
 | Through PC denied (macOS microphone) | *(Setup › Audio, as today: the permission sentence with the System Settings path)* | | |
 
-`Pick a build` opens the build menu (section 5). `Get the runtime` opens
+`Pick a build…` and `Play Virtual…` open the build chooser (section 5). `Get the runtime` opens
 https://aka.ms/vs/17/release/vc_redist.x64.exe in the browser. `Clear quarantine` runs
 `xattr -dr com.apple.quarantine` on the build's folder and tries again.
+
+## 7b. The instrument's play controls
+
+The Play toolbar carries what the board reports about how it plays: the key and scale (the
+app's), the label mode, the tuning chip (StcN) and, when the firmware reports it, **Legato**:
+mono legato as StcY's `legato=0|1`. The toggle presses settings key 9 over USB (StcK) and the
+state is read back; the app keeps nothing. Without the field there is no toggle.
 
 ## 8. Firmware-side requests
 

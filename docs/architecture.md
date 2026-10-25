@@ -29,8 +29,8 @@ own booleans. What the user sees of it, flow by flow, is `docs/flows.md`.
    the session fails with one message: "This Striso needs a firmware update to work with Striso
    Live (found <version>)". There are no fallbacks for older firmware.
 5. **The app ships no firmware.** Virtual loads a `striso_virtual` library at run time:
-   - a build from `<app data>/firmware/<build>/` (the build menu in Play, docs/flows.md 5), an
-     installed release zip, or `--virtual-lib`;
+   - a build from `<app data>/firmware/<build>/` (the build chooser the header's Virtual control
+     opens, docs/flows.md 5), an installed release zip, or `--virtual-lib`;
    - the library must report `sv_api_version() == 2` (`svApiVersion`), else the problem names
      the build and offers another; a build is probed once (its API and firmware version, without
      keeping it loaded) so the menu greys out the ones that cannot run;

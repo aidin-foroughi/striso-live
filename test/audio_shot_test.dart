@@ -69,6 +69,14 @@ void main() {
     }
 
     await tester.tap(find.byKey(const Key('fix-playVirtual')));
+
+    for (var i = 0; i < 8; i++) {
+
+      await tester.pump(const Duration(milliseconds: 50));
+
+    }
+
+    await tester.tap(find.byKey(const Key('build-mock')));
     ctl.audio.setThrough(true);
     // the demo board's StcU poll (every 2 s) and the Striso buffer (Stct)
     await run(140);

@@ -35,6 +35,10 @@ Future<void> runFor(WidgetTester tester, int ms) async {
 
 Future<void> startDemo(WidgetTester tester, AppController ctl) async {
   await tester.tap(find.byKey(const Key('fix-playVirtual')));
+  for (var i = 0; i < 8; i++) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+  await tester.tap(find.byKey(const Key('build-mock')));
   // the demo answers over timers: connect, version, voices, the four lists
   for (var i = 0; i < 60 && (ctl.listsLoading || ctl.dot != Dot.demo || ctl.params[3]!.params.isEmpty); i++) {
     await runFor(tester, 50);

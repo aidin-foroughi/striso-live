@@ -76,6 +76,14 @@ void main() {
     }
 
     await tester.tap(find.byKey(const Key('fix-playVirtual')));
+
+    for (var i = 0; i < 8; i++) {
+
+      await tester.pump(const Duration(milliseconds: 50));
+
+    }
+
+    await tester.tap(find.byKey(const Key('build-mock')));
     await run(40);
     final b = ctl.demoBoard!;
     b.autoplay = false;
