@@ -635,7 +635,7 @@ class TuningChip extends StatelessWidget {
     final tip = !ctl.connected
         ? 'The tuning the board plays (read from it once connected)'
         : supported
-        ? '${t!.naming.name}: fifth ${t.fifthCents.toStringAsFixed(1)} ¢, octave ${t.octaveCents.toStringAsFixed(1)} ¢'
+        ? '${t!.nameIn(ctl.settingsLayout).name}: fifth ${t.fifthCents.toStringAsFixed(1)} ¢, octave ${t.octaveCents.toStringAsFixed(1)} ¢'
               '${t.hasKeyOffsets ? ', per-key offsets' : ''}${ref != null ? '. Fine tune: $ref' : ''}'
               '\nPitch labels are notated relative to this reference.'
         : 'This firmware does not report its tuning (no N command): labels assume 12-TET from the layout';

@@ -1221,19 +1221,19 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
         tuningSupported = false;
         tuning = null;
       } else {
-        if (tuningSupported != true) log('tuning: ${t.naming.name}${t.referenceText != null ? ', ${t.referenceText}' : ''}');
+        if (tuningSupported != true) log('tuning: ${t.nameIn(settingsLayout).name}${t.referenceText != null ? ', ${t.referenceText}' : ''}');
         tuningSupported = true;
-        final was = tuning?.naming.name;
+        final was = tuning?.nameIn(settingsLayout).name;
         tuning = t;
         if (!t.isPlain12 && !_tuningSuggested && names != Names.pitch && names != Names.cents) {
           _tuningSuggested = true;
           toastAction(
-            'The Striso plays ${t.naming.name}${t.referenceText != null ? ' at ${t.referenceText}' : ''}',
+            'The Striso plays ${t.nameIn(settingsLayout).name}${t.referenceText != null ? ' at ${t.referenceText}' : ''}',
             'Pitch labels',
             () => setNames(Names.pitch),
           );
-        } else if (was != null && was != t.naming.name) {
-          toast('Tuning: ${t.naming.name}');
+        } else if (was != null && was != t.nameIn(settingsLayout).name) {
+          toast('Tuning: ${t.nameIn(settingsLayout).name}');
         }
       }
       notifyListeners();
@@ -1244,8 +1244,8 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   }
 
   /// The tuning's names: from the N reply, else 12-TET (the layout's assumption).
-  String get tuningName => tuning?.naming.name ?? '12-TET';
-  String get tuningShort => tuning?.naming.short ?? '12TET';
+  String get tuningName => tuning?.nameIn(settingsLayout).name ?? '12-TET';
+  String get tuningShort => tuning?.nameIn(settingsLayout).short ?? '12TET';
 
   /// The board plays something other than 12-TET (chord names stay spelled, 12-TET by letter).
   bool get nonTwelve {

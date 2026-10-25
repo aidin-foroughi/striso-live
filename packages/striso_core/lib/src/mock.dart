@@ -14,7 +14,6 @@ import 'protocol.dart';
 import 'board_state.dart';
 import 'settings_map.dart';
 import 'transport.dart';
-import 'tuning.dart';
 
 typedef _P = (String name, String group, double min, double max, int kind, double def);
 
@@ -272,6 +271,25 @@ class MockConfig {
   final List<double> touch, keys;
   const MockConfig(this.touch, this.keys);
 }
+
+/// The mock's tunings 0..8 (widget tests only), as the firmware's config.h has them: the fifth and
+/// the octave in cents, the led colour and, for just intonation, the 17 per-key offsets in cents
+/// from C (C Db C# D Eb D# E F Gb F# G Ab G# A Bb A# B). Their names are the StcX recording's.
+const List<(double, double, int, List<double>?)> _mockTunings = [
+  (700, 1200, 0x00aa00, null),
+  (696.7742, 1200, 0x005555, null),
+  (694.7368, 1200, 0x0000aa, null),
+  (701.9550, 1200, 0x555500, null),
+  (720, 1200, 0xaa0000, null),
+  (685.7142, 1200, 0x550055, null),
+  (585.2169, 1024.130, 0x55aa00, null),
+  (1024.130, 1901.955, 0x55aa00, null),
+  (696.7741, 1200, 0x00aa55, [
+    0.0, -4.39774, -6.74692, 10.3616, 5.96386, -4.09683, -0.78306, // C Db C# D Eb D# E
+    -5.18080, -1.86703, 1.86703, 5.18080, 0.78306, -1.56612, // F Gb F# G Ab G#
+    -5.96386, -10.3616, 1.08397, 4.39774, // A Bb A# B
+  ]),
+];
 
 /// The firmware's StcX reply, as recorded from the virtual board (striso-control-firmware's
 /// virtual/tests/transcripts/settings_layout.txt). The mock (widget tests only) answers with it.
@@ -599,13 +617,13 @@ class MockBoard implements PlayableBoard {
 
   /// load_tuning(n): the settings card's tunings 0..8 (the fine tune is kept, as the board does).
   void loadTuning(int n) {
-    final t = factoryTunings[n.clamp(0, factoryTunings.length - 1)];
-    tuning = t.index;
-    notegen1 = toFloat32(t.fifth / 100);
-    notegen0 = toFloat32(t.octave / 100);
-    tuningColor = t.color;
+    final (fifth, octave, color, offsets) = _mockTunings[n.clamp(0, _mockTunings.length - 1)];
+    tuning = n.clamp(0, _mockTunings.length - 1);
+    notegen1 = toFloat32(fifth / 100);
+    notegen0 = toFloat32(octave / 100);
+    tuningColor = color;
     for (var k = 0; k < 61; k++) {
-      keyOffset[k] = toFloat32(factoryKeyOffset(t, k) / 100);
+      keyOffset[k] = toFloat32((offsets == null ? 0 : offsets[(k + 7) % 17]) / 100);
     }
   }
 

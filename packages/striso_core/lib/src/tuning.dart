@@ -1,6 +1,6 @@
-// The board's tuning: the `StcN` reply (what every key actually plays), names for tuning systems
-// from their fifth and octave, the factory tunings of config.h (for the mock and as the fallback
-// names), and the quarter-tone notation of a pitch.
+// The board's tuning: the `StcN` reply (what every key actually plays), its name as the board's
+// settings layout gives it (StcX), and the quarter-tone notation of a pitch. No tuning table here:
+// the firmware has them.
 //
 // Firmware (synth_control.cpp): a key's pitch in semitones is
 //   note = start_note_offset + tuning_note_offset[key] + notegen0 * coord0 + notegen1 * coord1 + note_offset
@@ -22,67 +22,9 @@
 
 import 'dart:math' as math;
 
+import 'board_state.dart';
 import 'layout.dart';
 import 'protocol.dart';
-
-/// One tuning of the settings card (config.h `fT<n>...`): the generators in cents and, for just
-/// intonation, the 17 per-key offsets in cents from C (C Db C# D Eb D# E F Gb F# G Ab G# A Bb A# B).
-class FactoryTuning {
-  final int index;
-  final String name, short;
-  final double fifth, octave; // cents
-  final int color; // 0xRRGGBB, the led colour
-  final List<double>? keyOffsets;
-  const FactoryTuning(this.index, this.name, this.short, this.fifth, this.octave, this.color, [this.keyOffsets]);
-}
-
-/// Tunings 0..8 as the firmware ships them (config.h; 0 is hard coded to 12-TET).
-const List<FactoryTuning> factoryTunings = [
-  FactoryTuning(0, '12-TET', '12TET', 700, 1200, 0x00aa00),
-  FactoryTuning(1, '31-TET', '31TET', 696.7742, 1200, 0x005555),
-  FactoryTuning(2, '19-TET', '19TET', 694.7368, 1200, 0x0000aa),
-  FactoryTuning(3, 'Pythagorean', 'Pyth', 701.9550, 1200, 0x555500),
-  FactoryTuning(4, '5-TET', '5TET', 720, 1200, 0xaa0000),
-  FactoryTuning(5, '7-TET', '7TET', 685.7142, 1200, 0x550055),
-  FactoryTuning(6, 'Bohlen-Pierce 1', 'BP1', 585.2169, 1024.130, 0x55aa00),
-  FactoryTuning(7, 'Bohlen-Pierce 2', 'BP2', 1024.130, 1901.955, 0x55aa00),
-  // 7-limit just intonation as 31-TET plus per-key corrections (config.h fT8...)
-  FactoryTuning(8, 'Just 7-limit', 'Just', 696.7741, 1200, 0x00aa55, [
-    0.0, -4.39774, -6.74692, 10.3616, 5.96386, -4.09683, -0.78306, // C Db C# D Eb D# E
-    -5.18080, -1.86703, 1.86703, 5.18080, 0.78306, -1.56612, // F Gb F# G Ab G#
-    -5.96386, -10.3616, 1.08397, 4.39774, // A Bb A# B
-  ]),
-];
-
-/// The per-key offset (cents) of key number [n] in a factory tuning: the 17 note offsets repeat
-/// per octave, counted from C the way set_note_offsets does ((n + 7) % 17).
-double factoryKeyOffset(FactoryTuning t, int n) {
-  final o = t.keyOffsets;
-  return o == null ? 0 : o[(n + 7) % 17];
-}
-
-/// What a key plays in a factory tuning: [c0v]/[c1v] octaves and fifths from D4 (62), with the fine
-/// tune [offsetCents]; the same formula as the firmware's Button::note.
-double factoryPitch(FactoryTuning t, int n, int c0v, int c1v, {double offsetCents = 0}) =>
-    startNote + (t.octave * c0v + t.fifth * c1v + factoryKeyOffset(t, n) + offsetCents) / 100;
-
-/// Known tuning systems by fifth and octave (cents), named from the values within tolerance.
-const List<(String name, String short, double fifth, double octave)> knownTunings = [
-  ('12-TET', '12TET', 700, 1200),
-  ('31-TET', '31TET', 696.7742, 1200),
-  ('19-TET', '19TET', 694.7368, 1200),
-  ('Pythagorean', 'Pyth', 701.9550, 1200),
-  ('5-TET', '5TET', 720, 1200),
-  ('7-TET', '7TET', 685.7143, 1200),
-  ('17-TET', '17TET', 705.8824, 1200),
-  ('22-TET', '22TET', 709.0909, 1200),
-  ('41-TET', '41TET', 702.4390, 1200),
-  ('53-TET', '53TET', 701.8868, 1200),
-  ('quarter-comma meantone', '¼-comma', 696.5784, 1200),
-  ('third-comma meantone', '⅓-comma', 694.7862, 1200),
-  ('Bohlen-Pierce 1', 'BP1', 585.2169, 1024.130),
-  ('Bohlen-Pierce 2', 'BP2', 1024.130, 1901.955),
-];
 
 const double _fifthTol = 0.02, _octaveTol = 0.05; // cents
 
@@ -146,19 +88,18 @@ class TuningInfo {
     return res.fold(0.0, (m, r) => math.max(m, (r - med).abs()));
   }
 
-  /// The tuning's name from its values: a known system, the card's name for just intonation,
-  /// else "custom: fifth 696.8 ¢" (and the octave when it is not 1200).
-  ({String name, String short}) get naming {
-    if (hasKeyOffsets) {
-      if (index >= 0 && index < factoryTunings.length && factoryTunings[index].keyOffsets != null) {
-        final f = factoryTunings[index];
-        return (name: f.name, short: f.short);
+  /// The tuning's name, as the board names it: the settings card's tuning [index] by its key in
+  /// the board's settings layout (StcX: "Tuning 1: 31-TET", short "31TET"; a tuning renamed in the
+  /// configuration has that name); a changed generator (index -1) is custom, with its values.
+  ({String name, String short}) nameIn(SettingsLayout layout) {
+    if (index >= 0) {
+      for (final k in layout.keys.values) {
+        if (k.tuningIndex != index) continue;
+        final i = k.title.indexOf(': ');
+        return (name: i >= 0 ? k.title.substring(i + 2) : k.title, short: k.short);
       }
-      return (name: 'custom: per-key offsets', short: 'custom');
     }
-    for (final (name, short, f, o) in knownTunings) {
-      if ((fifthCents - f).abs() < _fifthTol && (octaveCents - o).abs() < _octaveTol) return (name: name, short: short);
-    }
+    if (hasKeyOffsets) return (name: 'custom: per-key offsets', short: 'custom');
     final oct = (octaveCents - 1200).abs() < _octaveTol ? '' : ', octave ${octaveCents.toStringAsFixed(1)} ¢';
     return (name: 'custom: fifth ${fifthCents.toStringAsFixed(1)} ¢$oct', short: 'custom');
   }
@@ -173,7 +114,7 @@ class TuningInfo {
   }
 
   @override
-  String toString() => 'TuningInfo(${naming.name}, index $index, ${notes.length} keys, offset ${offsetCents.toStringAsFixed(1)} ¢)';
+  String toString() => 'TuningInfo(index $index, ${notes.length} keys, offset ${offsetCents.toStringAsFixed(1)} ¢)';
 }
 
 final _hex8 = RegExp(r'^[0-9a-fA-F]{8}$');

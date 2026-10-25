@@ -44,7 +44,7 @@ void main() {
       expect(t.notes.length, 61);
       // D4 (button 25, key number 36) is the anchor: exactly 62
       expect(t.pitchOfButton(25), closeTo(62, 1e-5));
-      expect(t.naming.name, '31-TET');
+      expect(t.nameIn(mockSettingsLayout).name, '31-TET');
       expect(t.hasKeyOffsets, isFalse);
       expect(t.isPlain12, isFalse);
     });
@@ -60,7 +60,7 @@ void main() {
       expect(t.notes[30], 62.0);
       expect(t.notes[37], closeTo(67.032, 1e-9)); // cents
       expect(t.complete, isFalse);
-      expect(t.naming.name, 'custom: fifth 696.8 ¢');
+      expect(t.nameIn(mockSettingsLayout).name, 'custom: fifth 696.8 ¢');
     });
 
     test('partial replies: header only, keys only, noise lines, duplicates, bad values', () {
@@ -84,7 +84,7 @@ void main() {
       ])!;
       expect(noisy.index, 2);
       expect(noisy.base, 74); // transposed an octave up
-      expect(noisy.naming.name, '19-TET');
+      expect(noisy.nameIn(mockSettingsLayout).name, '19-TET');
       expect(noisy.notes, {5: closeTo(44.6, 1e-5)});
     });
 
@@ -100,7 +100,7 @@ void main() {
       await c.connect();
       final t = await c.getTuning();
       expect(t, isNotNull);
-      expect(t!.naming.name, 'Pythagorean');
+      expect(t!.nameIn(mockSettingsLayout).name, 'Pythagorean');
       expect(t.complete, isTrue);
       await c.disconnect();
       // a board that ignores N: the request times out, the parser returns null
@@ -114,12 +114,11 @@ void main() {
   });
 
   group('tuning names', () {
-    test('every factory tuning names itself from its values', () {
+    test('a tuning is named as the board names it (its StcX key), a changed generator is custom', () {
       final expected = ['12-TET', '31-TET', '19-TET', 'Pythagorean', '5-TET', '7-TET', 'Bohlen-Pierce 1', 'Bohlen-Pierce 2', 'Just 7-limit'];
       for (var n = 0; n < 9; n++) {
         final t = parseTuningReply(mockReply(n))!;
-        expect(t.naming.name, expected[n], reason: 'tuning $n');
-        expect(t.naming.short, factoryTunings[n].short);
+        expect(t.nameIn(mockSettingsLayout).name, expected[n], reason: 'tuning $n');
         expect(t.hasKeyOffsets, n == 8);
         if (n == 8) expect(t.keyOffsets[30]! * 100, closeTo(10.3616, 1e-3)); // D's just offset
         // the per-key offsets are also found from the pitches alone (a reply without them)
@@ -127,17 +126,12 @@ void main() {
         expect(parseTuningReply(bare)!.keyOffsets, isEmpty);
         expect(parseTuningReply(bare)!.hasKeyOffsets, n == 8, reason: 'tuning $n from pitches');
       }
-    });
-
-    test('just intonation with another index is custom per-key offsets; a changed fifth is custom', () {
+      expect(parseTuningReply(mockReply(1))!.nameIn(mockSettingsLayout).short, '31TET');
       final lines = mockReply(8).map((l) => l.startsWith('tuning 8 ') ? l.replaceFirst('tuning 8 ', 'tuning -1 ') : l).toList();
-      expect(parseTuningReply(lines)!.naming, (name: 'custom: per-key offsets', short: 'custom'));
-      final odd = TuningInfo(index: -1, fifth: 7.03, octave: 12, offset: 0);
-      expect(odd.naming.name, 'custom: fifth 703.0 ¢');
-      final bp = TuningInfo(index: -1, fifth: 10.2413, octave: 19.01955, offset: 0);
-      expect(bp.naming.name, 'Bohlen-Pierce 2');
-      final weird = TuningInfo(index: -1, fifth: 7, octave: 12.1, offset: 0);
-      expect(weird.naming.name, 'custom: fifth 700.0 ¢, octave 1210.0 ¢');
+      expect(parseTuningReply(lines)!.nameIn(mockSettingsLayout), (name: 'custom: per-key offsets', short: 'custom'));
+      expect(TuningInfo(index: -1, fifth: 7.03, octave: 12, offset: 0).nameIn(mockSettingsLayout).name, 'custom: fifth 703.0 ¢');
+      expect(TuningInfo(index: -1, fifth: 7, octave: 12.1, offset: 0).nameIn(mockSettingsLayout).name, 'custom: fifth 700.0 ¢, octave 1210.0 ¢');
+      expect(TuningInfo(index: 1, fifth: 6.967742, octave: 12, offset: 0).nameIn(SettingsLayout.empty).short, 'custom', reason: 'no layout, no name');
     });
 
     test('the fine tune reads as a reference pitch', () {
@@ -266,7 +260,7 @@ void main() {
       await c.connect();
       expect(await c.pressSettingsKey(36), (ok: true, id: 36)); // tuning 1
       expect(board.tuning, 1);
-      expect((await c.getTuning())!.naming.name, '31-TET');
+      expect((await c.getTuning())!.nameIn(mockSettingsLayout).name, '31-TET');
       expect(await c.pressSettingsKey(34), (ok: true, id: 34)); // back to 12-TET
       expect(board.tuning, 0);
       expect(await c.pressSettingsKey(4), (ok: true, id: 4));
