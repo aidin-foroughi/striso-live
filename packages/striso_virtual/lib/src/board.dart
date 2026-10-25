@@ -56,12 +56,21 @@ class VirtualBoard {
 
   /// Boots a board (power on, [bootMs] of virtual time). [flash]: the config area to start with
   /// (from [flash] of an earlier board), else erased (the firmware's defaults). [driveDir]: where
-  /// the bootloader's update drive appears (default: a temporary directory).
-  factory VirtualBoard({Uint8List? flash, String? driveDir, bool portKeyHeld = false, int serial = 1, int bootMs = 1000, String? libPath}) {
+  /// the bootloader's update drive appears (default: a temporary directory). [engineDir]: a
+  /// folder of engine components the firmware loads (sv_options.engine_dir), null: none.
+  factory VirtualBoard({
+    Uint8List? flash,
+    String? driveDir,
+    bool portKeyHeld = false,
+    int serial = 1,
+    int bootMs = 1000,
+    String? libPath,
+    String? engineDir,
+  }) {
     final lib = StrisoVirtualLib.load(explicit: libPath);
     final o = calloc<SvOptions>();
     Pointer<Uint8> f = nullptr;
-    Pointer<Utf8> d = nullptr;
+    Pointer<Utf8> d = nullptr, e = nullptr;
     try {
       o.ref.size = sizeOf<SvOptions>();
       if (flash != null) {
@@ -74,6 +83,10 @@ class VirtualBoard {
         d = driveDir.toNativeUtf8();
         o.ref.driveDir = d.cast();
       }
+      if (engineDir != null) {
+        e = engineDir.toNativeUtf8();
+        o.ref.engineDir = e.cast();
+      }
       o.ref.portKeyHeld = portKeyHeld ? 1 : 0;
       o.ref.serial = serial;
       o.ref.bootMs = bootMs <= 0 ? -1 : bootMs;
@@ -83,6 +96,7 @@ class VirtualBoard {
     } finally {
       if (f != nullptr) calloc.free(f);
       if (d != nullptr) calloc.free(d);
+      if (e != nullptr) calloc.free(e);
       calloc.free(o);
     }
   }

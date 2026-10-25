@@ -30,6 +30,11 @@ final class SvOptions extends Struct {
   external int serial;
   @Int32()
   external int bootMs;
+
+  /// Engine components (awva's engine ABI) to load, listed after the compiled-in engines; null:
+  /// none. A build older than the field reads only its own part of the struct (it copies `size`
+  /// bytes at most), so it is safe to pass to any.
+  external Pointer<Char> engineDir;
 }
 
 final class SvLeds extends Struct {

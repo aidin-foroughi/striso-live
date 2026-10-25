@@ -396,4 +396,54 @@ void main() {
       expect(_fnv(out).toRadixString(16).padLeft(16, '0'), want);
     });
   });
+
+  // sv_options.engine_dir: the firmware loads the engine components in it and lists them after
+  // its own engines. The components are awva's (build/sdk/components in an awva checkout), found
+  // through $STRISO_ENGINE_DIR or ../worktrees/awva-*.
+  final comp = _component('sax');
+  group('engine components (engine_dir)', skip: skip ?? (comp == null ? 'no awva sax component built' : null), () {
+    test('a component in engine_dir is listed after the compiled-in engines, and plays', () async {
+      final dir = Directory.systemTemp.createTempSync('sv-engines');
+      try {
+        File(comp!).copySync('${dir.path}${Platform.pathSeparator}${comp.split(RegExp(r'[\\/]')).last}');
+        File('${dir.path}${Platform.pathSeparator}broken.${comp.split('.').last}').writeAsStringSync('not a library');
+        final plain = VirtualBoard()..startRealtime();
+        final cp = await _connect(plain);
+        final own = await cp.listVoices();
+        await cp.disconnect();
+        plain.dispose();
+        final b = VirtualBoard(engineDir: dir.path)..startRealtime();
+        final c = await _connect(b);
+        final voices = await c.listVoices();
+        expect(voices.take(own.length).map((v) => v.name), own.map((v) => v.name), reason: 'its own engines first, as they were');
+        final added = voices.skip(own.length).toList();
+        expect(added.map((v) => v.engine).toSet(), {'sax'}, reason: 'the component, and nothing of the broken file');
+        expect(added.map((v) => v.preset), ['soprano sax', 'alto sax', 'tenor sax', 'baritone sax']);
+        final r = await c.selectVoice(added[1].index);
+        expect(r?.ok, isTrue);
+        expect((await c.listVoices()).where((v) => v.current).single.name, 'sax:alto sax');
+        await c.disconnect();
+        b.dispose();
+      } finally {
+        try {
+          dir.deleteSync(recursive: true);
+        } catch (_) {}
+      }
+    });
+  });
+}
+
+/// An awva engine component library (`<name>.dll` / `.dylib` / `.so`), if one is built.
+String? _component(String name) {
+  final ext = Platform.isWindows ? 'dll' : (Platform.isMacOS ? 'dylib' : 'so');
+  final roots = [?Platform.environment['STRISO_ENGINE_DIR']];
+  for (final w in ['awva-sax', 'awva-clarinet', 'awva-flute', 'awva-brassfam']) {
+    roots.add('../../../worktrees/$w/build/sdk/components');
+  }
+  roots.add('../../../awva/build/sdk/components');
+  for (final r in roots) {
+    final f = File('$r/$name.$ext');
+    if (f.existsSync()) return f.absolute.path;
+  }
+  return null;
 }
