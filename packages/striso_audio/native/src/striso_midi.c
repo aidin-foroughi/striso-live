@@ -103,9 +103,11 @@ typedef struct {
     uint32_t messages;
     int64_t last_us;
     sa_midi_parser parser;
+    int protocol; /* 1 bytes, 2 UMP */
 #if defined(_WIN32)
     UINT index;
     HMIDIIN h;
+    int wms; /* a Windows MIDI Services endpoint (protocol 2) */
 #elif defined(__APPLE__)
     MIDIEndpointRef src;
 #endif
@@ -113,8 +115,10 @@ typedef struct {
 
 typedef struct {
     char id[256], name[256];
+    int protocol;
 #if defined(_WIN32)
     UINT index;
+    int wms;
 #elif defined(__APPLE__)
     MIDIEndpointRef src;
 #endif
@@ -132,11 +136,14 @@ static struct {
     /* deliver lock */
     sa_midi_sink_fn sink;
     void* sink_user;
+    sa_midi_ump_sink_fn ump_sink;
+    void* ump_user;
     sa_midi_event ring[SA_MIDI_RING];
     uint32_t rw, rr, lost;
 #if defined(__APPLE__)
     MIDIClientRef client;
-    MIDIPortRef port;
+    MIDIPortRef port, port2; /* MIDI 1.0 bytes; MIDI 2.0 UMP */
+    MIDIEndpointRef test_src; /* tests: a virtual MIDI 2.0 source */
     sa_thread thread;
     CFRunLoopRef rl;
     volatile uint32_t ready, quit, changes;
@@ -197,6 +204,46 @@ static int deliver(int slot, uint32_t session, const uint8_t* bytes, int n, int6
     return total;
 }
 
+/* ---- UMP */
+
+int sa_ump_words(uint32_t w) {
+    static const int8_t size[16] = {1, 1, 1, 2, 2, 4, 1, 1, 2, 2, 2, 3, 3, 4, 4, 4};
+    return size[(w >> 28) & 0xF];
+}
+
+static void ring_push_ump(int slot, uint32_t w, int64_t t) {
+    if (M.rw - M.rr >= SA_MIDI_RING) {
+        M.lost++;
+        return;
+    }
+    sa_midi_event* e = &M.ring[M.rw % SA_MIDI_RING];
+    e->t_us = t;
+    e->device = slot;
+    e->len = 4;
+    e->bytes[0] = (uint8_t)(w >> 16);
+    e->bytes[1] = (uint8_t)(w >> 8);
+    e->bytes[2] = (uint8_t)w;
+    M.rw++;
+}
+
+int sa_midi_deliver_ump(int slot, uint32_t session, const uint32_t* words, int n, int64_t t) {
+    if (slot < 0 || slot >= SA_MIDI_MAX || n <= 0) return 0;
+    int packets = 0;
+    lk(&g_deliver);
+    mdev* d = &M.dev[slot];
+    if (d->live && d->session == session) {
+        for (int i = 0; i < n; i += sa_ump_words(words[i])) {
+            ring_push_ump(slot, words[i], t);
+            packets++;
+        }
+        d->messages += (uint32_t)packets;
+        d->last_us = t;
+        if (M.ump_sink) M.ump_sink(M.ump_user, words, n);
+    }
+    ulk(&g_deliver);
+    return packets;
+}
+
 static void set_live(mdev* d, int live) {
     lk(&g_deliver);
     if (live) {
@@ -209,6 +256,36 @@ static void set_live(mdev* d, int live) {
 
 /* ======================================================================== the system: WinMM */
 #if defined(_WIN32)
+
+#if defined(SA_NO_WMS)
+/* built without the Windows MIDI Services SDK: no MIDI 2.0 */
+int sa_wms_init(void) { return 0; }
+void sa_wms_shutdown(void) {}
+const char* sa_wms_status(void) { return "this build has no Windows MIDI Services support"; }
+void sa_wms_diagnostic(int on) { (void)on; }
+int sa_wms_enumerate(sa_wms_endpoint* out, int max) {
+    (void)out;
+    (void)max;
+    return 0;
+}
+int sa_wms_open(const char* id, int slot, uint32_t session) {
+    (void)id;
+    (void)slot;
+    (void)session;
+    return SA_ERR_NOT_FOUND;
+}
+void sa_wms_close(int slot) { (void)slot; }
+int sa_wms_test_source(char* id_out, int max) {
+    (void)id_out;
+    (void)max;
+    return SA_ERR_NOT_FOUND;
+}
+int sa_wms_test_send(const uint32_t* words, int n) {
+    (void)words;
+    (void)n;
+    return SA_ERR_NOT_FOUND;
+}
+#endif
 
 static void CALLBACK winmm_cb(HMIDIIN h, UINT msg, DWORD_PTR inst, DWORD_PTR p1, DWORD_PTR p2) {
     (void)h;
@@ -243,14 +320,36 @@ static int os_enumerate(osdev* out, int max) {
         if (dup == 1) copy_str(out[k].id, name, sizeof(out[k].id));
         else snprintf(out[k].id, sizeof(out[k].id), "%s#%d", name, dup);
         out[k].index = i;
+        out[k].protocol = 1;
+        out[k].wms = 0;
+        k++;
+    }
+    /* MIDI 2.0: Windows MIDI Services' UMP-native endpoints */
+    static sa_wms_endpoint e[SA_MIDI_MAX];
+    const int n2 = sa_wms_enumerate(e, max - k);
+    for (int i = 0; i < n2 && k < max; i++) {
+        copy_str(out[k].id, e[i].id, sizeof(out[k].id));
+        copy_str(out[k].name, e[i].name, sizeof(out[k].name));
+        out[k].protocol = 2;
+        out[k].wms = 1;
+        out[k].index = 0;
         k++;
     }
     return k;
 }
 
-static void os_take(mdev* d, const osdev* o) { d->index = o->index; }
+static void os_take(mdev* d, const osdev* o) {
+    d->index = o->index;
+    d->wms = o->wms;
+    d->protocol = o->protocol;
+}
 
 static int32_t os_open(mdev* d, int slot) {
+    if (d->wms) {
+        const int32_t r = sa_wms_open(d->id, slot, d->session);
+        d->os_error = r == SA_OK ? 0 : r;
+        return r;
+    }
     HMIDIIN h = NULL;
     MMRESULT r = midiInOpen(&h, d->index, (DWORD_PTR)winmm_cb, (DWORD_PTR)refcon(slot, d->session), CALLBACK_FUNCTION);
     d->os_error = (int32_t)r;
@@ -268,6 +367,10 @@ static int32_t os_open(mdev* d, int slot) {
 }
 
 static void os_close(mdev* d) {
+    if (d->wms) {
+        sa_wms_close((int)(d - M.dev)); /* returns once the connection is gone */
+        return;
+    }
     if (!d->h) return;
     midiInStop(d->h);
     midiInReset(d->h);
@@ -275,8 +378,11 @@ static void os_close(mdev* d) {
     d->h = NULL;
 }
 
-static int32_t os_init(void) { return SA_OK; }
-static void os_shutdown(void) {}
+static int32_t os_init(void) {
+    sa_wms_init(); /* MIDI 2.0 when Windows MIDI Services is there; WinMM either way */
+    return SA_OK;
+}
+static void os_shutdown(void) { sa_wms_shutdown(); }
 
 /* ======================================================================== the system: CoreMIDI */
 #elif defined(__APPLE__)
@@ -315,6 +421,29 @@ static void mac_read(const MIDIPacketList* pl, void* port_ref, void* conn_ref) {
 
 #pragma clang diagnostic pop
 
+/* a MIDI 2.0 source's event list: its packets' words, untouched, in one delivery (up to 256
+ * words at a time) */
+static void mac_read_ump(const MIDIEventList* el, void* conn_ref) {
+    const uintptr_t rc = (uintptr_t)conn_ref;
+    const int slot = (int)(rc & 0xFF);
+    const uint32_t session = (uint32_t)(rc >> 8);
+    uint32_t buf[256];
+    int n = 0;
+    int64_t t = 0;
+    const MIDIEventPacket* p = &el->packet[0];
+    for (UInt32 i = 0; i < el->numPackets; i++) {
+        if (!t) t = p->timeStamp ? (int64_t)sa_device_time_us((uint64_t)p->timeStamp) : now_us();
+        const int wc = (int)p->wordCount;
+        if (n + wc > (int)(sizeof(buf) / sizeof(buf[0]))) {
+            sa_midi_deliver_ump(slot, session, buf, n, t);
+            n = 0;
+        }
+        for (int j = 0; j < wc && n < (int)(sizeof(buf) / sizeof(buf[0])); j++) buf[n++] = p->words[j];
+        p = MIDIEventPacketNext(p);
+    }
+    if (n) sa_midi_deliver_ump(slot, session, buf, n, t ? t : now_us());
+}
+
 static void mac_notify(const MIDINotification* m, void* ref) {
     (void)m;
     (void)ref;
@@ -338,6 +467,10 @@ static void mac_thread(void* arg) {
     OSStatus s = MIDIClientCreate(CFSTR("Striso Live"), mac_notify, NULL, &M.client);
     if (s == noErr) s = MIDIInputPortCreate(M.client, CFSTR("Striso Live input"), mac_read, NULL, &M.port);
 #pragma clang diagnostic pop
+    if (s == noErr) {
+        s = MIDIInputPortCreateWithProtocol(M.client, CFSTR("Striso Live MIDI 2.0 input"), kMIDIProtocol_2_0, &M.port2,
+                                            ^(const MIDIEventList* el, void* conn) { mac_read_ump(el, conn); });
+    }
     M.status = s;
     CFRunLoopTimerRef keep = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent() + 1e7, 1e7, 0, 0, mac_timer, NULL);
     CFRunLoopAddTimer(rl, keep, kCFRunLoopDefaultMode);
@@ -345,6 +478,10 @@ static void mac_thread(void* arg) {
     while (s == noErr && !__atomic_load_n(&M.quit, __ATOMIC_ACQUIRE)) {
         if (CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.25, false) == kCFRunLoopRunFinished) sa_sleep_ms(50);
     }
+    if (M.test_src) MIDIEndpointDispose(M.test_src);
+    M.test_src = 0;
+    if (M.port2) MIDIPortDispose(M.port2);
+    M.port2 = 0;
     if (M.port) MIDIPortDispose(M.port);
     if (M.client) MIDIClientDispose(M.client);
     M.port = 0;
@@ -406,22 +543,28 @@ static int os_enumerate(osdev* out, int max) {
         if (!out[k].name[0]) copy_str(out[k].name, "MIDI source", sizeof(out[k].name));
         snprintf(out[k].id, sizeof(out[k].id), "%d", (int)uid);
         out[k].src = e;
+        SInt32 proto = 0;
+        out[k].protocol = MIDIObjectGetIntegerProperty(e, kMIDIPropertyProtocolID, &proto) == noErr && proto == kMIDIProtocol_2_0 ? 2 : 1;
         k++;
     }
     return k;
 }
 
-static void os_take(mdev* d, const osdev* o) { d->src = o->src; }
+static void os_take(mdev* d, const osdev* o) {
+    d->src = o->src;
+    d->protocol = o->protocol;
+}
 
 static int32_t os_open(mdev* d, int slot) {
-    OSStatus s = MIDIPortConnectSource(M.port, d->src, refcon(slot, d->session));
+    OSStatus s = MIDIPortConnectSource(d->protocol == 2 ? M.port2 : M.port, d->src, refcon(slot, d->session));
     d->os_error = (int32_t)s;
     if (s == kMIDIObjectNotFound) return SA_ERR_NOT_FOUND;
     return s == noErr ? SA_OK : SA_ERR_MIDI_OPEN;
 }
 
 static void os_close(mdev* d) {
-    if (M.port && d->src) MIDIPortDisconnectSource(M.port, d->src); /* a stale ref (unplugged) just fails */
+    const MIDIPortRef p = d->protocol == 2 ? M.port2 : M.port;
+    if (p && d->src) MIDIPortDisconnectSource(p, d->src); /* a stale ref (unplugged) just fails */
 }
 
 /* ======================================================================== no system MIDI */
@@ -432,10 +575,7 @@ static int os_enumerate(osdev* out, int max) {
     (void)max;
     return 0;
 }
-static void os_take(mdev* d, const osdev* o) {
-    (void)d;
-    (void)o;
-}
+static void os_take(mdev* d, const osdev* o) { d->protocol = o->protocol; }
 static int32_t os_open(mdev* d, int slot) {
     (void)d;
     (void)slot;
@@ -575,6 +715,8 @@ SA_API void sa_midi_shutdown(void) {
     lk(&g_deliver);
     M.sink = NULL;
     M.sink_user = NULL;
+    M.ump_sink = NULL;
+    M.ump_user = NULL;
     M.rr = M.rw;
     M.lost = 0;
     ulk(&g_deliver);
@@ -616,6 +758,7 @@ SA_API int32_t sa_midi_get(int32_t i, sa_midi_device* out) {
     out->present = d->present;
     out->is_virtual = d->is_virtual;
     out->os_error = d->os_error;
+    out->protocol = d->protocol ? d->protocol : 1;
     lk(&g_deliver);
     out->messages = d->messages;
     out->last_us = d->last_us;
@@ -707,6 +850,56 @@ SA_API void sa_midi_set_sink(sa_midi_sink_fn fn, void* user) {
     ulk(&g_deliver);
 }
 
+SA_API void sa_midi_set_ump_sink(sa_midi_ump_sink_fn fn, void* user) {
+    lk(&g_deliver);
+    M.ump_sink = fn;
+    M.ump_user = fn ? user : NULL;
+    ulk(&g_deliver);
+}
+
+/* the slot of a virtual device for an injection (made when the id is no system input) */
+static int inject_slot(const char* id, int protocol) {
+    int s = find(id);
+    if (s < 0 || (!M.dev[s].is_virtual && !M.dev[s].present && !M.dev[s].open && !M.dev[s].listed)) {
+        if (s < 0) s = alloc_slot(id);
+        if (s < 0) return -1;
+        mdev* d = &M.dev[s];
+        d->is_virtual = 1;
+        d->present = 1;
+        d->open = 1;
+        d->protocol = protocol;
+        copy_str(d->name, id, sizeof(d->name));
+        set_live(d, 1);
+        refresh_locked(); /* lists it: the generation goes up */
+    }
+    return s;
+}
+
+SA_API int32_t sa_midi_inject_ump(const char* id, const uint32_t* words, int32_t n) {
+    if (!id || !id[0] || (n > 0 && !words) || n < 0) return SA_ERR_BAD_ARG;
+    lk(&g_table);
+    const int s = inject_slot(id, 2);
+    if (s < 0) {
+        ulk(&g_table);
+        return SA_ERR_MIDI_FULL;
+    }
+    const int live = M.dev[s].open;
+    const uint32_t session = M.dev[s].session;
+    ulk(&g_table);
+    if (!live) return 0;
+    return sa_midi_deliver_ump(s, session, words, n, now_us());
+}
+
+SA_API int32_t sa_midi2_status(char* out, int32_t max) {
+    if (!out || max <= 0) return SA_ERR_BAD_ARG;
+#if defined(_WIN32)
+    copy_str(out, sa_midi_internal_inited() ? sa_wms_status() : "not started", (size_t)max);
+#else
+    out[0] = 0;
+#endif
+    return SA_OK;
+}
+
 SA_API int32_t sa_midi_inject(const char* id, const uint8_t* bytes, int32_t n) {
     if (!id || !id[0] || (n > 0 && !bytes) || n < 0) return SA_ERR_BAD_ARG;
     lk(&g_table);
@@ -721,6 +914,7 @@ SA_API int32_t sa_midi_inject(const char* id, const uint8_t* bytes, int32_t n) {
         d->is_virtual = 1;
         d->present = 1;
         d->open = 1;
+        d->protocol = 1;
         copy_str(d->name, id, sizeof(d->name));
         set_live(d, 1);
         refresh_locked(); /* lists it: the generation goes up */
@@ -776,6 +970,76 @@ SA_API int32_t sa_midi_test_sink_read(uint8_t* out, int32_t max) {
     g_tlen -= c;
     ulk(&g_test);
     return c;
+}
+
+/* ---- the UMP test sink and test source */
+
+static uint32_t g_tubuf[SA_TEST_SINK / 4];
+static int g_tulen;
+
+SA_API int32_t sa_midi_test_ump_sink(void* user, const uint32_t* words, int32_t n) {
+    (void)user;
+    lk(&g_test);
+    int c = n;
+    if (c > (int)(SA_TEST_SINK / 4) - g_tulen) c = (int)(SA_TEST_SINK / 4) - g_tulen;
+    if (c > 0) {
+        memcpy(g_tubuf + g_tulen, words, (size_t)c * 4);
+        g_tulen += c;
+    }
+    ulk(&g_test);
+    return n;
+}
+
+SA_API int32_t sa_midi_test_ump_sink_read(uint32_t* out, int32_t max) {
+    if (!out || max <= 0) return 0;
+    lk(&g_test);
+    int c = g_tulen < max ? g_tulen : max;
+    memcpy(out, g_tubuf, (size_t)c * 4);
+    memmove(g_tubuf, g_tubuf + c, (size_t)(g_tulen - c) * 4);
+    g_tulen -= c;
+    ulk(&g_test);
+    return c;
+}
+
+SA_API int32_t sa_midi_test_ump_source(char* id_out, int32_t max) {
+    if (!id_out || max <= 0) return SA_ERR_BAD_ARG;
+    if (!sa_midi_internal_inited()) return SA_ERR_NOT_INITIALISED;
+#if defined(_WIN32)
+    sa_wms_diagnostic(1);
+    return sa_wms_test_source(id_out, max);
+#elif defined(__APPLE__)
+    if (!M.test_src) {
+        OSStatus s = MIDISourceCreateWithProtocol(M.client, CFSTR("Striso Live test MIDI 2.0 source"), kMIDIProtocol_2_0, &M.test_src);
+        if (s != noErr) return SA_ERR_MIDI_SYSTEM;
+    }
+    SInt32 uid = 0;
+    if (MIDIObjectGetIntegerProperty(M.test_src, kMIDIPropertyUniqueID, &uid) != noErr) return SA_ERR_MIDI_SYSTEM;
+    snprintf(id_out, (size_t)max, "%d", (int)uid);
+    return SA_OK;
+#else
+    return SA_ERR_NOT_FOUND;
+#endif
+}
+
+SA_API int32_t sa_midi_test_ump_send(const uint32_t* words, int32_t n) {
+    if (!words || n <= 0) return SA_ERR_BAD_ARG;
+#if defined(_WIN32)
+    return sa_wms_test_send(words, n);
+#elif defined(__APPLE__)
+    if (!M.test_src) return SA_ERR_NOT_FOUND;
+    uint8_t mem[2048];
+    MIDIEventList* el = (MIDIEventList*)mem;
+    MIDIEventPacket* p = MIDIEventListInit(el, kMIDIProtocol_2_0);
+    for (int i = 0; i < n && p;) {
+        const int w = sa_ump_words(words[i]);
+        if (i + w > n) break;
+        p = MIDIEventListAdd(el, sizeof(mem), p, 0, (ByteCount)w, words + i);
+        i += w;
+    }
+    return MIDIReceivedEventList(M.test_src, el) == noErr ? SA_OK : SA_ERR_MIDI_OPEN;
+#else
+    return SA_ERR_NOT_FOUND;
+#endif
 }
 
 int sa_midi_internal_inited(void) {

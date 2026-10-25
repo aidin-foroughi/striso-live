@@ -359,6 +359,13 @@ void main() {
     expect(ctl.midi!.backend.inject('test controller', const [0xD1, 70, 0x91, 62, 90]), greaterThanOrEqualTo(0));
     await waitFor(tester, () => vb.state.controls.any((v) => v[1] > 0), ms: 4000);
     ctl.midi!.backend.inject('test controller', const [0x81, 62, 40]);
+    await waitFor(tester, () => !vb.state.controls.any((v) => v[1] > 0), ms: 4000);
+    // a MIDI 2.0 controller: its UMP words, untouched, into the firmware's MIDI 2.0 input
+    expect(ctl.midi!.backend.injectUmp('test MIDI 2.0 controller', const [0x40D10000, 0x8CCCCCCC, 0x40913E00, 0xB0000000]), 2);
+    await waitFor(tester, () => vb.state.controls.any((v) => v[1] > 0), ms: 4000);
+    await waitFor(tester, () => ctl.midi!.status('test MIDI 2.0 controller') != null, ms: 3000); // the next refresh lists it
+    expect(ctl.midi!.status('test MIDI 2.0 controller')!.midi2, isTrue, reason: 'the menu marks it MIDI 2.0');
+    ctl.midi!.backend.injectUmp('test MIDI 2.0 controller', const [0x40813E00, 0x50000000]);
     await run(tester, ctl.userDisconnect());
     expect(ctl.midi!.running, isFalse);
     await finish(tester, ctl);

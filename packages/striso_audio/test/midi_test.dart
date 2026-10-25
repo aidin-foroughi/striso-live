@@ -297,6 +297,58 @@ void main() {
       expect(m.devices().where((d) => d.id == 'dart-test'), isEmpty);
     }, skip: skip);
 
+    test('MIDI 2.0: UMP words untouched to the UMP sink; the input is MIDI 2.0; bytes stay on the byte sink', () {
+      m.init();
+      m.setSink(m.testSinkAddress, 0);
+      m.setUmpSink(m.testUmpSinkAddress, 0);
+      m.testSinkRead();
+      m.testUmpSinkRead();
+      const words = [0x40D10000, 0x8CCCCCCC, 0x40913E00, 0xB0000000, 0x00000000, 0x40813E00, 0x50000000];
+      expect(m.injectUmp('dart-ump', words), 4, reason: '4 packets');
+      expect(m.testUmpSinkRead(), words);
+      expect(m.testSinkRead(), isEmpty, reason: 'no translation to MIDI 1.0');
+      final d = m.devices().singleWhere((d) => d.id == 'dart-ump');
+      expect(d.midi2, isTrue);
+      expect(d.messages, 4);
+      final inputs = MidiInputs(m)..start();
+      expect(inputs.status('dart-ump')!.midi2, isTrue);
+      inputs.stop();
+      m.inject('dart-bytes', [0x90, 60, 100]);
+      expect(m.testUmpSinkRead(), isEmpty);
+      expect(m.testSinkRead(), [0x09, 0x90, 60, 100]);
+      m.close('dart-ump');
+      m.close('dart-bytes');
+      m.setUmpSink(0, 0);
+      m.setSink(0, 0);
+    }, skip: skip);
+
+    test('MIDI 2.0 through the system (macOS: a CoreMIDI virtual source; Windows: Windows MIDI Services\' loopback): words untouched', () {
+      m.init();
+      final id = m.testUmpSource();
+      if (id == null) {
+        markTestSkipped('no MIDI 2.0 source on this system: ${m.midi2Status()}');
+        return;
+      }
+      m.refresh();
+      final d = m.devices().singleWhere((d) => d.id == id);
+      expect(d.midi2, isTrue, reason: '$d');
+      m.setUmpSink(m.testUmpSinkAddress, 0);
+      m.testUmpSinkRead();
+      expect(m.open(id), midiOk);
+      const words = [0x40D10000, 0x8CCCCCCC, 0x40913E00, 0xB0000000, 0x40813E00, 0x50000000];
+      expect(m.testUmpSend(words), 0);
+      final got = <int>[];
+      final sw = Stopwatch()..start();
+      while (got.length < words.length && sw.elapsedMilliseconds < 2000) {
+        got.addAll(m.testUmpSinkRead());
+      }
+      // ignore: avoid_print
+      print('MIDI 2.0 through ${d.name}: ${got.length} words in ${sw.elapsedMilliseconds} ms');
+      expect(got, words);
+      m.close(id);
+      m.setUmpSink(0, 0);
+    }, skip: skip);
+
     test('the fake parser equals the native one on 20000 random bytes', () {
       m.init();
       m.setSink(m.testSinkAddress, 0);

@@ -9,7 +9,7 @@ import 'midi.dart';
 import 'native.dart' show StrisoAudioLib;
 
 /// striso_midi.h's SA_MIDI_API_VERSION this binding is written for.
-const midiApiVersion = 1;
+const midiApiVersion = 2;
 
 /// sa_midi_device (552 bytes).
 final class SaMidiDevice extends Struct {
@@ -34,7 +34,7 @@ final class SaMidiDevice extends Struct {
   @Int32()
   external int os_error;
   @Int32()
-  external int reserved;
+  external int protocol;
 }
 
 /// sa_midi_event (16 bytes).
@@ -100,6 +100,18 @@ class NativeMidiBackend implements MidiBackend {
   late final _eventsLost = lib.lookupFunction<Uint32 Function(), int Function()>('sa_midi_events_lost');
   late final _clock = lib.lookupFunction<Int64 Function(), int Function()>('sa_clock_us');
   late final _testRead = lib.lookupFunction<Int32 Function(Pointer<Uint8>, Int32), int Function(Pointer<Uint8>, int)>('sa_midi_test_sink_read');
+  late final _setUmpSink = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<Void>), void Function(Pointer<Void>, Pointer<Void>)>(
+    'sa_midi_set_ump_sink',
+  );
+  late final _injectUmp = lib.lookupFunction<Int32 Function(Pointer<Utf8>, Pointer<Uint32>, Int32), int Function(Pointer<Utf8>, Pointer<Uint32>, int)>(
+    'sa_midi_inject_ump',
+  );
+  late final _midi2Status = lib.lookupFunction<Int32 Function(Pointer<Uint8>, Int32), int Function(Pointer<Uint8>, int)>('sa_midi2_status');
+  late final _testUmpRead = lib.lookupFunction<Int32 Function(Pointer<Uint32>, Int32), int Function(Pointer<Uint32>, int)>(
+    'sa_midi_test_ump_sink_read',
+  );
+  late final _testUmpSource = lib.lookupFunction<Int32 Function(Pointer<Uint8>, Int32), int Function(Pointer<Uint8>, int)>('sa_midi_test_ump_source');
+  late final _testUmpSend = lib.lookupFunction<Int32 Function(Pointer<Uint32>, Int32), int Function(Pointer<Uint32>, int)>('sa_midi_test_ump_send');
 
   // one buffer each, for the life of the binding (the calls are synchronous)
   static const _evMax = 512;
@@ -143,6 +155,7 @@ class NativeMidiBackend implements MidiBackend {
           present: d.present != 0,
           isVirtual: d.is_virtual != 0,
           osError: d.os_error,
+          protocol: d.protocol == 2 ? 2 : 1,
         ),
       );
     }
@@ -193,6 +206,71 @@ class NativeMidiBackend implements MidiBackend {
 
   @override
   int clockUs() => _clock();
+
+  @override
+  void setUmpSink(int fnAddress, int userAddress) => _setUmpSink(Pointer<Void>.fromAddress(fnAddress), Pointer<Void>.fromAddress(userAddress));
+
+  @override
+  int injectUmp(String id, List<int> words) {
+    final w = calloc<Uint32>(words.isEmpty ? 1 : words.length);
+    try {
+      for (var i = 0; i < words.length; i++) {
+        w[i] = words[i];
+      }
+      return _withStr(id, (p) => _injectUmp(p, w, words.length));
+    } finally {
+      calloc.free(w);
+    }
+  }
+
+  @override
+  String midi2Status() {
+    final b = calloc<Uint8>(512);
+    try {
+      _midi2Status(b, 512);
+      return b.cast<Utf8>().toDartString();
+    } finally {
+      calloc.free(b);
+    }
+  }
+
+  /// The address of sa_midi_test_ump_sink (tests): records the words it gets.
+  int get testUmpSinkAddress => lib.lookup<Void>('sa_midi_test_ump_sink').address;
+
+  List<int> testUmpSinkRead() {
+    const max = 16384;
+    final b = calloc<Uint32>(max);
+    try {
+      final n = _testUmpRead(b, max);
+      return [for (var i = 0; i < n; i++) b[i]];
+    } finally {
+      calloc.free(b);
+    }
+  }
+
+  /// Tests: a MIDI 2.0 source of the system this process sends into (macOS a CoreMIDI virtual
+  /// source, Windows the Windows MIDI Services diagnostic loopback): the id of the input that
+  /// receives it, or null when the system has none.
+  String? testUmpSource() {
+    final b = calloc<Uint8>(512);
+    try {
+      return _testUmpSource(b, 512) == 0 ? b.cast<Utf8>().toDartString() : null;
+    } finally {
+      calloc.free(b);
+    }
+  }
+
+  int testUmpSend(List<int> words) {
+    final w = calloc<Uint32>(words.length);
+    try {
+      for (var i = 0; i < words.length; i++) {
+        w[i] = words[i];
+      }
+      return _testUmpSend(w, words.length);
+    } finally {
+      calloc.free(w);
+    }
+  }
 
   /// The address of sa_midi_test_sink: a sink that records what it gets (tests).
   int get testSinkAddress => lib.lookup<NativeFunction<_SinkN>>('sa_midi_test_sink').address;

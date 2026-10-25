@@ -237,6 +237,7 @@ static int midi_monitor(const char* id, double secs) {
 }
 
 int main(int argc, char** argv) {
+    setvbuf(stdout, NULL, _IONBF, 0); /* every line out at once (a crash still shows how far it got) */
     if (argc >= 2 && strcmp(argv[1], "--list") == 0) return list_devices();
     if (argc >= 2 && strcmp(argv[1], "--midi-list") == 0) return midi_list();
     if (argc >= 4 && strcmp(argv[1], "--midi-monitor") == 0) return midi_monitor(argv[2], atof(argv[3]));

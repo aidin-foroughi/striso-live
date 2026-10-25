@@ -581,7 +581,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     if (m == null) return ' · input: on-screen';
     final open = [
       for (final d in m.devices)
-        if (d.state == MidiInputState.open) d.name,
+        if (d.state == MidiInputState.open) d.midi2 ? '${d.name} (MIDI 2.0)' : d.name,
     ];
     return open.isEmpty ? ' · input: on-screen' : ' · input: ${open.join(', ')}';
   }

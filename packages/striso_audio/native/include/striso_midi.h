@@ -6,9 +6,17 @@
  * USB-MIDI event packets (striso_virtual's sv_midi_write). No mapping and no Dart on that path.
  *
  *   Windows  WinMM: midiInOpen with CALLBACK_FUNCTION; the callback runs on WinMM's thread.
- *   macOS    CoreMIDI: one client and input port, created on a thread of this library that runs a
- *            CFRunLoop (so the system's source list stays current without the caller's run loop);
- *            the read proc runs on CoreMIDI's own high-priority thread.
+ *            MIDI 2.0: Windows MIDI Services (striso_midi_wms.cpp): its UMP-native endpoints, the
+ *            service's callback thread delivering.
+ *   macOS    CoreMIDI: one client and two input ports (MIDI 1.0 bytes; MIDI 2.0 UMP, protocol 2.0),
+ *            created on a thread of this library that runs a CFRunLoop (so the system's source list
+ *            stays current without the caller's run loop); the read procs run on CoreMIDI's own
+ *            high-priority thread. A source whose protocol is MIDI 2.0 (kMIDIPropertyProtocolID) is
+ *            connected to the UMP port, every other one to the byte port.
+ *
+ * MIDI 2.0 inputs (protocol 2) deliver Universal MIDI Packets, 32-bit words, whole packets as the
+ * system gives them, untouched, to the UMP sink (striso_virtual's sv_ump_write): no translation
+ * either way. Their monitor events have len 4 (bytes: the first word's status and two data bytes).
  *   other    no system inputs (sa_midi_inject only).
  *
  * Packets: 4 bytes each, byte 0 = cable << 4 | CIN (cable 0; CIN 0x8..0xE from the status nibble),
@@ -42,7 +50,7 @@ extern "C" {
 
 /* Bumped whenever a struct or a function below changes. (Separate from SA_API_VERSION: a library
  * without MIDI has no sa_midi_api_version, and the audio binding's version check stays as it is.) */
-#define SA_MIDI_API_VERSION 1
+#define SA_MIDI_API_VERSION 2
 
 /* errors (besides SA_OK, SA_ERR_NOT_FOUND, SA_ERR_BAD_ARG, SA_ERR_NOT_INITIALISED of striso_audio.h) */
 #define SA_ERR_MIDI_IN_USE -20  /* Windows: another program has that input open (MMSYSERR_ALLOCATED) */
@@ -66,7 +74,7 @@ typedef struct sa_midi_device {
     int32_t present;     /* 1: the system lists it now (virtual: 1) */
     int32_t is_virtual;  /* 1: made by sa_midi_inject, no system port */
     int32_t os_error;    /* the system's code of the last failure (MMRESULT, OSStatus), 0 none */
-    int32_t reserved;
+    int32_t protocol;    /* 1: MIDI 1.0 bytes (to the sink), 2: MIDI 2.0 UMP (to the UMP sink) */
 } sa_midi_device;
 
 /* One channel message that went to the sink (or would have: the monitor records them with no sink
@@ -74,7 +82,7 @@ typedef struct sa_midi_device {
 typedef struct sa_midi_event {
     int64_t t_us;        /* sa_clock_us when the driver (or sa_midi_inject) delivered it */
     int32_t device;      /* the device's slot */
-    uint8_t len;         /* 2 or 3 */
+    uint8_t len;         /* 2 or 3; 4: a UMP packet (MIDI 2.0 input) */
     uint8_t bytes[3];    /* status, data (unused bytes 0) */
 } sa_midi_event;
 
@@ -127,6 +135,19 @@ SA_API void sa_midi_set_sink(sa_midi_sink_fn fn, void* user);
  * SA_ERR_BAD_ARG / SA_ERR_MIDI_FULL. Bytes to a closed system input are dropped (0). */
 SA_API int32_t sa_midi_inject(const char* id, const uint8_t* bytes, int32_t n);
 
+/* The UMP sink: called on the driver's thread with n 32-bit words of whole Universal MIDI Packets
+ * from a MIDI 2.0 input, exactly as the system delivered them. Same rules as sa_midi_set_sink (the
+ * same delivery lock). NULL: counted and monitored only. */
+typedef int32_t (*sa_midi_ump_sink_fn)(void* user, const uint32_t* words, int32_t n);
+SA_API void sa_midi_set_ump_sink(sa_midi_ump_sink_fn fn, void* user);
+/* Feeds UMP words, untouched, to the UMP sink as the MIDI 2.0 input with that id; an id that is no
+ * system input makes a virtual MIDI 2.0 device (protocol 2). Returns the packets counted, or
+ * SA_ERR_BAD_ARG / SA_ERR_MIDI_FULL. */
+SA_API int32_t sa_midi_inject_ump(const char* id, const uint32_t* words, int32_t n);
+/* Windows: what Windows MIDI Services said (empty: it is there), so the app can tell why there is
+ * no MIDI 2.0; other systems: "". */
+SA_API int32_t sa_midi2_status(char* out, int32_t max);
+
 /* Takes up to max monitor events, oldest first; returns how many. The ring keeps SA_MIDI_RING;
  * when it is full newer events are dropped (counted in sa_midi_events_lost) until it is read. */
 SA_API int32_t sa_midi_events(sa_midi_event* out, int32_t max);
@@ -137,6 +158,15 @@ SA_API uint32_t sa_midi_events_lost(void);
  * up to max recorded bytes (oldest first) and returns how many. */
 SA_API int32_t sa_midi_test_sink(void* user, const uint8_t* packets, int32_t n);
 SA_API int32_t sa_midi_test_sink_read(uint8_t* out, int32_t max);
+/* Tests, MIDI 2.0: a UMP sink that records the words it gets, and a MIDI 2.0 source of the system
+ * that this process sends into: macOS, a CoreMIDI virtual source of protocol 2.0; Windows, Windows
+ * MIDI Services' diagnostic loopback (A sends, B is listed as the input). sa_midi_test_ump_source
+ * writes the id of the input that receives it (open that) and returns SA_OK, or an error when the
+ * system has none; sa_midi_test_ump_send sends whole UMP words through it. */
+SA_API int32_t sa_midi_test_ump_sink(void* user, const uint32_t* words, int32_t n);
+SA_API int32_t sa_midi_test_ump_sink_read(uint32_t* out, int32_t max);
+SA_API int32_t sa_midi_test_ump_source(char* id_out, int32_t max);
+SA_API int32_t sa_midi_test_ump_send(const uint32_t* words, int32_t n);
 
 #ifdef __cplusplus
 }

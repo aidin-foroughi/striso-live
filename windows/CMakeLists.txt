@@ -94,6 +94,10 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/libusb/libusb-1.0.dll" "${CMAKE_CURRE
 
 # striso_audio.dll next to the exe (lib/src/native.dart in striso_audio loads it from there)
 install(FILES "$<TARGET_FILE:striso_audio>" DESTINATION "${CMAKE_INSTALL_PREFIX}" COMPONENT Runtime)
+# Windows MIDI Services' SDK (MIDI 2.0 inputs), app-local: next to the exe, where C++/WinRT finds it
+if(STRISO_MIDI2_DLL)
+  install(FILES ${STRISO_MIDI2_DLL} DESTINATION "${CMAKE_INSTALL_PREFIX}" COMPONENT Runtime)
+endif()
 
 # The Microsoft C++ runtime, app-local (Microsoft's "local deployment"), so the app and a virtual
 # Striso library (striso_virtual.dll: MSVCP140_ATOMIC_WAIT.dll, 14.28 or later) run on a PC

@@ -68,9 +68,21 @@ class InputPicker extends StatelessWidget {
                 value: d.id,
                 checked: d.chosen,
                 height: Sizes.row,
-                child: Text(
-                  '${d.name}${d.chosen && d.state != MidiInputState.open ? ' · ${d.text}' : ''}',
-                  style: ui(TypeSize.body, color: d.present ? Pal.text1 : Pal.text3),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        '${d.name}${d.chosen && d.state != MidiInputState.open ? ' · ${d.text}' : ''}',
+                        overflow: TextOverflow.ellipsis,
+                        style: ui(TypeSize.body, color: d.present ? Pal.text1 : Pal.text3),
+                      ),
+                    ),
+                    if (d.midi2) ...[
+                      const SizedBox(width: Space.s),
+                      Text('MIDI 2.0', key: Key('midi2-${d.id}'), style: microStyle(color: Pal.accent)),
+                    ],
+                  ],
                 ),
               ),
             PopupMenuItem<String>(
@@ -78,6 +90,12 @@ class InputPicker extends StatelessWidget {
               height: Sizes.row,
               child: Text('The on-screen board always plays', style: ui(TypeSize.small, color: Pal.text3)),
             ),
+            if (m.midi2Status.isNotEmpty)
+              PopupMenuItem<String>(
+                enabled: false,
+                height: Sizes.row,
+                child: Text('No MIDI 2.0 here: ${m.midi2Status}', style: ui(TypeSize.small, color: Pal.text3)),
+              ),
           ],
           child: face,
         );

@@ -59,6 +59,10 @@ class MidiDevice {
   /// The system's code of the last failure (MMRESULT, OSStatus).
   final int osError;
 
+  /// 1: MIDI 1.0 (bytes, to the sink); 2: MIDI 2.0 (Universal MIDI Packets, to the UMP sink).
+  final int protocol;
+  bool get midi2 => protocol == 2;
+
   const MidiDevice({
     required this.name,
     required this.id,
@@ -70,11 +74,12 @@ class MidiDevice {
     this.present = true,
     this.isVirtual = false,
     this.osError = 0,
+    this.protocol = 1,
   });
 
   @override
   String toString() =>
-      'MidiDevice($id "$name"${open ? ' open' : ''}${present ? '' : ' gone'}${isVirtual ? ' virtual' : ''}, error $error, $messages msgs)';
+      'MidiDevice($id "$name"${midi2 ? ' MIDI 2.0' : ''}${open ? ' open' : ''}${present ? '' : ' gone'}${isVirtual ? ' virtual' : ''}, error $error, $messages msgs)';
 }
 
 /// One channel message the sink got (sa_midi_event).
@@ -91,6 +96,9 @@ class MidiEvent {
   @override
   String toString() => 'MidiEvent($tUs, slot $device, ${bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')})';
 }
+
+/// The words of the UMP packet that starts with word [w] (by its message type).
+int umpWords(int w) => const [1, 1, 1, 2, 2, 4, 1, 1, 2, 2, 2, 3, 3, 4, 4, 4][(w >> 28) & 0xF];
 
 /// What MidiInputs needs of the native MIDI input (NativeMidiBackend) or of a fake.
 abstract class MidiBackend {
@@ -125,6 +133,16 @@ abstract class MidiBackend {
 
   /// The library's clock (`sa_clock_us`): [MidiDevice.lastUs] and [MidiEvent.tUs] are on it.
   int clockUs();
+
+  /// The UMP sink (sa_midi_set_ump_sink: striso_virtual's sv_ump_write and its board), by address,
+  /// for MIDI 2.0 inputs; 0 detaches.
+  void setUmpSink(int fnAddress, int userAddress);
+
+  /// UMP words, untouched, as the MIDI 2.0 input [id] (a test device when it is no system input).
+  int injectUmp(String id, List<int> words);
+
+  /// Why there is no MIDI 2.0 here ('' when there is, or nothing to say).
+  String midi2Status();
 }
 
 /// The native parser's rules in Dart (striso_midi.c, sa_midi_parse), for the fake: one USB-MIDI
@@ -183,7 +201,7 @@ class MidiParser {
 class _FakeDev {
   final String id;
   String name;
-  bool present = true, open = false, isVirtual = false, gone = false;
+  bool present = true, open = false, isVirtual = false, gone = false, midi2 = false;
   int error = midiOk, messages = 0, lastUs = 0;
   final int slot;
   final parser = MidiParser();
@@ -199,6 +217,7 @@ class _FakeDev {
     slot: slot,
     present: present,
     isVirtual: isVirtual,
+    protocol: midi2 ? 2 : 1,
   );
 }
 
@@ -224,6 +243,15 @@ class FakeMidiBackend implements MidiBackend {
 
   /// What the sink got, one entry per call (the packets, 4 bytes each).
   final sinkCalls = <List<int>>[];
+
+  /// What the UMP sink got (the words of each delivery), and a callback for each.
+  final umpCalls = <List<int>>[];
+  void Function(List<int> words)? onUmpSink;
+  int umpSinkFn = 0, umpSinkUser = 0;
+
+  /// MIDI 2.0 (UMP) inputs among the plugged ones (by id).
+  final midi2 = <String>{};
+  String midi2Why = '';
   void Function(List<int> packets)? onSink;
   int sinkFn = 0, sinkUser = 0;
 
@@ -334,7 +362,9 @@ class FakeMidiBackend implements MidiBackend {
   }
 
   @override
-  List<MidiDevice> devices() => [for (final id in _order) _devs[id]!.view];
+  List<MidiDevice> devices() => [
+    for (final id in _order) (_devs[id]!..midi2 = midi2.contains(id)).view,
+  ];
 
   @override
   int open(String id) {
@@ -387,6 +417,27 @@ class FakeMidiBackend implements MidiBackend {
     }
     refresh();
   }
+
+  @override
+  void setUmpSink(int fnAddress, int userAddress) {
+    umpSinkFn = fnAddress;
+    umpSinkUser = userAddress;
+  }
+
+  @override
+  int injectUmp(String id, List<int> words) {
+    midi2.add(id);
+    var packets = 0;
+    for (var i = 0; i < words.length; i += umpWords(words[i])) {
+      packets++;
+    }
+    umpCalls.add(List.of(words));
+    onUmpSink?.call(List.of(words));
+    return packets;
+  }
+
+  @override
+  String midi2Status() => midi2Why;
 
   @override
   void setSink(int fnAddress, int userAddress) {

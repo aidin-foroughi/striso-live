@@ -182,6 +182,10 @@ class StrisoVirtualLib {
   /// inputs (sa_midi_set_sink), the board as its user pointer.
   Pointer<Void> get midiSink => _l.lookup<Void>('sv_midi_write');
 
+  /// The address of sv_ump_write (the board's MIDI 2.0 input): the UMP sink for MIDI 2.0 inputs
+  /// (sa_midi_set_ump_sink), the board as its user pointer.
+  Pointer<Void> get umpSink => _l.lookup<Void>('sv_ump_write');
+
   /// The library, or throws (the candidates tried in the message). With [explicit], that file
   /// only (a candidate firmware build's striso_virtual); else the first one found, once per isolate.
   static StrisoVirtualLib load({String? explicit}) {

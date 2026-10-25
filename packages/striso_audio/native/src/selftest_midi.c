@@ -256,6 +256,82 @@ static void test_system(void) {
     if (!was) sa_midi_shutdown();
 }
 
+/* MIDI 2.0: UMP words to the UMP sink untouched, counted by packet; a byte input still to the byte
+ * sink only */
+static void test_ump(void) {
+    uint32_t got[64];
+    uint8_t gotb[64];
+    while (sa_midi_test_ump_sink_read(got, 64) > 0) {}
+    while (sa_midi_test_sink_read(gotb, 64) > 0) {}
+    sa_midi_set_ump_sink(sa_midi_test_ump_sink, NULL);
+    sa_midi_set_sink(sa_midi_test_sink, NULL);
+    /* channel pressure (2 words), a note-on (2 words), a utility NOOP (1 word), a 4-word stream message */
+    static const uint32_t w[] = {0x40D10000, 0x8CCCCCCC, 0x40913E00, 0xB0000000, 0x00000000, 0xF0000000, 0x11223344, 0x55667788, 0x99AABBCC};
+    const int k = sa_midi_inject_ump("selftest ump", w, 9);
+    const int n = sa_midi_test_ump_sink_read(got, 64);
+    const int nb = sa_midi_test_sink_read(gotb, 64);
+    char line[200];
+    snprintf(line, sizeof(line), "midi 2.0: inject: %d words untouched to the UMP sink, %d packets counted, none to the byte sink", n, k);
+    check(n == 9 && memcmp(got, w, sizeof(w)) == 0 && k == 4 && nb == 0, line);
+    sa_midi_device d;
+    int proto = 0;
+    for (int i = 0; i < sa_midi_count(); i++)
+        if (sa_midi_get(i, &d) == SA_OK && strcmp(d.id, "selftest ump") == 0) proto = d.protocol;
+    check(proto == 2, "midi 2.0: the injected device is listed as MIDI 2.0 (protocol 2)");
+    static const uint8_t b[] = {0x90, 60, 100};
+    sa_midi_inject("selftest bytes", b, 3);
+    check(sa_midi_test_ump_sink_read(got, 64) == 0 && sa_midi_test_sink_read(gotb, 64) == 4, "midi 2.0: a MIDI 1.0 input still goes to the byte sink only");
+    sa_midi_close("selftest ump");
+    sa_midi_close("selftest bytes");
+    sa_midi_set_ump_sink(NULL, NULL);
+    sa_midi_set_sink(NULL, NULL);
+}
+
+/* MIDI 2.0 through the system: a MIDI 2.0 source of the system (macOS: a CoreMIDI virtual source;
+ * Windows: Windows MIDI Services' diagnostic loopback) into an open input, the words untouched */
+static void test_ump_system(void) {
+    const int was = sa_midi_internal_inited();
+    if (sa_midi_init() != SA_OK) {
+        check(0, "midi 2.0: the system's MIDI set up");
+        return;
+    }
+    char id[256], st[256];
+    sa_midi2_status(st, sizeof(st));
+    const int32_t r = sa_midi_test_ump_source(id, sizeof(id));
+    if (r != SA_OK) {
+        say("skip  midi 2.0 through the system: no MIDI 2.0 source here (%d%s%s)\n", r, st[0] ? ": " : "", st);
+        if (!was) sa_midi_shutdown();
+        return;
+    }
+    sa_midi_refresh();
+    sa_midi_device d;
+    int proto = 0;
+    for (int i = 0; i < sa_midi_count(); i++)
+        if (sa_midi_get(i, &d) == SA_OK && strcmp(d.id, id) == 0) proto = d.protocol;
+    char line[600];
+    snprintf(line, sizeof(line), "midi 2.0 through the system: the source is listed as MIDI 2.0 (%.200s)", id);
+    check(proto == 2, line);
+    uint32_t got[64];
+    while (sa_midi_test_ump_sink_read(got, 64) > 0) {}
+    sa_midi_set_ump_sink(sa_midi_test_ump_sink, NULL);
+    const int32_t o = sa_midi_open(id);
+    snprintf(line, sizeof(line), "midi 2.0 through the system: the input opens (%d)", o);
+    check(o == SA_OK, line);
+    static const uint32_t w[] = {0x40D10000, 0x8CCCCCCC, 0x40913E00, 0xB0000000, 0x40813E00, 0x50000000};
+    const int32_t sent = sa_midi_test_ump_send(w, 6);
+    int n = 0;
+    for (int i = 0; i < 200 && n < 6; i++) {
+        sa_sleep_ms(5);
+        n += sa_midi_test_ump_sink_read(got + n, 64 - n);
+    }
+    snprintf(line, sizeof(line), "midi 2.0 through the system: sent (%d), %d words arrived untouched", sent, n);
+    check(sent == SA_OK && n == 6 && memcmp(got, w, sizeof(w)) == 0, line);
+    if (n) say("      got %08X %08X %08X %08X %08X %08X\n", got[0], got[1], n > 2 ? got[2] : 0, n > 3 ? got[3] : 0, n > 4 ? got[4] : 0, n > 5 ? got[5] : 0);
+    sa_midi_close(id);
+    sa_midi_set_ump_sink(NULL, NULL);
+    if (!was) sa_midi_shutdown();
+}
+
 void sa_selftest_midi(void (*say_fn)(const char* fmt, ...), void (*check_fn)(int ok, const char* what)) {
     say = say_fn;
     check = check_fn;
@@ -265,6 +341,8 @@ void sa_selftest_midi(void (*say_fn)(const char* fmt, ...), void (*check_fn)(int
     } else {
         test_inject();
         test_swap();
+        test_ump();
     }
     test_system();
+    if (!sa_midi_internal_has_sink()) test_ump_system();
 }

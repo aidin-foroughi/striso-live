@@ -30,6 +30,9 @@ abstract class VirtualSound {
   /// sv_midi_write and its board, as addresses for the MIDI sink.
   int get midiFn;
   int get midiUser;
+
+  /// sv_ump_write and its board, as addresses for the UMP sink (MIDI 2.0 inputs).
+  int get umpFn;
   bool get alive;
 }
 
@@ -60,6 +63,8 @@ class VirtualInstrument implements VirtualSound {
   int get midiFn => board.lib.midiSink.address;
   @override
   int get midiUser => board.handle.address;
+  @override
+  int get umpFn => board.lib.umpSink.address;
   @override
   bool get alive => !board.disposed;
 }

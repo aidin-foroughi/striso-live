@@ -44,6 +44,9 @@ class MidiInputStatus {
   /// Channel messages in the last second.
   final int activity;
 
+  /// A MIDI 2.0 input: its Universal MIDI Packets go, untouched, to the UMP sink.
+  final bool midi2;
+
   const MidiInputStatus({
     required this.id,
     required this.name,
@@ -53,6 +56,7 @@ class MidiInputStatus {
     required this.text,
     this.isVirtual = false,
     this.activity = 0,
+    this.midi2 = false,
   });
 
   @override
@@ -222,6 +226,12 @@ class MidiInputs {
   /// (returns once no call to the previous one runs).
   void setSink(int fnAddress, int userAddress) => backend.setSink(fnAddress, userAddress);
 
+  /// The native UMP sink for MIDI 2.0 inputs (striso_virtual's sv_ump_write), by address.
+  void setUmpSink(int fnAddress, int userAddress) => backend.setUmpSink(fnAddress, userAddress);
+
+  /// Why there is no MIDI 2.0 on this system ('' when there is).
+  String get midi2Status => backend.midi2Status();
+
   MidiDevice? _find(String id) {
     for (final d in _list) {
       if (d.id == id) return d;
@@ -364,6 +374,7 @@ class MidiInputs {
       state: st,
       text: text,
       activity: _activity[id] ?? 0,
+      midi2: d?.midi2 ?? false,
     );
   }
 }

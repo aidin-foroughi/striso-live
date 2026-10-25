@@ -6,6 +6,8 @@
 // The virtual board's clock never depends on the output: it renders in the output's callback
 // while the output runs, and on its own real-time thread whenever it does not (the status then
 // says "No sound: ...").
+// MIDI 1.0 inputs give their bytes to sv_midi_write, MIDI 2.0 inputs their Universal MIDI Packets
+// to sv_ump_write, both untouched, from the driver's thread.
 
 import 'dart:async';
 
@@ -74,11 +76,15 @@ class SoundRouting {
       final m = midi;
       if (m != null) {
         if (midiWanted) {
-          if (v != null) m.setSink(v.midiFn, v.midiUser);
+          if (v != null) {
+            m.setSink(v.midiFn, v.midiUser);
+            m.setUmpSink(v.umpFn, v.midiUser);
+          }
           m.start();
         } else {
           m.stop();
           m.setSink(0, 0);
+          m.setUmpSink(0, 0);
         }
       }
     }
@@ -96,6 +102,7 @@ class SoundRouting {
       if (old.alive) old.startRealtime();
       if (_midiOn) {
         midi?.setSink(0, 0);
+        midi?.setUmpSink(0, 0);
       }
     }
     _silent = null;
@@ -105,7 +112,10 @@ class SoundRouting {
     if (!audio.setSource(v.sourceFn, v.sourceUser)) {
       _silent = audio.backend == null ? 'audio is off in this run' : 'the audio engine cannot play the virtual Striso';
     }
-    if (_midiOn) midi?.setSink(v.midiFn, v.midiUser);
+    if (_midiOn) {
+      midi?.setSink(v.midiFn, v.midiUser);
+      midi?.setUmpSink(v.umpFn, v.midiUser);
+    }
     _lastFrames = v.timeFrames;
     _lastMove = _now();
     _clock = Timer.periodic(every, (_) => checkClock());
@@ -159,6 +169,7 @@ class SoundRouting {
     if (_midiOn) {
       midi?.stop();
       midi?.setSink(0, 0);
+      midi?.setUmpSink(0, 0);
       _midiOn = false;
     }
   }
