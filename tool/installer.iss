@@ -23,6 +23,8 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Files]
+; the whole Release folder: the app, its DLLs and the C++ runtime next to the exe (app-local:
+; msvcp140, msvcp140_atomic_wait, vcruntime140, vcruntime140_1; windows/CMakeLists.txt)
 Source: "..\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 
 [Icons]

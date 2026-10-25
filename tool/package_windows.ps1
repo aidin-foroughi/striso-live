@@ -7,6 +7,10 @@ $src = 'build\windows\x64\runner\Release'
 if (-not (Test-Path "$src\StrisoLive.exe")) { throw "no $src\StrisoLive.exe: run flutter build windows --release first" }
 if (-not (Test-Path "$src\libusb-1.0.dll")) { throw "libusb-1.0.dll is missing from the build" }
 if (-not (Test-Path "$src\striso_audio.dll")) { throw "striso_audio.dll is missing from the build" }
+# the C++ runtime, app-local (windows/CMakeLists.txt): the app and striso_virtual need it
+foreach ($dll in 'msvcp140.dll', 'msvcp140_atomic_wait.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') {
+  if (-not (Test-Path "$src\$dll")) { throw "$dll is missing from the build" }
+}
 New-Item -ItemType Directory -Force dist | Out-Null
 $stage = "dist\Striso Live"
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }

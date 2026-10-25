@@ -95,6 +95,21 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/libusb/libusb-1.0.dll" "${CMAKE_CURRE
 # striso_audio.dll next to the exe (lib/src/native.dart in striso_audio loads it from there)
 install(FILES "$<TARGET_FILE:striso_audio>" DESTINATION "${CMAKE_INSTALL_PREFIX}" COMPONENT Runtime)
 
+# The Microsoft C++ runtime, app-local (Microsoft's "local deployment"), so the app and a virtual
+# Striso library (striso_virtual.dll: MSVCP140_ATOMIC_WAIT.dll, 14.28 or later) run on a PC
+# without the Visual C++ Redistributable or with an older one: the four DLLs the exe, the plugins,
+# striso_audio, libusb and striso_virtual import, from this compiler's Microsoft.VC143.CRT.
+set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
+set(CMAKE_INSTALL_UCRT_LIBRARIES FALSE)
+include(InstallRequiredSystemLibraries)
+set(STRISO_CRT ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS})
+list(FILTER STRISO_CRT INCLUDE REGEX "[/\\\\](msvcp140|msvcp140_atomic_wait|vcruntime140|vcruntime140_1)\\.dll$")
+list(LENGTH STRISO_CRT STRISO_CRT_N)
+if(NOT STRISO_CRT_N EQUAL 4)
+  message(FATAL_ERROR "the C++ runtime for local deployment: found ${STRISO_CRT_N} of 4 (${STRISO_CRT}) in ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS}")
+endif()
+install(FILES ${STRISO_CRT} DESTINATION "${CMAKE_INSTALL_PREFIX}" COMPONENT Runtime)
+
 if(PLUGIN_BUNDLED_LIBRARIES)
   install(FILES "${PLUGIN_BUNDLED_LIBRARIES}"
     DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
