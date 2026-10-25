@@ -321,8 +321,19 @@ void main() {
     await run(tester, c.raw(0x4D)); // StcM: the firmware reports every MIDI message it gets
     // a controller (the library's test device: the same parser and sink as a real input)
     const bytes = [0x91, 60, 100, 0xD1, 80, 0xB1, 74, 70, 0xE1, 0x00, 0x48, 74, 71, 0xF8, 0x81, 60, 30];
+    final sw = Stopwatch()..start();
+    var firstUs = -1;
+    final seenAt = c.onStream!;
+    c.onStream = (src, id, v, n) {
+      if (src == Src.midi && firstUs < 0) firstUs = sw.elapsedMicroseconds;
+      seenAt(src, id, v, n);
+    };
     expect(ctl.midi!.backend.inject('test controller', bytes), greaterThanOrEqualTo(0));
     await waitFor(tester, () => seen.length >= 6, ms: 4000);
+    // measured: the bytes in, the firmware's monitor message back over its console (an upper bound
+    // of when the firmware had them: it includes the console stream and the transport's 2 ms poll)
+    // ignore: avoid_print
+    print('MIDI in -> the firmware\u2019s monitor back in the app: ${(firstUs / 1000).toStringAsFixed(2)} ms');
     // [channel, status nibble, data 1, data 2]: running status expanded, the clock (F8) dropped
     expect(seen, [
       [1, 0x9, 60, 100],
