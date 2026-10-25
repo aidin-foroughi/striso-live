@@ -129,6 +129,38 @@ List<String> strisoVirtualCandidates({String? explicit}) {
   return out;
 }
 
+/// Why a build's library could not be used (each kind has its own fix in the app).
+enum LoadFailureKind {
+  /// The file is not there.
+  notFound,
+
+  /// It loads but has no sv_api_version: not a striso_virtual library.
+  notLibrary,
+
+  /// Its C API is another version than this app speaks.
+  apiMismatch,
+
+  /// Windows: the Microsoft C++ runtime it links is missing.
+  runtimeMissing,
+
+  /// macOS: dlopen refused it (quarantined, unsigned).
+  quarantined,
+
+  /// dlopen failed for another reason.
+  other,
+}
+
+class LoadFailure implements Exception {
+  final LoadFailureKind kind;
+  final String path, message;
+
+  /// The C API the library reports (apiMismatch).
+  final int? api;
+  const LoadFailure(this.kind, this.path, this.message, {this.api});
+  @override
+  String toString() => message;
+}
+
 class StrisoVirtualLib {
   final DynamicLibrary _l;
   final String path;
@@ -187,30 +219,19 @@ class StrisoVirtualLib {
   Pointer<Void> get umpSink => _l.lookup<Void>('sv_ump_write');
 
   /// The library, or throws (the candidates tried in the message). With [explicit], that file
-  /// only (a candidate firmware build's striso_virtual); else the first one found, once per isolate.
+  /// only (a candidate firmware build's striso_virtual; a [LoadFailure] says what is wrong with
+  /// it); else the first one found, once per isolate.
   static StrisoVirtualLib load({String? explicit}) {
     if (explicit != null) {
       final abs = File(explicit).absolute.path;
       final have = _byPath[abs];
       if (have != null) return have;
-      if (!File(abs).existsSync()) throw StateError(loadError = 'striso_virtual not found: $abs');
-      final DynamicLibrary dl;
-      try {
-        dl = DynamicLibrary.open(abs);
-      } catch (e) {
-        throw StateError(loadError = missingRuntime() ?? '$abs could not be loaded: $e');
-      }
-      final int api;
-      try {
-        api = dl.lookupFunction<SvI32VFn, int Function()>('sv_api_version')();
-      } catch (_) {
-        dl.close();
-        throw StateError(loadError = '$abs is not a striso_virtual library (no sv_api_version)');
-      }
+      final dl = _open(abs);
+      final api = _api(dl, abs);
       final why = apiMismatch(api);
       if (why != null) {
         dl.close();
-        throw StateError(loadError = '$abs: $why');
+        throw LoadFailure(LoadFailureKind.apiMismatch, abs, loadError = why, api: api);
       }
       return _byPath[abs] = StrisoVirtualLib._(dl, abs);
     }
@@ -234,6 +255,47 @@ class StrisoVirtualLib {
     }
     loadError = 'striso_virtual not found: ${tried.join('; ')}';
     throw StateError(loadError!);
+  }
+
+  /// What a build at [path] is, without keeping it loaded: its C API and the firmware version it
+  /// reports. Throws a [LoadFailure] with the kind of trouble. A library that is loaded already
+  /// is not reopened (the system refcounts it; this handle is closed again).
+  static ({int api, String firmwareVersion}) probe(String path) {
+    final abs = File(path).absolute.path;
+    final have = _byPath[abs] ?? (_cached?.path == abs ? _cached : null);
+    if (have != null) return (api: have.apiVersion(), firmwareVersion: have.firmwareVersion);
+    final dl = _open(abs);
+    try {
+      final api = _api(dl, abs);
+      final fw = _cstr(dl.lookupFunction<SvPVFn, Pointer<Char> Function()>('sv_firmware_version')());
+      return (api: api, firmwareVersion: fw);
+    } finally {
+      dl.close();
+    }
+  }
+
+  static DynamicLibrary _open(String abs) {
+    if (!File(abs).existsSync()) throw LoadFailure(LoadFailureKind.notFound, abs, loadError = 'striso_virtual not found: $abs');
+    try {
+      return DynamicLibrary.open(abs);
+    } catch (e) {
+      final runtime = missingRuntime();
+      if (runtime != null) throw LoadFailure(LoadFailureKind.runtimeMissing, abs, loadError = runtime);
+      final text = '$e';
+      // macOS refuses a quarantined, unsigned library: "code signature ... not valid for use in
+      // process", "library load disallowed by system policy"
+      final quarantine = Platform.isMacOS && (text.contains('system policy') || text.contains('code signature'));
+      throw LoadFailure(quarantine ? LoadFailureKind.quarantined : LoadFailureKind.other, abs, loadError = '$abs could not be loaded: $e');
+    }
+  }
+
+  static int _api(DynamicLibrary dl, String abs) {
+    try {
+      return dl.lookupFunction<SvI32VFn, int Function()>('sv_api_version')();
+    } catch (_) {
+      dl.close();
+      throw LoadFailure(LoadFailureKind.notLibrary, abs, loadError = '$abs is not a striso_virtual library (no sv_api_version)');
+    }
   }
 
   /// The Windows build of striso_virtual links the Microsoft C++ runtime, MSVCP140_ATOMIC_WAIT.dll

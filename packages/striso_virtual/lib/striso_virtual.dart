@@ -8,6 +8,8 @@ library;
 export 'src/bindings.dart'
     show
         StrisoVirtualLib,
+        LoadFailure,
+        LoadFailureKind,
         svApiVersion,
         strisoVirtualCandidates,
         svUsbAttached,
