@@ -11,7 +11,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:striso_audio/striso_audio.dart';
 import 'package:striso_core/striso_core.dart';
-import 'package:striso_virtual/striso_virtual.dart' show svApiVersion;
+import 'package:striso_virtual/striso_virtual.dart' show LoadFailure, LoadFailureKind, StrisoVirtualLib, svApiVersion;
 
 import 'app_log.dart';
 import 'firmware_library.dart';
@@ -41,7 +41,67 @@ class Pulse extends ChangeNotifier {
 
 enum Dot { off, on, demo, busy }
 
-enum InviteState { idle, connecting, reconnect }
+/// A fix the user can click on a problem or the start screen (docs/flows.md 7).
+enum Fix { connectStriso, connectNow, playVirtual, pickBuild, installBuild, openFolder, copyVersion, getRuntime, clearQuarantine }
+
+extension FixLabel on Fix {
+  String get label => switch (this) {
+    Fix.connectStriso => 'Connect Striso',
+    Fix.connectNow => 'Connect now',
+    Fix.playVirtual => 'Play Virtual',
+    Fix.pickBuild => 'Pick a build',
+    Fix.installBuild => 'Install a release zip…',
+    Fix.openFolder => 'Open the firmware folder',
+    Fix.copyVersion => 'Copy version',
+    Fix.getRuntime => 'Get the runtime',
+    Fix.clearQuarantine => 'Clear quarantine',
+  };
+}
+
+/// A problem of the session: a title, the sentence that says what to do, and the fixes. The
+/// banner strip and the start screen render the same one.
+class Problem {
+  final String title, detail;
+  final List<Fix> actions;
+  const Problem(this.title, this.detail, this.actions);
+}
+
+/// The start screen over the dimmed board: a title, a sentence, the actions; [busy] is the
+/// accent line while something is under way (connecting, saving).
+class Invite {
+  final String title, body;
+  final List<Fix> actions;
+  final String? busy;
+  const Invite(this.title, this.body, this.actions, {this.busy});
+}
+
+/// A firmware build as the build menu lists it (docs/flows.md 5).
+class BuildInfo {
+  final FirmwareBuild build;
+  final bool current, onStriso;
+
+  /// The commit from the firmware version the library reports, if it was readable.
+  final String? commit;
+
+  /// Why it cannot be chosen (null: it loads).
+  final String? reason;
+  const BuildInfo(this.build, {required this.current, required this.onStriso, this.commit, this.reason});
+  bool get loadable => reason == null;
+  String get title => build.title;
+  String get path => build.path;
+}
+
+/// What a probe of a build's library said, with the file's stamp it was true for.
+class BuildProbe {
+  final int stamp;
+  final int? api;
+  final String? firmwareVersion;
+  final LoadFailure? failure;
+  const BuildProbe(this.stamp, {this.api, this.firmwareVersion, this.failure});
+}
+
+/// "2026-10-25_v2.2.4-308-g3e05282_all" or "strisoboard_v2.2.4-308-g3e05282" -> "3e05282".
+String? commitOf(String? v) => v == null ? null : RegExp(r'-g([0-9a-f]{7,})').firstMatch(v)?.group(1);
 
 /// Key labels: spelled names (with or without the octave), degrees, solfège, the pitch as the
 /// board plays it in quarter-tone notation, its cents from 12-TET, or none.
@@ -348,12 +408,14 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     final dataDir = store.path == null ? null : File(store.path!).parent.path;
     firmwareDir = dataDir == null ? null : '$dataDir${Platform.pathSeparator}firmware';
     final chosen = store.get<String>('virtualLib');
+    final libPath =
+        options.virtualLib ??
+        (chosen != null && File(chosen).existsSync() ? chosen : null) ??
+        Platform.environment['STRISO_VIRTUAL_LIB'] ??
+        findFirmwareBuilds(firmwareDir).firstOrNull?.path;
     virtual = VirtualStrisoRuntime(
-      libPath:
-          options.virtualLib ??
-          (chosen != null && File(chosen).existsSync() ? chosen : null) ??
-          Platform.environment['STRISO_VIRTUAL_LIB'] ??
-          findFirmwareBuilds(firmwareDir).firstOrNull?.path,
+      libPath: libPath,
+      title: libPath == null ? null : buildOf(libPath).title,
       mockOnly: options.mockDemo,
       flashFile: dataDir == null ? null : '$dataDir${Platform.pathSeparator}virtual${Platform.pathSeparator}flash.bin',
       log: (s) => log(s),
@@ -489,7 +551,8 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   }
 
   // ---------------------------------------------------------------------------------------------
-  // the session: state, status, connect, disconnect (the logic is in session/session.dart)
+  // the session: state, status, connect, disconnect (the logic is in session/session.dart; what
+  // the user sees of it is docs/flows.md)
 
   SessionState get state => session.state;
 
@@ -521,6 +584,10 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   bool get lost => state is Idle && (state as Idle).lost;
   bool get ledOn => connected;
 
+  /// The Striso's firmware as it reported it the last time it was connected in this run (the
+  /// build list marks the build that matches it; a too-old Striso's problem names it).
+  VersionInfo? strisoVersion;
+
   /// The status dot, from the state.
   Dot get dot => switch (state) {
     Live(mode: Mode.virtual) => Dot.demo,
@@ -530,30 +597,29 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     _ => Dot.off,
   };
 
-  /// The status text, from the state (and, while live, what the session runs).
+  /// The status in a few words, from the state (docs/flows.md 3).
   String get status {
     final s = state;
     return switch (s) {
       Idle(why: IdleWhy.unplugged) => 'Unplugged',
       Idle(why: IdleWhy.lost) => 'Connection lost',
-      Idle(why: IdleWhy.user) when session.lastPresent == true && session.usb != null => 'Disconnected: click Connect to use the Striso',
-      Idle() => 'Not connected',
-      Waiting(:final why) when why.startsWith('Board busy') => why,
-      Waiting() => 'Striso found, connecting in ${reconnectDelay.inSeconds} s',
-      Connecting(mode: Mode.virtual) => 'Starting the virtual Striso',
-      Connecting(mode: Mode.striso, :final step) => step == 'looking for the Striso' ? 'Looking for the Striso' : 'Connecting',
+      Idle(why: IdleWhy.user) => 'Disconnected',
+      Idle(why: IdleWhy.stopped) => 'Stopped',
+      Idle(why: IdleWhy.modeSwitch) => 'Switching…',
+      Idle() => boardPresent ? 'Striso found' : 'Not connected',
+      Waiting(:final why) when why.startsWith('Board busy') => 'Striso busy · trying again',
+      Waiting() => 'Striso found · connecting in ${reconnectDelay.inSeconds} s',
+      Connecting(mode: Mode.virtual) => 'Starting Virtual…',
+      Connecting(mode: Mode.striso) => 'Connecting…',
       Live(mode: Mode.striso) => listsLoading ? 'Connected · reading parameters' : 'Connected',
       Live(mode: Mode.virtual) => virtual.label,
-      Rebooting(mode: Mode.virtual, why: 'reset') => 'The virtual Striso restarts',
-      Rebooting() => 'Saving to the Striso',
-      Failed(kind: FailKind.busy, :final message) => message.startsWith('Board busy') ? message : 'Board busy',
-      Failed(kind: FailKind.needsUpdate) => 'Firmware update needed',
-      Failed(kind: FailKind.library) => 'The virtual Striso did not load',
-      Failed() => 'Not connected',
+      Rebooting(mode: Mode.virtual, why: 'reset') => 'Virtual restarts…',
+      Rebooting() => 'Saving to the Striso…',
+      Failed() => problem?.title ?? 'Not connected',
     };
   }
 
-  /// The sound line under the header: what makes the sound and where it is heard.
+  /// The sound line: what makes the sound and where it is heard.
   String get soundLine {
     final s = state;
     if (s.mode == Mode.virtual && s is! Failed) {
@@ -586,113 +652,177 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     return open.isEmpty ? ' · input: on-screen' : ' · input: ${open.join(', ')}';
   }
 
-  /// The start screen's line under the buttons (a reconnect waits, a connect runs).
-  InviteState get invite => switch (state) {
-    Waiting() => InviteState.reconnect,
-    Connecting(mode: Mode.striso) => InviteState.connecting,
-    _ => InviteState.idle,
-  };
+  // the start screen and the problems ------------------------------------------------------------
 
-  String get inviteText => switch (state) {
-    Waiting(:final why) when why.startsWith('Board busy') => 'Your Striso is busy: trying again.',
-    Waiting() => 'Your Striso is back: connecting in ${reconnectDelay.inSeconds} s.',
-    Connecting(mode: Mode.striso, :final step) => step == 'looking for the Striso' ? 'Looking for your Striso…' : 'Connecting to your Striso…',
-    _ => '',
-  };
+  /// The start screen over the dimmed board (docs/flows.md 4 and 7): null while a session is up.
+  Invite? get invite {
+    final s = state;
+    if (connected) return null;
+    final p = problem;
+    if (p != null) return Invite(p.title, p.detail, p.actions);
+    return switch (s) {
+      Idle(why: IdleWhy.user) => const Invite('Disconnected', 'You let go of the Striso.', [Fix.connectStriso, Fix.playVirtual]),
+      Idle(why: IdleWhy.stopped) => const Invite('Stopped', 'Nothing plays.', [Fix.connectStriso, Fix.playVirtual]),
+      Idle(why: IdleWhy.unplugged) => const Invite('Striso unplugged', 'It reconnects by itself a few seconds after it is back.', [Fix.playVirtual]),
+      Idle(why: IdleWhy.lost, :final note) => Invite('Connection lost', note ?? '', const [Fix.connectStriso, Fix.playVirtual]),
+      Idle(why: IdleWhy.modeSwitch) => const Invite('', '', [], busy: 'Switching…'),
+      Idle() when boardPresent => const Invite('Striso found', '', [], busy: 'Connecting…'),
+      Idle() => const Invite(
+        'Plug in your Striso',
+        'It connects by itself. Or play Virtual: the Striso firmware on this computer.',
+        [Fix.playVirtual],
+      ),
+      Waiting(:final why) when why.startsWith('Board busy') => const Invite(
+        'Your Striso is busy',
+        'Another program holds it: trying again.',
+        [Fix.playVirtual],
+        busy: 'Trying again…',
+      ),
+      Waiting() => Invite('Striso found', '', const [Fix.connectNow, Fix.playVirtual], busy: 'Connecting in ${reconnectDelay.inSeconds} s…'),
+      Connecting(mode: Mode.striso) => const Invite('', '', [], busy: 'Connecting to your Striso…'),
+      Connecting(mode: Mode.virtual) => const Invite('', '', [], busy: 'Starting Virtual…'),
+      Rebooting(mode: Mode.virtual, why: 'reset') => const Invite('', '', [], busy: 'Virtual restarts…'),
+      Rebooting() => const Invite('', '', [], busy: 'Saving to the Striso…'),
+      _ => null,
+    };
+  }
 
-  /// The Connect button: the Striso, now.
+  /// The session's problem and its fix (docs/flows.md 7), while the state is Failed; else null.
+  Problem? get problem {
+    final s = state;
+    if (s is! Failed) return null;
+    final title = virtual.buildTitle ?? 'This build';
+    switch (s.kind) {
+      case FailKind.noUsb:
+        return const Problem('USB is off in this run', 'The app was started with --no-usb.', [Fix.playVirtual]);
+      case FailKind.notFound:
+        if (s.message.startsWith('Saved')) {
+          return const Problem('The Striso did not come back', 'Saved. Plug it in again, or connect it.', [Fix.connectStriso, Fix.playVirtual]);
+        }
+        return const Problem('No Striso on USB', 'Plug it in and switch it on; it connects by itself.', [Fix.playVirtual]);
+      case FailKind.busy:
+        return const Problem(
+          'Your Striso is busy',
+          'Another program holds it: striso.py, the web app, a flash tool. Close it, then connect.',
+          [Fix.connectStriso, Fix.playVirtual],
+        );
+      case FailKind.noDriver:
+        return Problem(
+          'No driver for the Striso',
+          Platform.isWindows
+              ? 'Interface 2 needs the WinUSB driver. Zadig sets it: Options › List all devices, Striso (Interface 2), WinUSB.'
+              : s.message,
+          const [Fix.connectStriso],
+        );
+      case FailKind.needsUpdate:
+        if (s.mode == Mode.virtual) {
+          return Problem(
+            '$title is too old for Striso Live',
+            'It runs ${virtual.version ?? 'an old firmware'}; the app needs StcX, Stcy and StcH. Pick a newer build.',
+            const [Fix.pickBuild],
+          );
+        }
+        final fw = strisoVersion?.fw;
+        return Problem(
+          'This Striso needs a firmware update',
+          fw == null
+              ? 'Striso Live needs the current firmware, and this Striso did not say which it runs. Flash the latest release, then plug it in again.'
+              : 'Striso Live needs the current firmware; this Striso runs $fw. Flash the latest release, then plug it in again.',
+          [if (fw != null) Fix.copyVersion, Fix.playVirtual],
+        );
+      case FailKind.library:
+        final f = virtual.failure;
+        if (f == null) {
+          if (virtual.libPath == null && buildList().isEmpty) {
+            return const Problem('No firmware builds for Virtual', 'Install a release zip, or put a build in the firmware folder.', [
+              Fix.installBuild,
+              Fix.openFolder,
+            ]);
+          }
+          return Problem('Virtual did not start', s.message, const [Fix.playVirtual, Fix.pickBuild]);
+        }
+        return switch (f.kind) {
+          LoadFailureKind.apiMismatch => Problem(
+            '$title was built for another Striso Live',
+            'Its C API is ${f.api}; this app speaks $svApiVersion. Ask for a rebuild, or pick another build.',
+            const [Fix.pickBuild, Fix.openFolder],
+          ),
+          LoadFailureKind.notLibrary => Problem('$title is not a striso_virtual library', f.message, const [Fix.pickBuild, Fix.openFolder]),
+          LoadFailureKind.runtimeMissing => Problem('Virtual needs the Microsoft C++ runtime', f.message, const [Fix.getRuntime, Fix.pickBuild]),
+          LoadFailureKind.quarantined => Problem(
+            'macOS keeps $title in quarantine',
+            'Downloaded files are quarantined and refused. Striso Live can clear it.',
+            const [Fix.clearQuarantine, Fix.pickBuild],
+          ),
+          LoadFailureKind.notFound => Problem('$title is gone', 'Its library is no longer at ${f.path}.', const [Fix.pickBuild, Fix.openFolder]),
+          LoadFailureKind.other => Problem('Virtual did not start', f.message, const [Fix.playVirtual, Fix.pickBuild]),
+        };
+      case FailKind.other:
+        if (s.mode == Mode.virtual) return Problem('Virtual did not start', s.message, const [Fix.playVirtual, Fix.pickBuild]);
+        return Problem('Could not connect', s.message, const [Fix.connectStriso, Fix.playVirtual]);
+    }
+  }
+
+  /// A fix the controller can do itself (the UI does the ones that need a dialog or a menu).
+  Future<void> fix(Fix f) async {
+    switch (f) {
+      case Fix.connectStriso || Fix.connectNow:
+        await userConnect();
+      case Fix.playVirtual:
+        await playVirtual();
+      case Fix.clearQuarantine:
+        final p = virtual.libPath;
+        if (p == null) return;
+        if (!await clearQuarantine(File(p).parent.path)) {
+          toast('xattr could not clear the quarantine', 'warn');
+          return;
+        }
+        await useBuild(p);
+      case Fix.pickBuild || Fix.installBuild || Fix.openFolder || Fix.copyVersion || Fix.getRuntime:
+        break; // the UI's
+    }
+  }
+
+  // connect, stop, switch --------------------------------------------------------------------------
+
+  /// The Striso, now (the header's Striso segment, Connect Striso, Connect now).
   Future<void> userConnect() async {
+    if (saving) return;
     _trace('click', start: true);
     await session.connect(Mode.striso);
   }
 
-  /// The Disconnect button (or Cancel while a reconnect waits): everything ends; the Striso stays
-  /// away until Connect.
+  /// Disconnect: everything ends; the Striso stays away until it is connected by hand (also
+  /// Cancel while a connect waits).
   Future<void> userDisconnect() => session.disconnect();
 
-  /// Play without a Striso: the virtual Striso (a full teardown of a Striso session first).
-  Future<void> playVirtual() async {
-    if (saving) return;
-    await session.connect(Mode.virtual);
+  /// Stop (Virtual): everything ends; nothing plays. The Striso's standing is untouched: one
+  /// plugged in from now on connects by itself.
+  Future<void> userStop() => session.disconnect(why: IdleWhy.stopped);
+
+  /// Virtual on the build chosen (a Striso session ends first).
+  Future<bool> playVirtual() async {
+    if (saving) return false;
+    return session.connect(Mode.virtual);
   }
 
-  // the virtual Striso's firmware -----------------------------------------------------------------
-
-  /// The firmware folder in the app data: a folder per build (null in tests with a memory store).
-  late final String? firmwareDir;
-
-  /// The builds in the firmware folder, and the one in use when it is elsewhere.
-  List<FirmwareBuild> firmwareBuilds() {
-    final l = [...findFirmwareBuilds(firmwareDir)];
-    final cur = virtual.lib?.path ?? virtual.libPath;
-    if (cur != null && !l.any((b) => b.path == File(cur).absolute.path)) l.add(buildOf(cur));
-    return l;
-  }
-
-  /// The build in use (its library's path), if one is loaded.
-  String? get firmwarePath => virtual.lib?.path;
-
-  /// Plays another firmware build: Virtual is torn down (if it runs), the old library unloaded,
-  /// the new one loaded and checked, and Virtual started again on it. Remembered.
-  Future<bool> useFirmware(String path) async {
-    final wasLive = mode == Mode.virtual;
-    if (wasLive) await session.disconnect(why: IdleWhy.modeSwitch);
-    virtual.selectLibrary(path);
-    final l = virtual.lib;
-    if (l == null) {
-      final why = virtual.loadError ?? 'it did not load';
-      showBanner('That firmware build cannot run here: $why');
-      notifyListeners();
-      return false;
-    }
-    store.set('virtualLib', l.path);
-    log('virtual firmware: ${l.path} (${l.firmwareVersion})');
-    toast('Virtual firmware: ${l.firmwareVersion}');
-    notifyListeners();
-    if (wasLive) await playVirtual();
-    return true;
-  }
-
-  /// Installs a firmware build (a release zip, or a library) into the firmware folder, then plays
-  /// it (useFirmware). macOS: its quarantine cleared. False with a banner when it cannot be.
-  Future<bool> installAndUseFirmware(String source) async {
-    final dir = firmwareDir;
-    if (dir == null) {
-      showBanner('There is no firmware folder in this run.');
-      return false;
-    }
-    final String lib;
-    try {
-      lib = await installFirmware(source, dir, apiVersion: svApiVersion);
-    } on FirmwareInstallError catch (e) {
-      showBanner('That firmware build cannot be installed: $e');
-      return false;
-    } catch (e) {
-      showBanner('That firmware build cannot be installed: $e');
-      return false;
-    }
-    log('virtual firmware installed: $lib');
-    return useFirmware(lib);
-  }
-
-  /// The header's mode control.
+  /// The header's instrument control.
   Future<void> setMode(Mode m) => m == Mode.virtual ? playVirtual() : userConnect();
 
-  @Deprecated('use playVirtual')
-  Future<void> connectDemo() => playVirtual();
-
-  /// The header button: Connect, Disconnect or Cancel.
+  /// The header's trailing button: what [connectLabel] says.
   Future<void> connectButton() async {
     final s = state;
-    if (s is Live || s is Connecting || s is Waiting || s is Rebooting) return userDisconnect();
-    return userConnect();
+    if (s is Waiting) return userDisconnect();
+    if (s is Live || s is Connecting) return s.mode == Mode.virtual ? userStop() : userDisconnect();
   }
 
+  /// The trailing button's label: Cancel (a connect waits), Disconnect (the Striso), Stop
+  /// (Virtual); empty when there is nothing to end (the segments are the actions then).
   String get connectLabel {
     final s = state;
     if (s is Waiting) return 'Cancel';
-    if (s is Live || s is Connecting || s is Rebooting) return 'Disconnect';
-    return 'Connect';
+    if (s is Live || s is Connecting) return s.mode == Mode.virtual ? 'Stop' : 'Disconnect';
+    return '';
   }
 
   /// Ends the session (tests, the window closing).
@@ -707,6 +837,141 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   void _route() {
     if (_disposed) return;
     routing.apply(state, virtual.sound);
+  }
+
+  // the firmware builds Virtual can run (docs/flows.md 5) --------------------------------------------
+
+  /// The firmware folder in the app data: a folder per build (null in tests with a memory store).
+  late final String? firmwareDir;
+
+  /// The build played before the current one, for the ⇄ swap (this run only), and the one that
+  /// plays (or played last): a build that did not load counts for neither.
+  String? previousBuild, _playedBuild;
+
+  final _probes = <String, BuildProbe>{};
+
+  /// The builds in the firmware folder (and the one in use when it is elsewhere), as the menu
+  /// shows them: title, the commit it reports, whether it can load and why not. Each library is
+  /// probed once (its C API and firmware version) and not kept loaded.
+  List<BuildInfo> buildList() {
+    final builds = [...findFirmwareBuilds(firmwareDir)];
+    final cur = virtual.libPath;
+    if (cur != null && !builds.any((b) => b.path == File(cur).absolute.path)) builds.add(buildOf(cur));
+    final board = commitOf(strisoVersion?.fw);
+    final out = <BuildInfo>[];
+    for (final b in builds) {
+      final current = b.path == cur;
+      final BuildProbe probe;
+      if (current && virtual.lib != null) {
+        probe = BuildProbe(0, api: svApiVersion, firmwareVersion: virtual.version);
+      } else if (current && virtual.failure != null) {
+        probe = BuildProbe(0, api: virtual.failure!.api, failure: virtual.failure);
+      } else {
+        probe = _probe(b.path);
+      }
+      final f = probe.failure;
+      final commit = commitOf(probe.firmwareVersion);
+      out.add(
+        BuildInfo(
+          b,
+          current: current,
+          commit: commit,
+          onStriso: commit != null && commit == board,
+          reason: f == null
+              ? null
+              : switch (f.kind) {
+                  LoadFailureKind.apiMismatch => 'built for another Striso Live (API ${f.api})',
+                  LoadFailureKind.notLibrary => 'not a striso_virtual library',
+                  LoadFailureKind.runtimeMissing => 'needs the Microsoft C++ runtime',
+                  LoadFailureKind.quarantined => 'kept in quarantine by macOS',
+                  LoadFailureKind.notFound => 'its library is gone',
+                  LoadFailureKind.other => 'does not load',
+                },
+        ),
+      );
+    }
+    return out;
+  }
+
+  BuildProbe _probe(String path) {
+    int stamp;
+    try {
+      final st = File(path).statSync();
+      stamp = st.modified.millisecondsSinceEpoch ^ st.size;
+    } catch (_) {
+      stamp = -1;
+    }
+    final have = _probes[path];
+    if (have != null && have.stamp == stamp) return have;
+    BuildProbe r;
+    try {
+      final p = StrisoVirtualLib.probe(path);
+      r = BuildProbe(
+        stamp,
+        api: p.api,
+        firmwareVersion: p.firmwareVersion,
+        failure: p.api == svApiVersion ? null : LoadFailure(LoadFailureKind.apiMismatch, path, '', api: p.api),
+      );
+    } on LoadFailure catch (e) {
+      r = BuildProbe(stamp, api: e.api, failure: e);
+    } catch (e) {
+      r = BuildProbe(stamp, failure: LoadFailure(LoadFailureKind.other, path, '$e'));
+    }
+    return _probes[path] = r;
+  }
+
+  /// The build in use (its library's path), if one is loaded.
+  String? get firmwarePath => virtual.lib?.path;
+
+  /// Plays a build: whatever plays ends, the old library is let go of, this one is loaded and
+  /// Virtual starts on it; then the voice key you were on is pressed, so the same key plays the
+  /// new build's sound (its firmware picks the preset it remembers for the key). Remembered for
+  /// the next start when it plays.
+  Future<bool> useBuild(String path) async {
+    if (saving) return false;
+    final b = buildOf(path);
+    final key = isVirtual && canSend ? settingsLayout.voiceKeyOf(currentEngine) : null;
+    final prev = _playedBuild ?? (virtual.lib != null ? virtual.libPath : null);
+    if (state.mode != null) await session.disconnect(why: IdleWhy.modeSwitch);
+    final f = virtual.selectLibrary(b.path, title: b.title);
+    if (f != null) log('virtual firmware: ${b.title} refused: ${f.message}', LogKind.err);
+    notifyListeners();
+    final ok = await session.connect(Mode.virtual);
+    if (!ok) return false;
+    store.set('virtualLib', b.path);
+    _playedBuild = b.path;
+    if (prev != null && prev != b.path) previousBuild = prev;
+    log('virtual firmware: ${b.title} (${virtual.version})');
+    if (key != null && settingsLayout[key]?.switchable == true) unawaited(pressSettingsKey(key));
+    notifyListeners();
+    return true;
+  }
+
+  /// ⇄: the build played before this one, on the same key.
+  Future<bool> swapBuild() async {
+    final p = previousBuild;
+    if (p == null) return false;
+    return useBuild(p);
+  }
+
+  /// Installs a build (a release zip, or a library) into the firmware folder, then plays it.
+  /// macOS: its quarantine cleared. False with a toast when it cannot be.
+  Future<bool> installAndUseFirmware(String source) async {
+    final dir = firmwareDir;
+    if (dir == null) {
+      toast('There is no firmware folder in this run', 'warn');
+      return false;
+    }
+    final String lib;
+    try {
+      lib = await installFirmware(source, dir, apiVersion: svApiVersion);
+    } catch (e) {
+      toast('Not installed: $e', 'err');
+      log('firmware install: $e', LogKind.err);
+      return false;
+    }
+    log('virtual firmware installed: $lib');
+    return useBuild(lib);
   }
 
   // SessionHost -----------------------------------------------------------------------------------
@@ -757,6 +1022,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
       );
     }
     version = v;
+    if (usbBoard) strisoVersion = v;
     log('connected: ${v.line}');
     if (usbBoard) _trace('version');
     // the app needs the current firmware: it reports its settings layout and its state
@@ -765,12 +1031,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     final hero = count == null ? null : await c.getHeroes();
     if (!current()) return null;
     if (layout == null || count == null || hero == null) {
-      return FailEv(
-        FailKind.needsUpdate,
-        b.mode == Mode.virtual
-            ? 'This virtual firmware build is too old for Striso Live (found ${v.fw}): pick a newer one in Setup.'
-            : 'This Striso needs a firmware update to work with Striso Live (found ${v.fw}).',
-      );
+      return FailEv(FailKind.needsUpdate, b.mode == Mode.virtual ? 'This build is too old for Striso Live (found ${v.fw}).' : 'This Striso needs a firmware update to work with Striso Live (found ${v.fw}).');
     }
     settingsLayout = layout;
     heroes = hero;

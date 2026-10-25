@@ -1,18 +1,16 @@
 // Setup (DESIGN.md 3): a mode control (Sensitivity, Key equalizer, Settings keys) changes the
 // board's overlay and the right column; Save to Striso, Audio (Through PC, devices, Record), the
-// motion sensor and the firmware are always at the lower right.
+// motion sensor and the firmware that plays are always at the lower right. The firmware builds
+// Virtual can run are chosen in Play (docs/flows.md 5), not here.
 
-import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:striso_core/striso_core.dart';
 
 import '../controller.dart';
-import '../firmware_library.dart';
 import '../theme.dart';
 import 'audio.dart';
 import 'board_view.dart';
@@ -85,8 +83,6 @@ class SetupTab extends StatelessWidget {
                 AudioSection(ctl),
                 const SizedBox(height: Space.xl),
                 if (c.maxWidth >= 1100) ...[MotionRow(ctl), const SizedBox(height: Space.l), FirmwareRow(ctl)],
-                const SizedBox(height: Space.l),
-                VirtualFirmwareRow(ctl),
                 const SizedBox(height: Space.m),
                 Align(
                   alignment: Alignment.centerLeft,
@@ -591,7 +587,7 @@ class SaveBox extends StatelessWidget {
   Widget build(BuildContext context) {
     final st = ctl.saveStatus;
     final reason = !ctl.connected
-        ? 'Connect the Striso first'
+        ? 'Nothing plays: connect the Striso or play Virtual first'
         : (ctl.isVirtual && ctl.options.fakeSave == null && ctl.virtual.isMock)
         ? 'The demo keeps its settings until you restart it'
         : (ctl.params[2]!.params.isEmpty && ctl.params[3]!.params.isEmpty)
@@ -601,10 +597,14 @@ class SaveBox extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Btn(
-          'Save to Striso',
+          ctl.isVirtual ? 'Save to Virtual' : 'Save to Striso',
           key: const Key('btn-save-board'),
           kind: BtnKind.primary,
-          tooltip: reason ?? 'Writes the touch settings and key factors to the board (it restarts, about 15 s)',
+          tooltip:
+              reason ??
+              (ctl.isVirtual
+                  ? 'Writes the touch settings and key factors to the virtual board\u2019s settings, kept on this computer (it restarts)'
+                  : 'Writes the touch settings and key factors to the board (it restarts, about 15 s)'),
           onPressed: ctl.saving || reason != null ? null : () => _save(context),
         ),
         if (ctl.saving)
@@ -648,24 +648,32 @@ class MotionRow extends StatelessWidget {
   );
 }
 
+/// The firmware that plays: the Striso's version, or Virtual's build (its title and the version
+/// it reports), with a copy button. The builds are chosen in Play.
 class FirmwareRow extends StatelessWidget {
   final AppController ctl;
   const FirmwareRow(this.ctl, {super.key});
   @override
   Widget build(BuildContext context) {
     final v = ctl.version;
+    final virtual = ctl.isVirtual && ctl.connected;
+    final text = v == null
+        ? (ctl.connected ? 'The board did not report its version.' : 'Nothing plays')
+        : virtual
+        ? '${ctl.virtual.buildTitle ?? 'Virtual'} · ${v.fw}'
+        : v.fw;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Micro('Firmware'),
+        Micro(virtual ? 'Virtual firmware' : 'Firmware'),
         const SizedBox(height: Space.xs),
         Row(
           children: [
             Expanded(
               child: Tooltip(
-                message: v == null ? '' : [v.line, ...v.extra].join('\n'),
+                message: v == null ? '' : [if (virtual && ctl.virtual.libPath != null) ctl.virtual.libPath!, v.line, ...v.extra].join('\n'),
                 child: Text(
-                  v?.fw ?? (ctl.connected ? 'The board did not report its version.' : 'Not connected'),
+                  text,
                   key: const Key('fw'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -684,76 +692,11 @@ class FirmwareRow extends StatelessWidget {
               ),
           ],
         ),
-      ],
-    );
-  }
-}
-
-/// The virtual Striso's firmware: the builds in the firmware folder, Load from file…, the
-/// version the loaded one reports. A switch tears Virtual down and starts it on the new build.
-class VirtualFirmwareRow extends StatelessWidget {
-  final AppController ctl;
-  const VirtualFirmwareRow(this.ctl, {super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final builds = ctl.firmwareBuilds();
-    final cur = ctl.firmwarePath ?? ctl.virtual.libPath;
-    final v = ctl.virtual.version;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Micro('Virtual firmware'),
-        const SizedBox(height: Space.xs),
-        Row(
-          children: [
-            Expanded(
-              child: builds.isEmpty
-                  ? Text(
-                      ctl.virtual.isMock ? 'The Dart mock (tests)' : 'None: put a striso_virtual build in the firmware folder, or load one',
-                      key: const Key('vfw-none'),
-                      maxLines: 2,
-                      style: ui(TypeSize.small, color: Pal.text3),
-                    )
-                  : LayoutBuilder(
-                      builder: (context, box) => SmallSelect<String>(
-                        key: const Key('vfw-select'),
-                        value: builds.any((b) => b.path == cur) ? cur! : builds.first.path,
-                        items: [for (final b in builds) (b.path, b.path == ctl.firmwarePath && v != null ? '${b.name} · $v' : b.name)],
-                        onChanged: ctl.saving ? null : (p) => ctl.useFirmware(p),
-                        width: box.maxWidth,
-                        tooltip: cur ?? '',
-                      ),
-                    ),
-            ),
-            const SizedBox(width: Space.s),
-            Btn(
-              'Install…',
-              key: const Key('vfw-load'),
-              kind: BtnKind.ghost,
-              tooltip:
-                  'A firmware release\u2019s striso_virtual-<version>-${virtualPlatform()}.zip (checked against its manifest), or a ${virtualLibName()}: '
-                  'installed into the firmware folder and played',
-              onPressed: () async {
-                final f = await openFile(
-                  acceptedTypeGroups: [
-                    XTypeGroup(label: 'striso_virtual', extensions: ['zip', virtualLibName().split('.').last]),
-                  ],
-                );
-                if (f != null) await ctl.installAndUseFirmware(f.path);
-              },
-            ),
-            if (ctl.firmwareDir != null)
-              IconBtn(
-                Icons.folder_open,
-                tooltip: 'The firmware folder: ${ctl.firmwareDir}',
-                onPressed: () async {
-                  Directory(ctl.firmwareDir!).createSync(recursive: true);
-                  await revealFile('${ctl.firmwareDir!}${Platform.pathSeparator}.');
-                },
-              ),
-          ],
-        ),
+        if (virtual)
+          Padding(
+            padding: const EdgeInsets.only(top: Space.xs),
+            child: Text('Other builds: Play, the build row.', style: ui(TypeSize.small, color: Pal.text3)),
+          ),
       ],
     );
   }

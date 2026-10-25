@@ -146,7 +146,7 @@ void main() {
     await connect(tester, ctl);
     ctl.setTab(AppTab.setup);
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.textContaining('the Striso’s synth comes over USB to this computer while it is connected'), findsOneWidget);
+    expect(find.textContaining('hear the Striso on this computer (its USB audio) while it plays'), findsOneWidget);
     await ticks(tester, ctl);
     expect(fake.enumerations, greaterThan(0), reason: 'the pickers ask for the devices');
     expect(find.text('Automatic: Striso Synth (Striso Synth)'), findsOneWidget);

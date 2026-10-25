@@ -128,6 +128,32 @@ void main() {
     await finish(tester, ctl);
   });
 
+  testWidgets('first launch (nothing chosen yet): a Striso on USB connects by itself; one plugged in later too, after 4 s', (tester) async {
+    final usb = FakeUsb();
+    final ctl = make(usb);
+    await pumpUntil(tester, ctl.start());
+    await waitFor(tester, () => ctl.dot == Dot.on && !ctl.listsLoading);
+    expect(ctl.connected, isTrue);
+    expect(ctl.intent, 'connected');
+    await finish(tester, ctl);
+
+    final usb2 = FakeUsb()..present = false;
+    final ctl2 = make(usb2);
+    await pumpUntil(tester, ctl2.start());
+    expect(ctl2.invite!.title, 'Plug in your Striso');
+    expect(ctl2.invite!.actions, [Fix.playVirtual]);
+    expect(ctl2.connectLabel, '', reason: 'nothing to end');
+    usb2.present = true;
+    await tester.pump(const Duration(milliseconds: 1500));
+    expect(ctl2.reconnectPending, isTrue);
+    expect(ctl2.invite!.title, 'Striso found');
+    expect(ctl2.connectLabel, 'Cancel');
+    await waitFor(tester, () => ctl2.dot == Dot.on);
+    expect(ctl2.connected, isTrue);
+    expect(ctl2.connectLabel, 'Disconnect');
+    await finish(tester, ctl2);
+  });
+
   testWidgets('at start: stays away after a Disconnect, and when the board is plugged in', (tester) async {
     final usb = FakeUsb();
     final ctl = make(usb, intent: 'off');
@@ -178,7 +204,7 @@ void main() {
     expect(ctl.reconnectPending, isTrue);
     await tester.pump(const Duration(milliseconds: 4100)); // first try: busy
     await tester.pump(const Duration(milliseconds: 50));
-    expect(ctl.status, 'Board busy (being updated?)');
+    expect(ctl.status, 'Striso busy · trying again');
     expect(ctl.banner, isNull, reason: 'quiet while retrying');
     await waitFor(tester, () => ctl.dot == Dot.on, ms: 12000);
     expect(ctl.connected, isTrue);
@@ -202,13 +228,16 @@ void main() {
     await finish(tester, ctl);
   });
 
-  testWidgets('Connect with no board: a banner, no session', (tester) async {
+  testWidgets('Connect with no board: a problem with its fix, no session', (tester) async {
     final usb = FakeUsb()..present = false;
     final ctl = make(usb);
     await pumpUntil(tester, ctl.start());
     await pumpUntil(tester, ctl.userConnect());
     expect(ctl.connected, isFalse);
-    expect(ctl.banner?.text, contains('No Striso found'));
+    expect(ctl.problem!.title, 'No Striso on USB');
+    expect(ctl.problem!.actions, [Fix.playVirtual]);
+    expect(ctl.status, 'No Striso on USB');
+    expect(ctl.banner, isNull);
     usb.present = true;
     await pumpUntil(tester, ctl.userConnect());
     await waitFor(tester, () => ctl.dot == Dot.on);

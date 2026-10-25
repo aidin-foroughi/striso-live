@@ -20,7 +20,15 @@ class FirmwareBuild {
   /// Its folder's name (the version it was published as), or the file's folder for one loaded
   /// from elsewhere.
   final String name;
-  const FirmwareBuild(this.path, this.name);
+
+  /// What its manifest.json says about it, when the folder has one (a release zip installed by
+  /// the app; an audition that was given one).
+  final FirmwareManifest? manifest;
+  const FirmwareBuild(this.path, this.name, {this.manifest});
+
+  /// How the user knows it: the manifest's title, else the folder's name.
+  String get title => manifest?.title ?? name;
+  String? get description => manifest?.description;
   @override
   bool operator ==(Object other) => other is FirmwareBuild && other.path == path;
   @override
@@ -37,17 +45,29 @@ List<FirmwareBuild> findFirmwareBuilds(String? dir) {
     for (final e in d.listSync()) {
       if (e is! Directory) continue;
       final f = File('${e.path}${Platform.pathSeparator}${virtualLibName()}');
-      if (f.existsSync()) out.add(FirmwareBuild(f.absolute.path, e.path.split(RegExp(r'[\\/]')).last));
+      if (f.existsSync()) out.add(buildOf(f.absolute.path));
     }
   } catch (_) {}
   out.sort((a, b) => b.name.compareTo(a.name));
   return out;
 }
 
-/// A library file anywhere, as a build.
+/// A library file anywhere, as a build: its folder's name, and its manifest.json when the folder
+/// has a readable one.
 FirmwareBuild buildOf(String path) {
-  final parts = File(path).absolute.path.split(RegExp(r'[\\/]'));
-  return FirmwareBuild(File(path).absolute.path, parts.length > 1 ? parts[parts.length - 2] : parts.last);
+  final abs = File(path).absolute.path;
+  final parts = abs.split(RegExp(r'[\\/]'));
+  final name = parts.length > 1 ? parts[parts.length - 2] : parts.last;
+  FirmwareManifest? m;
+  final mf = File('${File(abs).parent.path}${Platform.pathSeparator}manifest.json');
+  if (mf.existsSync()) {
+    try {
+      m = FirmwareManifest.parse(mf.readAsStringSync());
+    } catch (_) {
+      m = null; // a manifest the app cannot read names nothing; the folder's name does
+    }
+  }
+  return FirmwareBuild(abs, name, manifest: m);
 }
 
 /// The release's platform word for this system (in striso_virtual-VERSION-PLATFORM.zip).
@@ -60,11 +80,13 @@ class FirmwareInstallError implements Exception {
   String toString() => message;
 }
 
-/// What a release zip says about itself (manifest.json, the firmware's tools/package.sh).
+/// What a build says about itself (manifest.json, the firmware's tools/package.sh; an audition's
+/// folder gets one too). `title` and `description` are how the user knows the build
+/// (docs/flows.md 8); the rest checks the zip at install time.
 class FirmwareManifest {
   final String version, platform, library, sha256;
   final int apiVersion;
-  final String? firmwareVersion, runtime;
+  final String? firmwareVersion, runtime, title, description;
   const FirmwareManifest({
     required this.version,
     required this.platform,
@@ -73,6 +95,8 @@ class FirmwareManifest {
     required this.apiVersion,
     this.firmwareVersion,
     this.runtime,
+    this.title,
+    this.description,
   });
 
   static FirmwareManifest parse(String json) {
@@ -100,6 +124,8 @@ class FirmwareManifest {
       apiVersion: api,
       firmwareVersion: m['firmware_version'] is String ? m['firmware_version'] as String : null,
       runtime: m['runtime'] is String ? m['runtime'] as String : null,
+      title: m['title'] is String && (m['title'] as String).trim().isNotEmpty ? (m['title'] as String).trim() : null,
+      description: m['description'] is String && (m['description'] as String).trim().isNotEmpty ? (m['description'] as String).trim() : null,
     );
   }
 }

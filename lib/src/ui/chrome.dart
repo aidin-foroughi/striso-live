@@ -7,6 +7,7 @@ import 'package:striso_core/striso_core.dart';
 
 import '../controller.dart';
 import '../theme.dart';
+import 'build_picker.dart';
 
 class BrandMark extends StatelessWidget {
   final double size;
@@ -100,11 +101,38 @@ class BannerBar extends StatelessWidget {
     return ListenableBuilder(
       listenable: ctl,
       builder: (context, _) {
+        final p = ctl.problem;
         final b = ctl.banner;
         return AnimatedSize(
           duration: Timing.open,
           curve: Timing.curveOpen,
-          child: b == null
+          child: p != null
+              ? Container(
+                  key: const Key('problem'),
+                  constraints: const BoxConstraints(minHeight: 32),
+                  color: Pal.bg2,
+                  padding: const EdgeInsets.symmetric(horizontal: Space.gutter, vertical: Space.xs + 2),
+                  child: Row(
+                    children: [
+                      const Pip(Pal.error, size: 6),
+                      const SizedBox(width: Space.s),
+                      Expanded(
+                        child: Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: Space.m,
+                          runSpacing: Space.xs,
+                          children: [
+                            Text(p.title, key: const Key('problem-title'), style: ui(TypeSize.body, weight: FontWeight.w500)),
+                            if (p.detail.isNotEmpty) SelectableText(p.detail, style: ui(TypeSize.body, color: Pal.text2)),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: Space.m),
+                      FixButtons(ctl, p.actions, lead: false),
+                    ],
+                  ),
+                )
+              : b == null
               ? const SizedBox(width: double.infinity)
               : Container(
                   key: const Key('banner'),
@@ -208,39 +236,34 @@ class InviteCard extends StatelessWidget {
     return ListenableBuilder(
       listenable: ctl,
       builder: (context, _) {
-        if (ctl.connected) return const SizedBox.shrink();
-        final busy = ctl.invite == InviteState.connecting;
+        final inv = ctl.invite;
+        if (inv == null) return const SizedBox.shrink();
+        final problem = ctl.problem != null;
         return Center(
-          child: Column(
-            key: const Key('invite'),
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('Plug in your Striso', style: ui(TypeSize.title, weight: FontWeight.w600)),
-              const SizedBox(height: Space.s),
-              Text('Connect your Striso over USB, or play the virtual Striso on this computer.', style: ui(TypeSize.body, color: Pal.text2)),
-              const SizedBox(height: Space.l),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Btn(
-                    ctl.invite == InviteState.reconnect ? 'Connect Striso now' : 'Connect Striso',
-                    key: const Key('btn-connect-2'),
-                    kind: BtnKind.primary,
-                    tooltip: 'Your Striso over USB: its own sound, voices and settings',
-                    onPressed: busy ? null : ctl.userConnect,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Column(
+              key: const Key('invite'),
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (inv.title.isNotEmpty)
+                  Text(
+                    inv.title,
+                    key: const Key('invite-title'),
+                    textAlign: TextAlign.center,
+                    style: ui(TypeSize.title, weight: FontWeight.w600, color: problem ? Pal.error : Pal.text1),
                   ),
-                  const SizedBox(width: Space.s),
-                  Btn(
-                    'Play Virtual Striso',
-                    key: const Key('btn-demo'),
-                    kind: BtnKind.ghost,
-                    tooltip: 'The firmware as a soft instrument on this computer: play it from MIDI controllers or the screen, no Striso needed',
-                    onPressed: busy ? null : ctl.playVirtual,
-                  ),
+                if (inv.body.isNotEmpty) ...[
+                  const SizedBox(height: Space.s),
+                  Text(inv.body, textAlign: TextAlign.center, style: ui(TypeSize.body, color: Pal.text2)),
                 ],
-              ),
-              if (ctl.inviteText.isNotEmpty) ...[const SizedBox(height: Space.m), Text(ctl.inviteText, style: ui(TypeSize.small, color: Pal.accent))],
-            ],
+                if (inv.actions.isNotEmpty) ...[const SizedBox(height: Space.l), FixButtons(ctl, inv.actions)],
+                if (inv.busy != null) ...[
+                  const SizedBox(height: Space.m),
+                  Text(inv.busy!, key: const Key('invite-busy'), style: ui(TypeSize.small, color: Pal.accent)),
+                ],
+              ],
+            ),
           ),
         );
       },

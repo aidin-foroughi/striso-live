@@ -51,7 +51,8 @@ is live about 0.3 s after it starts talking to the board.
 1. Unzip `StrisoLive-<version>-windows-x64.zip` anywhere and run `Striso Live\StrisoLive.exe`.
 2. The build is not signed, so SmartScreen may say *Windows protected your PC*: click
    **More info**, then **Run anyway**. Windows remembers it for this file.
-3. Plug in the Striso and click **Connect Striso**, or **Play Virtual Striso** without one.
+3. Plug in the Striso: it connects by itself. Without one, **Play Virtual**: the Striso firmware
+   on this computer (it needs a firmware build, see Testing without the hardware).
 
 The installer (`StrisoLive-<version>-windows-setup.exe`) installs per user without admin rights
 and gets the same SmartScreen warning.
@@ -79,9 +80,14 @@ Connect says there is no usable driver, the Zadig tool can set WinUSB for *Stris
 - **One program at a time.** Only one program can hold the Striso's interface. If Connect says
   the board is busy, close the web app tab, the Electron app or a `tools/striso.py` session
   (the firmware repository's board tool).
-- **Reconnects by itself** after an unplug or a reboot, 4 s after the board is back (so a flash
-  tool gets it first), retrying a busy board for 30 s; never after you clicked Disconnect.
-  At start it connects right away when you left it connected.
+- **Connects by itself** when the Striso is on USB: right away at start, 4 s after it is plugged
+  in or comes back from a reboot (so a flash tool gets it first), retrying a busy board for 30 s;
+  never after you clicked Disconnect (then only the **Striso** segment or **Connect Striso**
+  brings it back). **Stop** (Virtual) ends Virtual and leaves the Striso alone.
+- **What plays** is the header's **Striso | Virtual** control; the one button next to the status
+  ends it (Disconnect, Stop, Cancel). A problem (no Striso, busy, no driver, a build that does not
+  load…) shows under the header and on the board with the button that fixes it. The flows are in
+  `docs/flows.md`.
 - **Your data** lives in `%APPDATA%\Striso Live` (Windows) or
   `~/Library/Application Support/Striso Live` (macOS): `settings.json` (preferences, your sounds,
   morph corners), `logs/striso-live.log` (also in the console drawer) and `backups/` (the board's
@@ -94,7 +100,7 @@ Firmware with USB audio (the board shows up as the input **Striso Synth**: UAC1,
 24 bit) plays its synth through the computer's speakers or interface, no DAW needed. The
 headphone jack keeps working at the same time.
 
-- **Through PC** (header, Striso mode only; off until you turn it on, then remembered): while the Striso is connected, its USB audio plays through the computer. Without a Striso session nothing is opened, whatever the toggle says. The
+- **Through PC** (header, while the Striso plays; off until you turn it on, then remembered): hear the Striso on this computer: its USB audio plays through the computer. Without a Striso session nothing is opened, whatever the toggle says; Virtual has no Through PC (it plays to the output itself). The
   Striso's input plays to the default output, or the one chosen in Setup › Audio. The pip next to
   the toggle is the input level (red at full scale, red when the input is gone, accent while it
   looks); a click opens Setup.
@@ -165,8 +171,8 @@ whose `INFO_UF2.TXT` names the Striso (and only when there is exactly one), back
   not list shows as an error).
 - **Sound**: every voice and effect parameter, undo/redo, Reset, Mutate, A/B, Save sound, Copy as
   C; My sounds; the morph pad (closed until you open it).
-- **Setup**: Sensitivity, Key equalizer or Settings keys on the big board; Save to Striso;
-  Audio (Through PC, devices, Record); motion; firmware.
+- **Setup**: Sensitivity, Key equalizer or Settings keys on the big board; Save to Striso (Save to
+  Virtual in Virtual); Audio (Through PC, devices, Record); motion; the firmware that plays.
 - **Stage mode** (F or F11, Esc leaves): only the board and the chord, larger.
 - After a reconnect, if the board lost your edits (a restart, Save to Striso), a toast offers to
   restore the edited sound.
@@ -182,7 +188,7 @@ resets; Alt+click locks against Mutate.
 
 | flag | |
 |---|---|
-| `--demo` | start in Virtual mode |
+| `--demo` | start Virtual |
 | `--virtual-lib=<path>` | the firmware build Virtual runs: a `striso_virtual.dll` / `.dylib` / `.so` built from any firmware branch (default: the one chosen in Setup, `$STRISO_VIRTUAL_LIB`, the newest in the firmware folder, or `../striso-control-firmware/build/host-virtual/virtual/`) |
 | `--mock-demo` | Virtual on the Dart mock board instead (no native library) |
 | `--no-usb` | never touch USB |
@@ -272,7 +278,7 @@ In Virtual the app talks to the firmware over the same console protocol as to th
 - **Sound**: Virtual plays to the computer's output (Setup › Audio: the output, its buffer (Auto), exclusive mode and gain), whatever Through PC says: it renders inside the output's callback (`sa_set_source` with `sv_audio_source`). Its clock never depends on the output. When the output does not open or stalls, it runs on its own real-time thread, and the status says "No sound: …".
 - **Input**: any MIDI or MPE controller the computer sees (the Striso through its USB MIDI port, a LinnStrument, a keyboard), chosen in the header's **Input** menu, and the on-screen board. The bytes go from the MIDI driver's thread (WinMM, CoreMIDI; `striso_audio`'s MIDI inputs) straight into the firmware's own USB-MIDI input (`sv_midi_write`) with no Dart on the path. The app maps nothing: the firmware's MIDI input handles them. The first time Virtual plays, every input there is chosen. Hot-plug: a chosen input that comes back is opened again.
 - **MIDI 2.0**: a MIDI 2.0 controller's Universal MIDI Packets go, whole and untouched, into the firmware's MIDI 2.0 input (`sv_ump_write`) at their full resolution; the Input menu marks such inputs **MIDI 2.0**. Windows: through Windows MIDI Services, the MIDI 2.0 service in recent Windows 11 (`midisrv`), with its SDK's `Windows.Devices.Midi2.dll` next to the exe (`packages/striso_audio/native/third_party/midi2`); without the service there is no MIDI 2.0 and MIDI 1.0 goes through WinMM. macOS 11+: CoreMIDI's MIDI 2.0 protocol for sources that declare it.
-- **Firmware**: the app ships none. Setup › Virtual firmware lists the builds in the firmware folder (`%APPDATA%\Striso Live\firmware\<version>\striso_virtual.dll`, `~/Library/Application Support/Striso Live/firmware/<version>/libstriso_virtual.dylib`). **Load…** takes one from anywhere. A switch unloads the old library and starts Virtual on the new one without a restart. A library with another C API (`sv_api_version`) is refused with a clear message.
+- **Firmware builds**: the app ships none. In Virtual the Play tab's left column starts with the build it runs; its menu lists the builds in the firmware folder (`%APPDATA%\Striso Live\firmware\<build>\striso_virtual.dll`, `~/Library/Application Support/Striso Live/firmware/<build>/libstriso_virtual.dylib`) by the `title` in each folder's `manifest.json`, else by the folder's name, with the commit each reports and "on your Striso" for the one the connected Striso runs. **Choosing a build plays it** and presses the voice key you were on, so the same key plays the new build's sound; **⇄** goes back to the build played before. **Install a release zip…** takes `striso_virtual-<version>-<platform>.zip` (checked against its manifest). A build that cannot load (another C API, not a library, the C++ runtime missing, quarantined on macOS) is listed greyed with the reason; chosen anyway (at start, say) it is a problem with its fix under the header.
 
 **The firmware is the source of truth.** The app shows what the board (real or virtual) reports and reads it again whenever the board's change counter moves (`Stcy`, every 250 ms while connected): the voice, every value, the tuning, the transposition. The settings overlay is the board's own list (`StcX`). A Striso without these commands gets one message: "This Striso needs a firmware update to work with Striso Live (found …)".
 

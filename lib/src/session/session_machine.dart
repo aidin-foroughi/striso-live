@@ -5,8 +5,10 @@
 /// computer (no USB session with any board).
 enum Mode { striso, virtual }
 
-/// Why the session is idle.
-enum IdleWhy { start, user, unplugged, lost, modeSwitch }
+/// Why the session is idle: never connected; the user let go of the Striso (Disconnect: it stays
+/// away); the user stopped Virtual (a Striso plugged in from now on connects by itself); unplugged;
+/// the connection was lost; one mode ended for the other.
+enum IdleWhy { start, user, stopped, unplugged, lost, modeSwitch }
 
 /// What failed.
 enum FailKind { busy, noDriver, notFound, needsUpdate, library, noUsb, other }

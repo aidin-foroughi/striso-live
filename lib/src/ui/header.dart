@@ -1,7 +1,8 @@
-// The header (DESIGN.md 3): brand and name, the mode (Striso | Virtual), the tabs centred, the CPU
-// sparkline, Through PC in Striso mode (a toggle and a level pip; the recording time while
-// recording) or the MIDI input in Virtual, the status line (a click opens the console) and
-// Connect / Disconnect. In stage mode it shrinks to a 24 px strip.
+// The header (DESIGN.md 3, docs/flows.md 3): brand and name, the instrument (Striso | Virtual),
+// the tabs centred, the CPU sparkline, Through PC while the Striso plays (a toggle and a level
+// pip; the recording time while recording) or the MIDI input while Virtual plays, the status line
+// (a click opens the console) and the one button that ends what plays (Disconnect, Stop, Cancel).
+// In stage mode it shrinks to a 24 px strip.
 
 import 'dart:math' as math;
 
@@ -37,7 +38,7 @@ class TopBar extends StatelessWidget {
               (ctl.audio.recording ? 60 : 0) +
               16 +
               Space.m +
-              104;
+              (ctl.connectLabel.isEmpty ? 0 : 104);
           final statusMax = (rightRoom - others).clamp(72.0, narrow ? 140.0 : 280.0);
           return Container(
             height: Sizes.header,
@@ -62,16 +63,20 @@ class TopBar extends StatelessWidget {
                     RecIndicator(ctl),
                     const SizedBox(width: Space.l),
                     ConnectionStatus(ctl, maxWidth: statusMax),
-                    const SizedBox(width: Space.m),
-                    Btn(
-                      ctl.connectLabel,
-                      key: const Key('btn-connect'),
-                      kind: !ctl.connected && ctl.boardPresent && !ctl.reconnectPending ? BtnKind.primary : BtnKind.secondary,
-                      tooltip: ctl.connectLabel == 'Disconnect'
-                          ? 'End the session: the board, its sound, Through PC and MIDI all stop'
-                          : (ctl.connectLabel == 'Cancel' ? 'Do not reconnect' : 'Connect the Striso over USB'),
-                      onPressed: ctl.connecting && !ctl.isVirtual ? null : ctl.connectButton,
-                    ),
+                    if (ctl.connectLabel.isNotEmpty) ...[
+                      const SizedBox(width: Space.m),
+                      Btn(
+                        ctl.connectLabel,
+                        key: const Key('btn-connect'),
+                        kind: BtnKind.secondary,
+                        tooltip: switch (ctl.connectLabel) {
+                          'Disconnect' => 'Let go of the Striso: its console, Through PC and the pollers end. It stays away until you click Striso again.',
+                          'Stop' => 'Stop Virtual: its sound and MIDI inputs close. Nothing plays.',
+                          _ => 'Do not connect',
+                        },
+                        onPressed: ctl.saving ? null : ctl.connectButton,
+                      ),
+                    ],
                   ],
                 ),
                 TabRow(ctl),
@@ -276,8 +281,8 @@ class LoadSparkline extends CustomPainter {
   bool shouldRepaint(covariant LoadSparkline old) => true;
 }
 
-/// Striso | Virtual: the two modes. A click on the other one ends this session completely and
-/// starts that one; nothing is selected while idle.
+/// Striso | Virtual: what plays. A click on the other one ends this instrument completely and
+/// starts that one; while nothing plays neither is filled and a click starts that instrument.
 class ModeControl extends StatelessWidget {
   final AppController ctl;
   const ModeControl(this.ctl, {super.key});
@@ -292,11 +297,20 @@ class ModeControl extends StatelessWidget {
         child: Seg<Mode?>(
           keys: const {Mode.striso: Key('mode-striso'), Mode.virtual: Key('mode-virtual')},
           items: [
-            (Mode.striso, 'Striso', 'Your Striso over USB: its own sound (and Through PC), its voices and settings'),
+            (
+              Mode.striso,
+              'Striso',
+              ctl.mode == Mode.striso
+                  ? 'Your Striso over USB plays: its own sound, its voices and settings'
+                  : ctl.boardPresent
+                  ? 'Connect your Striso over USB (it is plugged in)'
+                  : 'Your Striso over USB (none is plugged in)',
+            ),
             (
               Mode.virtual,
               'Virtual',
-              'The virtual Striso: the firmware as a soft instrument on this computer, played from MIDI controllers or the screen${ctl.virtual.version != null ? ' (${ctl.virtual.version})' : ''}',
+              'The Striso firmware on this computer, played from MIDI controllers (your Striso too) and the on-screen board'
+                  '${ctl.virtual.buildTitle != null ? ': ${ctl.virtual.buildTitle}' : ''}',
             ),
           ],
           value: ctl.mode,

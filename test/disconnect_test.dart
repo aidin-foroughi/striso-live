@@ -34,8 +34,10 @@ class Rig {
   final audio = FakeAudioBackend();
   final midi = FakeMidiBackend();
   late final AppController ctl;
-  Rig({bool through = true}) {
+  /// [disconnected]: the user let go of the Striso the last time (so start does not connect it).
+  Rig({bool through = true, bool disconnected = true}) {
     final store = Store.memory();
+    if (disconnected) store.set('usbIntent', 'off');
     ctl = AppController(options: const AppOptions(), store: store, usb: usb, audioBackend: audio, midiBackend: midi);
     if (through) ctl.audio.setThrough(true);
   }
@@ -83,7 +85,7 @@ void main() {
       expect(ctl.state, isA<Idle>());
       expect(ctl.status, startsWith('Disconnected'));
       expect(ctl.dot, Dot.off);
-      expect(ctl.connectLabel, 'Connect');
+      expect(ctl.connectLabel, '', reason: 'nothing to end; the segments and the start screen act');
       expect(ctl.soundLine, isEmpty);
       r.expectNothingRuns(async, when: 'after Disconnect');
       expect(ctl.audio.through, isTrue, reason: 'the choice is kept for the next session');

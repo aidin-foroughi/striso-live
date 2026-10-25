@@ -75,7 +75,7 @@ void main() {
       File('${shot}_$name.png').writeAsBytesSync(png!);
     }
 
-    await tester.tap(find.byKey(const Key('btn-demo')));
+    await tester.tap(find.byKey(const Key('fix-playVirtual')));
     await run(40);
     final b = ctl.demoBoard!;
     b.autoplay = false;

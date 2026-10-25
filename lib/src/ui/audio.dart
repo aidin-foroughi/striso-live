@@ -60,7 +60,7 @@ class ThroughToggle extends StatelessWidget {
       builder: (context, _) {
         final a = ctl.audio;
         final tip = [
-          'Through PC: hear the Striso through this computer (its USB audio; the headphone jack keeps working).',
+          'Through PC: hear the Striso on this computer (its USB audio). Its jack keeps working.',
           if (a.state != ThroughState.off) a.message,
           ?a.outputNote,
           'Devices, buffer and gain: Setup › Audio',
@@ -248,8 +248,8 @@ class _AudioSectionState extends State<AudioSection> {
             const SizedBox(height: Space.xs),
             Text(
               virtual
-                  ? 'The virtual Striso plays to this output.'
-                  : 'Through PC: the Striso’s synth comes over USB to this computer while it is connected; the headphone jack keeps working.',
+                  ? 'Virtual plays to this output. Through PC is the Striso’s: it is not here.'
+                  : 'Through PC: hear the Striso on this computer (its USB audio) while it plays. Its jack keeps working.',
               style: ui(TypeSize.small, color: Pal.text3),
             ),
             const SizedBox(height: Space.s),

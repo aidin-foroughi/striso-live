@@ -114,7 +114,8 @@ class Session {
 
   // -------------------------------------------------------------------------------------- start
 
-  /// At start: Virtual again when it was left on, else the Striso when it was left connected.
+  /// At start: Virtual again when it was left on, else the Striso when it is on USB, unless the
+  /// user let go of it (Disconnect) the last time.
   Future<void> start({bool virtualFirst = false}) async {
     if (virtualFirst || (virtualWanted && virtual != null)) {
       await connect(Mode.virtual);
@@ -123,13 +124,14 @@ class Session {
     if (usb == null) return;
     final p = await _probe();
     lastPresent = p;
-    if (p && intent == 'connected') {
+    if (state is! Idle) return; // something started meanwhile (a click)
+    if (p && intent != 'off') {
       host.note('Striso found at start: connecting');
       unawaited(connect(Mode.striso, quiet: true));
       return;
     }
-    if (p && intent == 'off') {
-      machine.on(const DisconnectEv(IdleWhy.user)); // the note says how to come back
+    if (intent == 'off') {
+      machine.on(const DisconnectEv(IdleWhy.user)); // the status says how to come back
     }
     _schedulePresence();
     host.sessionChanged();
@@ -146,9 +148,9 @@ class Session {
 
   // ------------------------------------------------------------------------------ presence poll
 
-  /// The presence poll runs only while idle and it serves something: the user left the Striso
-  /// connected (reconnect when it is back), or has not chosen yet (Connect lights up). Never after
-  /// Disconnect, never while a session runs.
+  /// The presence poll runs only while nothing plays and it serves something: a Striso that
+  /// appears connects by itself (docs/flows.md 4). Never after Disconnect (the user let go of the
+  /// board), never while a session runs.
   bool get _wantsPresence {
     if (_disposed || usb == null) return false;
     final s = state;
@@ -178,13 +180,7 @@ class Session {
       lastPresent = p;
       if (was != p) host.sessionChanged();
       if (!_wantsPresence) return;
-      if (p && was == false) {
-        if (intent != 'connected') {
-          host.note('Striso plugged in; not connecting (click Connect)');
-        } else {
-          _wait('Striso plugged in', reconnectDelay);
-        }
-      }
+      if (p && was == false) _wait('Striso plugged in', reconnectDelay);
     } finally {
       _polling = false;
     }
@@ -222,12 +218,12 @@ class Session {
     final reboot = s is Rebooting ? s.why : null;
     if (!machine.on(ConnectEv(m, quiet: quiet)).accepted) return false;
     // a reboot's connect that does not get the board yet stays in the reboot (comeBack tries again)
-    bool fail(FailEv f, {bool banner = true}) {
+    bool fail(FailEv f) {
       if (reboot != null) {
         machine.on(RebootEv(reboot));
         return false;
       }
-      return _fail(f, banner: banner);
+      return _fail(f);
     }
 
     _cancelDue();
@@ -250,7 +246,7 @@ class Session {
           machine.on(const LostEv());
           return false;
         }
-        return fail(const FailEv(FailKind.notFound, 'No Striso found on USB. Plug it in (and switch it on), then click Connect.'));
+        return fail(const FailEv(FailKind.notFound, 'No Striso on USB.'));
       }
       b = StrisoBoard(usb!.transport());
     } else {
@@ -283,10 +279,10 @@ class Session {
       }
       _busyUntil = null;
       final kind = busy ? FailKind.busy : (e is UsbError && e.code == UsbErrorCode.noDriver ? FailKind.noDriver : FailKind.other);
-      final msg = busy && quiet ? 'Board busy: click Connect when it is free' : (e is UsbError ? e.message : 'Could not connect: $e');
+      final msg = e is UsbError ? e.message : 'Could not connect: $e';
       if (reboot != null) return fail(FailEv(kind, msg));
       if (m == Mode.virtual) await virtual?.stop();
-      return _fail(FailEv(kind, msg), banner: !(busy && quiet));
+      return _fail(FailEv(kind, msg));
     }
     _busyUntil = null;
     if (!current()) {
@@ -319,19 +315,23 @@ class Session {
     return true;
   }
 
-  bool _fail(FailEv f, {bool banner = true}) {
+  /// The session failed: the state carries the kind and the message; the host shows the problem
+  /// and its fix from the state (docs/flows.md 7).
+  bool _fail(FailEv f) {
     machine.on(f);
-    if (banner) host.say(f.message);
     return false;
   }
 
   // -------------------------------------------------------------------------------- disconnect
 
   /// Ends the whole session: the console, the stream, every poller, the virtual instrument and its
-  /// sound. [why] user: the Striso stays away until Connect.
+  /// sound. [why] user (Disconnect): the Striso stays away until it is connected again by hand;
+  /// stopped (Stop, Virtual): nothing plays, the Striso's standing is untouched.
   Future<void> disconnect({IdleWhy why = IdleWhy.user}) async {
     if (why == IdleWhy.user) {
       if (state.mode == Mode.striso || state is Waiting) setIntent('off');
+      store.set(_virtualKey, false);
+    } else if (why == IdleWhy.stopped) {
       store.set(_virtualKey, false);
     }
     _cancelDue();
@@ -423,7 +423,7 @@ class Session {
       }
       await Future<void>.delayed(const Duration(milliseconds: 1500));
     }
-    if (state is Rebooting) _fail(const FailEv(FailKind.notFound, 'Saved, but the Striso did not come back: click Connect.'), banner: false);
+    if (state is Rebooting) _fail(const FailEv(FailKind.notFound, 'Saved, but the Striso did not come back.'));
     return false;
   }
 

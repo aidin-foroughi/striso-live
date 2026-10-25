@@ -2,7 +2,7 @@
 
 How the app connects, what makes the sound, where it is heard, and what the UI may know. This
 replaces the old controller, where each mode (board, demo, virtual, audition, Through PC) added its
-own booleans.
+own booleans. What the user sees of it, flow by flow, is `docs/flows.md`.
 
 ## Principles
 
@@ -29,10 +29,13 @@ own booleans.
    the session fails with one message: "This Striso needs a firmware update to work with Striso
    Live (found <version>)". There are no fallbacks for older firmware.
 5. **The app ships no firmware.** Virtual loads a `striso_virtual` library at run time:
-   - from a picker over `<app data>/firmware/<version>/`, or "Load from file…", or
-     `--virtual-lib`;
-   - the library must report `sv_api_version() == 1`, else a clear error;
-   - switching builds tears Virtual down, closes the library, loads the new one, and starts again.
+   - a build from `<app data>/firmware/<build>/` (the build menu in Play, docs/flows.md 5), an
+     installed release zip, or `--virtual-lib`;
+   - the library must report `sv_api_version() == 2` (`svApiVersion`), else the problem names
+     the build and offers another; a build is probed once (its API and firmware version, without
+     keeping it loaded) so the menu greys out the ones that cannot run;
+   - choosing a build plays it: whatever plays is torn down, the library closed, the new one
+     loaded and checked, Virtual started on it, and the voice key the user was on pressed (`K`).
 6. **Nothing runs that the session does not need.** Disconnect leaves:
    - no USB handle;
    - no audio device open;
@@ -51,7 +54,7 @@ own booleans.
 | `SoundRouting` | tells the audio engine what to do in each state; the virtual board's clock; MIDI inputs into the virtual firmware |
 | `BoardState` | the last `StcY` reply, the `StcX` layout, the tuning (`StcN`); refreshed when `Stcy` changes |
 | `ParamsModel` (`lib/src/params_model.dart`) | the live parameters with undo, A/B, Mutate, Reset and the read-back of the board's values |
-| `VirtualStrisoRuntime` (`lib/src/virtual_support.dart`) | the striso_virtual library chosen (loaded and unloaded at run time), the instrument, its flash kept on this computer |
+| `VirtualStrisoRuntime` (`lib/src/virtual_support.dart`) | the build chosen (its library loaded when chosen, unloaded when another is; a `LoadFailure` kept when it did not load), the instrument, its flash kept on this computer |
 | `AppController` (Flutter) | the composition root and the UI's façade: widgets read it and call it, no logic in widgets |
 
 ### States
@@ -68,9 +71,10 @@ own booleans.
    └── Idle(lost) ── found (board back, user left it connected) ──▶ Waiting(m) ── due ──▶ Connecting(m)
 ```
 
-- **Idle**: nothing open. It carries why: never connected, disconnected by the user, unplugged,
-  connection lost. The presence poll runs only in Idle when the user left the Striso connected
-  (auto reconnect) or has not chosen yet; never after Disconnect.
+- **Idle**: nothing open. It carries why: never connected, disconnected by the user (the Striso
+  stays away), Virtual stopped by the user, unplugged, connection lost. The presence poll runs in
+  Idle unless the user disconnected the Striso: one that appears connects by itself (4 s after
+  it appears, so a flash tool gets it first); at start a Striso on USB connects right away.
 - **Waiting(m)**: a Striso was found (or was busy) and a connect is due at a set time (4 s after it
   appears, so a flash tool gets it first; busy retries for 30 s). Cancel goes back to Idle.
 - **Connecting(m)**: opening the board, the version, the capability check, the lists.
@@ -79,7 +83,9 @@ own booleans.
 - **Rebooting(m)**: Save to Striso or a reset; the board goes away on purpose and comes back by
   itself. Lost events are expected here.
 - **Failed(m, kind)**: `busy`, `noDriver`, `notFound`, `needsUpdate`, `library` (missing or wrong
-  API), `other`. Nothing stays open.
+  API), `noUsb`, `other`. Nothing stays open. The session never shows prose for a failure: the
+  controller derives a `Problem` (title, sentence, fixes) from the state and the virtual runtime's
+  `LoadFailure`, and the banner strip and the start screen render it (docs/flows.md 7).
 
 Mode switch = `disconnect` then `connect(other)`. The machine refuses transitions that make no
 sense (e.g. `ready` while Idle) and says so in the log.
@@ -111,9 +117,9 @@ sense (e.g. `ready` while Idle) and says so in the log.
 
 One line from the state and the resources, e.g.:
 - "Striso · Through PC → Headphones (TBT200 Dock)"
-- "Virtual (a647e81) → Headphones (TBT200 Dock) · input: LinnStrument"
-- "Virtual (a647e81) · No sound: the output would not open (Headphones) · input: on-screen"
-- "Not connected", "Unplugged", "Board busy", "This Striso needs a firmware update (found …)"
+- "Virtual · Sax v1 → Headphones (TBT200 Dock) · input: LinnStrument"
+- "Virtual · Sax v1 · No sound: the output would not open (Headphones) · input: on-screen"
+- "Not connected", "Striso found · connecting in 4 s", "Unplugged", "Stopped", a problem's title
 
 ## Board state, not app state
 

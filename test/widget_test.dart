@@ -34,7 +34,7 @@ Future<void> runFor(WidgetTester tester, int ms) async {
 }
 
 Future<void> startDemo(WidgetTester tester, AppController ctl) async {
-  await tester.tap(find.byKey(const Key('btn-demo')));
+  await tester.tap(find.byKey(const Key('fix-playVirtual')));
   // the demo answers over timers: connect, version, voices, the four lists
   for (var i = 0; i < 60 && (ctl.listsLoading || ctl.dot != Dot.demo || ctl.params[3]!.params.isEmpty); i++) {
     await runFor(tester, 50);
@@ -70,7 +70,10 @@ void main() {
   testWidgets('boots to the invite card, then the demo fills voices, now playing and the racks', (tester) async {
     final ctl = await boot(tester);
     expect(find.text('Plug in your Striso'), findsOneWidget);
-    expect(find.byKey(const Key('btn-connect-2')), findsOneWidget);
+    // the Striso connects by itself: the start screen offers Virtual only
+    expect(find.byKey(const Key('fix-playVirtual')), findsOneWidget);
+    expect(find.byKey(const Key('fix-connectStriso')), findsNothing);
+    expect(find.byKey(const Key('btn-connect')), findsNothing, reason: 'nothing to end: no button');
     expect(find.text('No voice'), findsOneWidget);
     await startDemo(tester, ctl);
     await settle(tester);

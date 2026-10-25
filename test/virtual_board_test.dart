@@ -198,7 +198,7 @@ void main() {
     await run(tester, ctl.playVirtual());
     await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
     expect(ctl.virtual.isMock, isFalse);
-    expect(ctl.status, startsWith('Virtual Striso'));
+    expect(ctl.status, startsWith('Virtual ·'));
     expect(ctl.playable, isTrue);
     expect(ctl.voices.length, ctl.virtual.instrument!.board.state.voices);
     // playing it by hand: the stream shows the key
@@ -249,7 +249,7 @@ void main() {
     await waitFor(tester, () => ctl.routing.heard, ms: 4000);
     expect(b.realtime, isFalse, reason: 'clocked by the output');
     expect(await framesIn(tester, b), greaterThan(4800), reason: 'the output renders the virtual board');
-    expect(ctl.soundLine, contains('Virtual Striso'));
+    expect(ctl.soundLine, contains('Virtual ·'));
     expect(ctl.soundLine, contains('→'));
     expect(ctl.audio.route, AudioRoute.source);
     // voice, then a preset of it, from the app: the board's synth follows, every time
@@ -385,19 +385,27 @@ void main() {
     await run(tester, ctl.playVirtual());
     await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
     expect(ctl.firmwarePath, File(a).absolute.path);
-    expect(await run(tester, ctl.useFirmware(b)), isTrue);
+    expect(await run(tester, ctl.useBuild(b)), isTrue);
     await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
     expect(ctl.firmwarePath, File(b).absolute.path);
     expect(ctl.version!.line, startsWith(ctl.virtual.version!));
     expect(StrisoVirtualLib.isLoaded(a), isFalse, reason: 'the old build is unloaded');
     expect(ctl.store.get<String>('virtualLib'), File(b).absolute.path, reason: 'remembered');
-    // not a striso_virtual library: refused, said so, Virtual stays down
-    final junk = File('${dir!.path}${Platform.pathSeparator}junk.dll')..writeAsStringSync('no');
-    expect(await run(tester, ctl.useFirmware(junk.path)), isFalse);
-    expect(ctl.banner!.text, contains('cannot run here'));
-    expect(ctl.state, isA<Idle>());
-    // and back to a good one
-    expect(await run(tester, ctl.useFirmware(a)), isTrue);
+    // not a library: refused, the problem names the build and offers another, Virtual stays down
+    final junkDir = Directory('${dir!.path}${Platform.pathSeparator}junk build')..createSync();
+    final junk = File('${junkDir.path}${Platform.pathSeparator}junk.dll')..writeAsStringSync('no');
+    expect(await run(tester, ctl.useBuild(junk.path)), isFalse);
+    expect(ctl.state, isA<Failed>());
+    expect(ctl.problem, isNotNull);
+    expect(ctl.problem!.actions, contains(Fix.pickBuild));
+    expect(ctl.virtual.buildTitle, 'junk build');
+    expect(ctl.buildList().where((x) => x.path == junk.absolute.path).single.loadable, isFalse);
+    expect(ctl.store.get<String>('virtualLib'), File(b).absolute.path, reason: 'a build that did not play is not remembered');
+    // and back to a good one, remembered as the one before it for the swap
+    expect(await run(tester, ctl.useBuild(a)), isTrue);
+    expect(ctl.previousBuild, File(b).absolute.path);
+    expect(await run(tester, ctl.swapBuild()), isTrue);
+    expect(ctl.firmwarePath, File(b).absolute.path);
     await run(tester, ctl.playVirtual());
     await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
     await finish(tester, ctl);
@@ -434,7 +442,8 @@ void main() {
     );
     expect(await run(tester, ctl.installAndUseFirmware(zip.path)), isTrue, reason: ctl.banner?.text);
     expect(ctl.firmwarePath, startsWith('${dir.path}${Platform.pathSeparator}firmware${Platform.pathSeparator}test build'));
-    expect(ctl.firmwareBuilds().map((b) => b.name), contains('test build'));
+    expect(ctl.buildList().map((b) => b.build.name), contains('test build'));
+    expect(ctl.buildList().where((b) => b.build.name == 'test build').single.current, isTrue);
     await run(tester, ctl.playVirtual());
     await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
     await finish(tester, ctl);

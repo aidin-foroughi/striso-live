@@ -12,6 +12,7 @@ import 'package:striso_core/striso_core.dart';
 import '../controller.dart';
 import '../theme.dart';
 import 'board_view.dart';
+import 'build_picker.dart';
 import 'chrome.dart';
 import 'knobs.dart';
 import 'live_panel.dart';
@@ -172,6 +173,8 @@ class EnginePanel extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Virtual: the build it runs, as a sound to try (docs/flows.md 5)
+            if (ctl.isVirtual && ctl.connected) ...[BuildRow(ctl), const SizedBox(height: Space.m)],
             SizedBox(
               height: Sizes.toolbar,
               child: Row(
@@ -748,7 +751,10 @@ class SoundName extends StatelessWidget {
           ),
           Row(
             children: [
-              if (engine.isNotEmpty) Text(engineInfo(engine).label.toLowerCase(), style: ui(TypeSize.small, color: engineColor(engine))),
+              if (engine.isNotEmpty)
+                Flexible(
+                  child: Text(engineInfo(engine).label.toLowerCase(), maxLines: 1, overflow: TextOverflow.ellipsis, style: ui(TypeSize.small, color: engineColor(engine))),
+                ),
               if (ctl.isVirtual && ctl.connected) ...[
                 const SizedBox(width: Space.s),
                 Text(

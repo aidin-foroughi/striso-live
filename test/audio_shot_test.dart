@@ -68,7 +68,7 @@ void main() {
       File('${shot}_$name.png').writeAsBytesSync(png!);
     }
 
-    await tester.tap(find.byKey(const Key('btn-demo')));
+    await tester.tap(find.byKey(const Key('fix-playVirtual')));
     ctl.audio.setThrough(true);
     // the demo board's StcU poll (every 2 s) and the Striso buffer (Stct)
     await run(140);

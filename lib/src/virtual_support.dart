@@ -97,8 +97,12 @@ class _VirtualBoardHandle extends Board {
 }
 
 class VirtualStrisoRuntime implements VirtualRuntime {
-  /// The library chosen (a path), or null for the first one found.
+  /// The build chosen (its library's path), or null for none.
   String? libPath;
+
+  /// How the user knows the build (its manifest's title, else its folder's name); the label.
+  String? buildTitle;
+
   /// --mock-demo: the Dart mock whatever library there is.
   final bool forceMock;
 
@@ -111,38 +115,46 @@ class VirtualStrisoRuntime implements VirtualRuntime {
   final void Function(String) log;
 
   StrisoVirtualLib? _lib;
-  String? loadError;
+
+  /// Why [libPath] did not load (null: it did, or there is none). Set once per choice: a build
+  /// that failed is not tried again until it is chosen again.
+  LoadFailure? failure;
   VirtualInstrument? instrument;
   MockBoard? mock;
 
   /// The instrument changed (started, stopped): SoundRouting attaches or detaches it.
   final void Function()? onChanged;
 
-  VirtualStrisoRuntime({this.libPath, bool mockOnly = false, this.flashFile, required this.log, this.onChanged}) : forceMock = mockOnly;
-
-  /// The library, loaded once; null with [loadError].
-  StrisoVirtualLib? get lib {
-    if (_lib != null || mockOnly) return _lib;
-    try {
-      _lib = StrisoVirtualLib.load(explicit: libPath);
-      loadError = null;
-    } catch (e) {
-      loadError = '$e';
-    }
-    return _lib;
+  VirtualStrisoRuntime({String? libPath, String? title, bool mockOnly = false, this.flashFile, required this.log, this.onChanged})
+    : forceMock = mockOnly {
+    selectLibrary(libPath, title: title);
   }
 
-  bool get available => lib != null;
+  /// The library chosen and loaded; null with [failure], or when none is chosen.
+  StrisoVirtualLib? get lib => _lib;
 
-  /// Another build: the instrument must be stopped (the session tears down first). The old
-  /// library is let go of (DynamicLibrary.close); the next [lib] loads [path] afresh.
-  void selectLibrary(String? path) {
+  bool get available => _lib != null;
+
+  /// Chooses [path] (null: none) and loads it now; returns why it did not load, if so. The
+  /// instrument must be stopped (the session tears down first); the old library is let go of
+  /// (DynamicLibrary.close) so a rebuilt file at the same path loads afresh.
+  LoadFailure? selectLibrary(String? path, {String? title}) {
     if (instrument != null) throw StateError('stop the virtual Striso before switching its firmware');
     final old = _lib;
     _lib = null;
-    loadError = null;
+    failure = null;
     if (old != null) StrisoVirtualLib.unload(old.path);
     libPath = path;
+    buildTitle = title;
+    if (path == null || mockOnly) return null;
+    try {
+      _lib = StrisoVirtualLib.load(explicit: path);
+    } on LoadFailure catch (e) {
+      failure = e;
+    } catch (e) {
+      failure = LoadFailure(LoadFailureKind.other, path, '$e');
+    }
+    return failure;
   }
 
   /// The firmware the library runs (sv_firmware_version: what StcV says first).
@@ -150,7 +162,8 @@ class VirtualStrisoRuntime implements VirtualRuntime {
   bool get isMock => instrument == null && mock != null;
   VirtualSound? get sound => instrument;
 
-  String get label => isMock ? 'Demo (mock)' : 'Virtual Striso${version != null ? ' (${shortVersion(version!)})' : ''}';
+  /// For the status and the log: the build as the user knows it.
+  String get label => isMock ? 'Demo (mock)' : 'Virtual · ${buildTitle ?? (version != null ? shortVersion(version!) : 'no build')}';
 
   @override
   Future<Board> open() async {
@@ -158,8 +171,8 @@ class VirtualStrisoRuntime implements VirtualRuntime {
       mock ??= MockBoard();
       return TransportBoard(Mode.virtual, MockTransport(board: mock), label: 'Demo (mock)', hand: mock);
     }
-    final l = lib;
-    if (l == null) throw VirtualError('The virtual Striso did not load: ${loadError ?? 'no striso_virtual library'}');
+    final l = _lib;
+    if (l == null) throw VirtualError(failure?.message ?? 'No firmware build is chosen for Virtual.');
     var inst = instrument;
     if (inst == null || !inst.alive) {
       final flash = _readFlash();
