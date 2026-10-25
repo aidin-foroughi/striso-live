@@ -344,13 +344,53 @@ can be tried without a firmware build: the build stays, the engine is added.
   never reads an engine itself beyond its manifest and a probe of its ABI version (the same probe
   as builds: load, read, unload).
 
-**What the firmware would need to report** (read-only, no app-side guessing):
+**What the firmware reports: `Stce`, the loaded engines** (requested; the app reads only this, it
+guesses nothing). A new console command, `e` (`E` is the scanner's), no payload, read-only, in a
+build with SYNTH_EXTERNAL_ENGINES (the virtual board). A build without it does not answer: it has
+no engines to add, and the chooser says so. The reply, one line per library file in `engine_dir`
+(`.dll` / `.dylib` / `.so`, other files not listed), in the order the firmware loads them (file
+name order):
 
-- Which entries of the voice list come from a loaded engine, and from which file: a flag or a
-  source in `Stcv`, or a short `StcE` listing (`E <engine> <file> ok|<why>`), so the engine row
-  can mark them and a refusal can be shown with the firmware's own reason.
-- The engine's colour for the engine row: the manifest could carry one, or the firmware the
-  voice-key colour it would give it (today a loaded engine gets a colour of its own).
+```
+e engines <abi> <files>
+e ok <first> <count> <rrggbb> <id> <file>
+e err <reason> <file>|<detail>
+e end
+```
+
+- `e engines <abi> <files>`: the engine ABI this build loads (`NSC_ABI`), and how many library
+  files it found (0 with no `engine_dir`). Always first, also with no files.
+- `e ok <first> <count> <rrggbb> <id> <file>`: loaded. Its voices are the `Stcv` entries
+  `first` .. `first + count - 1` (one per preset, or one with none); `rrggbb` is the colour the
+  board gives its voices (hex, as its LEDs show it for that voice); `id` the descriptor's id (as
+  in `Stcv`); `file` the file name (no directory; the rest of the line).
+- `e err <reason> <file>|<detail>`: refused, nothing of it in `Stcv`. `<reason>` is one token:
+  - `library`: the OS would not load it; `detail` the OS's own message (`dlerror()`, or
+    `FormatMessage` of `GetLastError()`), so a macOS quarantine or a missing C++ runtime shows as
+    the OS says it;
+  - `entry`: no `nsc_entry`;
+  - `component`: `nsc_entry` gave no descriptor or a wrong magic;
+  - `abi`: another engine ABI; `detail` `<its abi> <this build's abi>`;
+  - `voices`: fewer voices than the board plays; `detail` `<max_voices> <the board's>`;
+  - `memory`: its regions could not be allocated;
+  - `full`: the voice list was full (128 entries); `detail` how many of its entries were left out
+    (then it is also `ok` for the ones that fit: a line of each).
+- `e end`: the last line.
+- The reply changes only when the board is created (the engines are read at boot), so the app asks
+  once per run, after `Stcv`. `Stcy` need not count it.
+
+Example (two loaded, one refused):
+
+```
+e engines 1 3
+e ok 46 4 c08040 sax sax.dll
+e err abi flute.dll|2 1
+e ok 50 1 40a0ff sine sine.dll
+e end
+```
+
+The app's mock (striso_core `MockStriso`) answers `Stce` with recorded replies of this form, so the
+app is built and tested against it until the firmware has it.
 
 **What the app would need**: `sv_options.engine_dir` in the bindings (the struct's size grows; the
 firmware checks it), the second list in the chooser, and the staging folder. Nothing else changes:
