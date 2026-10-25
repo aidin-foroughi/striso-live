@@ -1,8 +1,13 @@
-# Striso Live against the virtual board: the firmware (striso-control-firmware, its virtual/)
-# builds striso_virtual on this runner, then the app's tests that run on it: packages/striso_virtual
-# (the client, save, reset, audio, the golden through Dart) and test/virtual_board_test.dart (the
-# app's controller on it: as the USB Striso, as Virtual, the audition when an audio engine with
-# sa_set_source is there). The firmware ref: the repository variable FIRMWARE_REF, else main.
+# Striso Live against the virtual board. The virtual board (striso_virtual) is an artifact of the
+# firmware's release, not of the app: a firmware tag v* publishes striso_virtual-<tag>-windows-x64.zip
+# and striso_virtual-<tag>-macos-universal.zip (the library, its header, manifest.json with the
+# firmware and C API versions), and the app loads one at run time. This takes the release's zip for
+# the runner (checked against the release's SHA256SUMS and the API version packages/striso_virtual
+# wants) and runs the app's tests on it: packages/striso_virtual (the client, save, reset, audio,
+# the golden through Dart) and test/virtual_board_test.dart (the app's controller on it: as the USB
+# Striso, as Virtual; Virtual's sound and MIDI when an audio engine is there). The firmware
+# source at the same tag gives the goldens. The tag: the repository variable FIRMWARE_TAG, else the
+# firmware's latest release.
 name: Striso Live (virtual board)
 
 on:
@@ -16,13 +21,18 @@ permissions:
 
 env:
   FLUTTER_VERSION: "3.41.2"
+  FIRMWARE_REPO: aidin-foroughi/striso-control-firmware
 
 jobs:
   virtual:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        include:
+          - os: windows-latest
+            platform: windows-x64
+          - os: macos-latest
+            platform: macos-universal
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -30,15 +40,30 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: the firmware next to the app
-        run: git clone --quiet --branch "${{ vars.FIRMWARE_REF || 'main' }}" https://github.com/aidin-foroughi/striso-control-firmware.git ../striso-control-firmware
+      - name: striso_virtual from the firmware's release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ vars.FIRMWARE_TAG }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          tag="${TAG:-$(gh release view --repo "$FIRMWARE_REPO" --json tagName --jq .tagName)}"
+          zip="striso_virtual-$tag-$PLATFORM.zip"
+          dir="$RUNNER_TEMP/striso_virtual"
+          mkdir -p "$dir" && cd "$dir"
+          gh release download "$tag" --repo "$FIRMWARE_REPO" --pattern "$zip" --pattern SHA256SUMS
+          grep "  $zip\$" SHA256SUMS | shasum -a 256 -c -
+          unzip -q "$zip"
+          manifest="$dir/${zip%.zip}/manifest.json"
+          cat "$manifest"
+          want="$(sed -n 's/^const svApiVersion = \([0-9]*\);/\1/p' "$GITHUB_WORKSPACE/packages/striso_virtual/lib/src/bindings.dart")"
+          got="$(jq -r .api_version "$manifest")"
+          [ "$got" = "$want" ] || { echo "::error::$zip has C API $got, packages/striso_virtual wants $want"; exit 1; }
+          lib="$dir/${zip%.zip}/$(jq -r .library "$manifest")"
+          if [ "$RUNNER_OS" = Windows ]; then lib="$(cygpath -m "$lib")"; fi
+          { echo "STRISO_VIRTUAL_LIB=$lib"; echo "FIRMWARE_TAG=$tag"; } >> "$GITHUB_ENV"
 
-      - name: ninja (macOS)
-        if: runner.os == 'macOS'
-        run: brew install ninja
-
-      - name: striso_virtual (the firmware's tools/virtual.sh)
-        run: ../striso-control-firmware/tools/virtual.sh build
+      - name: the firmware source at that tag (the goldens)
+        run: git clone --quiet --depth 1 --branch "$FIRMWARE_TAG" "https://github.com/$FIRMWARE_REPO.git" ../striso-control-firmware
 
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
