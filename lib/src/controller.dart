@@ -2710,10 +2710,29 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   // ---------------------------------------------------------------------------------------------
   // console
 
-  /// One command character (or 0xNN). Bootloader, DFU and calibration are blocked here.
+  /// One command character (or 0xNN), or `W <n>`: select voice-list entry n (StcW). Bootloader,
+  /// DFU and calibration are blocked here.
   Future<void> consoleSend(String raw) async {
     raw = raw.trim();
     if (raw.isEmpty) return;
+    final w = RegExp(r'^W\s*(\d+)$').firstMatch(raw);
+    if (w != null || raw == 'W') {
+      final n = w == null ? null : int.tryParse(w.group(1)!);
+      final cl = client;
+      if (n == null || n > 0xffff) {
+        log('W needs the entry: W <n>, e.g. W 130', LogKind.err);
+        return;
+      }
+      if (cl == null) {
+        log('not connected', LogKind.err);
+        return;
+      }
+      log('> StcW $n');
+      final r = await cl.selectVoice(n);
+      log(r == null ? '(no reply)' : (r.ok ? 'voice ${r.index} ${r.name ?? ''}' : 'no voice ${r.index}'), r == null || !r.ok ? LogKind.err : LogKind.out);
+      if (identical(client, cl)) await syncVoice();
+      return;
+    }
     final hex = RegExp(r'^0x[0-9a-fA-F]{1,2}$');
     final ch = hex.hasMatch(raw) ? int.parse(raw.substring(2), radix: 16) : raw.codeUnitAt(0);
     final c = String.fromCharCode(ch);

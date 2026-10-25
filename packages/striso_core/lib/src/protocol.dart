@@ -77,9 +77,12 @@ class Cmd {
   static Uint8List bootloader() => commandChar('B');
 }
 
+/// "StcW" and n, 16 bit little endian: select voice-list entry n, any entry (the list outgrew
+/// 0x80 + n; firmware with W, striso-control-firmware a6eedd2). The reply is `voice <n> <name>` or
+/// `no voice <n>`.
 Uint8List selectVoiceCommand(int n) {
-  if (n < 0 || n > 127) throw RangeError('bad voice index $n');
-  return command(0x80 + n);
+  if (n < 0 || n > 0xffff) throw RangeError('bad voice index $n');
+  return Uint8List.fromList([0x53, 0x74, 0x63, 0x57, n & 0xff, n >> 8]);
 }
 
 /// "StcK" + one byte: press a settings key (button id) as if Settings were held on the instrument.
@@ -277,7 +280,7 @@ VoiceEntry? parseVoiceLine(String line) {
   return VoiceEntry(index: int.parse(m[2]!), name: name, engine: s.engine, preset: s.preset, current: m[1] == '*');
 }
 
-/// Reply to 0x80+n: "voice n name" or "no voice n".
+/// Reply to StcW (and 0x80 + n): "voice n name" or "no voice n".
 ({bool ok, int index, String? name})? parseVoiceSelect(String line) {
   var m = RegExp(r'^voice (\d+) (.+?)\s*$').firstMatch(line);
   if (m != null) return (ok: true, index: int.parse(m[1]!), name: m[2]);

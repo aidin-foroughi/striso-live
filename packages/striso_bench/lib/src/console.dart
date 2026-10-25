@@ -172,9 +172,9 @@ class UsbConsole implements BoardConsole {
     return out;
   }
 
-  /// Selects voice [n] (the console's 0x80 + n): its name, or null.
+  /// Selects voice [n] (StcW, any entry): its name, or null.
   Future<String?> selectVoice(int n) async =>
-      (await _ask<String>(command(0x80 + n), (l) => RegExp(r'^voice \d+ (.+)$').firstMatch(l)?.group(1), timeout: const Duration(milliseconds: 800))).reply;
+      (await _ask<String>(selectVoiceCommand(n), (l) => RegExp(r'^voice \d+ (.+)$').firstMatch(l)?.group(1), timeout: const Duration(milliseconds: 800))).reply;
 
   /// The synth's DSP load since the last call ('L'): (blocks, avg, peak, budget cycles).
   Future<({int blocks, int avg, int peak, int budget})?> synthLoad() async {

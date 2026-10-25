@@ -138,8 +138,11 @@ void main() {
 
   test('commands', () {
     expect(commandChar('V'), [0x53, 0x74, 0x63, 0x56]);
-    expect(selectVoiceCommand(3), [0x53, 0x74, 0x63, 0x83]);
-    expect(() => selectVoiceCommand(128), throwsRangeError);
+    expect(selectVoiceCommand(3), [0x53, 0x74, 0x63, 0x57, 3, 0]);
+    expect(selectVoiceCommand(130), [0x53, 0x74, 0x63, 0x57, 130, 0], reason: 'past 0x80 + n');
+    expect(selectVoiceCommand(0x1234), [0x53, 0x74, 0x63, 0x57, 0x34, 0x12], reason: 'little endian');
+    expect(() => selectVoiceCommand(-1), throwsRangeError);
+    expect(() => selectVoiceCommand(0x10000), throwsRangeError);
     final q = setParamCommand(1, 7, 1.5);
     expect(q.length, setParamLength);
     expect(q, [0x53, 0x74, 0x63, 0x51, 1, 7, 0x00, 0x00, 0xc0, 0x3f]);

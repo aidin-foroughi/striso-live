@@ -434,6 +434,47 @@ void main() {
       }
     });
   });
+
+  // StcW: any voice-list entry, also past the 128 that 0x80 + n reaches. The firmware build's own
+  // components (build/<preset>/components) loaded all at once make the list that long.
+  final many = _componentDir();
+  test('StcW selects any entry: the voice list past 128 with the build\'s components loaded', skip: skip ?? (many == null ? 'no firmware build with components' : null), () async {
+    final b = VirtualBoard(engineDir: many)..startRealtime();
+    final c = await _connect(b);
+    try {
+      final voices = await c.listVoices();
+      expect(voices.length, greaterThan(128), reason: 'the components push the list past 0x80 + n');
+      for (final n in [0, 127, 128, 130, voices.length - 1]) {
+        final r = await c.selectVoice(n);
+        expect(r?.ok, isTrue, reason: 'entry $n');
+        expect(r!.index, n);
+        expect(r.name, voices[n].name);
+        expect((await c.listVoices()).where((v) => v.current).single.index, n);
+      }
+      final r = await c.selectVoice(voices.length);
+      expect(r?.ok, isFalse, reason: 'past the list: "no voice n"');
+      expect(r!.index, voices.length);
+    } finally {
+      await c.disconnect();
+      b.dispose();
+    }
+  });
+}
+
+/// The firmware build's components folder (`$STRISO_FW_DIR/build/<preset>/components`), when it
+/// has at least one component.
+String? _componentDir() {
+  final fw = Platform.environment['STRISO_FW_DIR'];
+  final libDir = Platform.environment['STRISO_VIRTUAL_LIB'];
+  final ext = Platform.isWindows ? 'dll' : (Platform.isMacOS ? 'dylib' : 'so');
+  for (final d in [
+    if (fw != null) for (final b in ['host-virtual', 'host-virtual-universal']) '$fw/build/$b/components',
+    if (libDir != null) '${File(libDir).parent.parent.path}/components',
+  ]) {
+    final dir = Directory(d);
+    if (dir.existsSync() && dir.listSync().any((f) => f.path.endsWith('.$ext'))) return dir.absolute.path;
+  }
+  return null;
 }
 
 /// An awva engine component library (`<name>.dll` / `.dylib` / `.so`) and what its manifest

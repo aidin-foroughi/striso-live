@@ -494,8 +494,8 @@ class MockBoard implements PlayableBoard {
   final List<String> engineFiles;
   final bool answersEngines;
 
-  /// The firmware as released upstream (v2.2.4): it does not answer StcX, StcY, Stcy, StcH or
-  /// the preset commands.
+  /// The firmware as released upstream (v2.2.4): it does not answer StcX, StcY, Stcy, StcH,
+  /// StcW or the preset commands.
   final bool stockFirmware;
 
   /// The preset store (doc/presets_console.md): off answers "store off" to the user's presets;
@@ -574,6 +574,8 @@ class MockBoard implements PlayableBoard {
           final n = int.tryParse(String.fromCharCodes(p)) ?? -1;
           if (n >= 49 && n <= 256) usbAudioTarget = n;
           if (n == 0 || (n >= 49 && n <= 256)) _print('usb audio target $usbAudioTarget frames (${usbAudioTarget * 1000000 ~/ 48000} us)\r\n');
+        } else if (_rxCmd == 'W') {
+          _select(p[0] | p[1] << 8);
         } else if (_rxCmd == PresetCodes.text) {
           _presetText(p[0] | p[1] << 8);
         } else if (_rxCmd == PresetCodes.delete) {
@@ -644,6 +646,10 @@ class MockBoard implements PlayableBoard {
       }
     } else if (c >= 0x80) {
       _select(c - 0x80);
+    } else if (ch == 'W' && !stockFirmware) {
+      _rxNeed = 2;
+      _rxCmd = 'W';
+      _rxPayload.clear();
     } else if ('pfgk'.contains(ch)) {
       final target = 'pfgk'.indexOf(ch);
       if (listDelay > Duration.zero) {
@@ -917,7 +923,7 @@ class MockBoard implements PlayableBoard {
     if (skipped.isNotEmpty) _print('O skipped ${skipped.take(16).map(_word).join(' ')}\r\n');
   }
 
-  // a voice-list entry chosen (0x80 + n, a preset opened)
+  // a voice-list entry chosen (StcW, 0x80 + n, a preset opened)
   void _select(int n, {bool quiet = false}) {
     if (n < _entries.length) {
       voice = n;
