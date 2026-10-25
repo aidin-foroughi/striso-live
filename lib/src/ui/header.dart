@@ -59,7 +59,7 @@ class TopBar extends StatelessWidget {
                     ModeControl(ctl),
                     const Spacer(),
                     if (ctl.connected && box.maxWidth >= 1000) ...[CpuIndicator(ctl), const SizedBox(width: Space.xl)],
-                    if (ctl.mode == Mode.virtual) InputPicker(ctl, label: throughLabel) else if (ctl.mode == Mode.striso) ThroughToggle(ctl, label: throughLabel),
+                    if (ctl.playing == Mode.virtual) InputPicker(ctl, label: throughLabel) else if (ctl.playing == Mode.striso) ThroughToggle(ctl, label: throughLabel),
                     RecIndicator(ctl),
                     const SizedBox(width: Space.l),
                     ConnectionStatus(ctl, maxWidth: statusMax),
@@ -120,7 +120,7 @@ class ConnectionStatus extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  StatusDot(ctl.dot, lost: ctl.lost),
+                  StatusDot(ctl.dot, lost: ctl.lost || ctl.problem != null),
                   const SizedBox(width: Space.s),
                   ConstrainedBox(
                     constraints: BoxConstraints(maxWidth: maxWidth),
@@ -300,7 +300,7 @@ class ModeControl extends StatelessWidget {
             (
               Mode.striso,
               'Striso',
-              ctl.mode == Mode.striso
+              ctl.playing == Mode.striso
                   ? 'Your Striso over USB plays: its own sound, its voices and settings'
                   : ctl.boardPresent
                   ? 'Connect your Striso over USB (it is plugged in)'
@@ -313,9 +313,9 @@ class ModeControl extends StatelessWidget {
                   '${ctl.virtual.buildTitle != null ? ': ${ctl.virtual.buildTitle}' : ''}',
             ),
           ],
-          value: ctl.mode,
+          value: ctl.playing,
           onChanged: (m) {
-            if (m != null && m != ctl.mode) ctl.setMode(m);
+            if (m != null && m != ctl.playing) ctl.setMode(m);
           },
         ),
       ),

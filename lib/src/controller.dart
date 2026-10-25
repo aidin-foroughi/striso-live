@@ -560,6 +560,13 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   Mode? get mode => session.mode;
   bool get isVirtual => mode == Mode.virtual;
 
+  /// The instrument that plays (or is starting, or restarts): what the header's control fills.
+  /// Null when nothing does, a failed one included.
+  Mode? get playing => switch (state) {
+    Connecting(:final mode) || Live(:final mode) || Rebooting(:final mode) => mode,
+    _ => null,
+  };
+
   /// The console of the active board.
   @override
   StrisoClient? get client => session.client;

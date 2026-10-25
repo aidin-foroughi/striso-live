@@ -28,7 +28,7 @@ class StageView extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: Space.gutter),
             child: Row(
               children: [
-                StatusDot(ctl.dot, lost: ctl.lost),
+                StatusDot(ctl.dot, lost: ctl.lost || ctl.problem != null),
                 const SizedBox(width: Space.s),
                 Text(ctl.voiceName.isEmpty ? 'Nothing playing' : (ctl.lastSound ?? ctl.nowPreset), style: ui(TypeSize.body, weight: FontWeight.w500)),
                 const Spacer(),

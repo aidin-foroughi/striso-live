@@ -105,30 +105,34 @@ class BuildMenu extends StatelessWidget {
               child: Row(
                 children: [
                   SizedBox(width: 14, child: b.current ? const Pip(Pal.demo, size: 6) : null),
-                  Flexible(
-                    flex: 3,
+                  Expanded(
                     child: Text(
                       b.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: ui(TypeSize.body, color: b.loadable ? (b.current ? Pal.text1 : Pal.text1) : Pal.text3, weight: b.current ? FontWeight.w500 : FontWeight.w400),
+                      style: ui(TypeSize.body, color: b.loadable ? Pal.text1 : Pal.text3, weight: b.current ? FontWeight.w500 : FontWeight.w400),
                     ),
                   ),
-                  const SizedBox(width: Space.m),
-                  Flexible(
-                    flex: 2,
+                  const SizedBox(width: Space.l),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 220),
                     child: Text(
                       b.reason ?? [?b.commit, if (b.onStriso) 'on your Striso'].join(' · '),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.right,
-                      style: ui(TypeSize.small, color: b.reason != null ? Pal.text3 : (b.onStriso ? Pal.ok : Pal.text3)),
+                      style: ui(TypeSize.small, color: b.onStriso && b.reason == null ? Pal.ok : Pal.text3),
                     ),
                   ),
                 ],
               ),
             ),
-          const PopupMenuDivider(height: 9),
+          PopupMenuItem<String>(
+            enabled: false,
+            height: 9,
+            padding: EdgeInsets.zero,
+            child: Container(height: 1, color: Pal.hairline),
+          ),
           PopupMenuItem<String>(
             value: _install,
             height: Sizes.row,
