@@ -188,7 +188,7 @@ void main() {
     expect(find.textContaining('Soprano, alto'), findsOneWidget, reason: 'the description');
     final item = tester.widget<PopupMenuItem<String>>(find.byKey(const Key('build-2026-10-24_audition sax v1 (56f7266)')));
     expect(item.enabled, isFalse, reason: 'cannot be chosen: it does not load');
-    expect(find.text('Install a release zip…'), findsOneWidget);
+    expect(find.text('Install a build or an engine…'), findsOneWidget);
     expect(find.text('Open the firmware folder'), findsOneWidget);
     await tester.tap(find.byKey(const Key('build-mock')));
     await untilLive(tester, ctl);

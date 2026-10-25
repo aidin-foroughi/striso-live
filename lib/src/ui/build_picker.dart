@@ -1,7 +1,8 @@
 // The firmware builds Virtual can run, as sounds to try (docs/flows.md 5): the build chooser that a
 // click on Virtual opens (titles and descriptions, the commit each reports, "on your Striso", the
-// ones that cannot load greyed with the reason, Install a release zip…, Open the firmware folder),
-// and the fixes a problem offers (docs/flows.md 7), run from the banner and the start screen.
+// ones that cannot load greyed with the reason; the engines to add to the build, docs/flows.md 10;
+// Install a build or an engine…, Open the firmware folder), and the fixes a problem offers
+// (docs/flows.md 7), run from the banner and the start screen.
 
 import 'dart:io';
 
@@ -27,6 +28,7 @@ Future<void> showBuildChooser(BuildContext anchor, AppController ctl) async {
   final rect = Rect.fromPoints(box.localToGlobal(Offset.zero, ancestor: overlay), box.localToGlobal(box.size.bottomRight(Offset.zero), ancestor: overlay));
   final position = RelativeRect.fromRect(Rect.fromLTWH(rect.left, rect.bottom + Space.xs, rect.width, 0), Offset.zero & overlay.size);
   final list = ctl.buildList();
+  final engines = ctl.engineList();
   final mock = ctl.virtual.mockOnly;
   final current = mock ? _mock : ctl.virtual.libPath;
   final chosen = await showMenu<String>(
@@ -90,13 +92,18 @@ Future<void> showBuildChooser(BuildContext anchor, AppController ctl) async {
             ],
           ),
         ),
+      if (engines.isNotEmpty) ...[
+        PopupMenuItem<String>(enabled: false, height: 9, padding: EdgeInsets.zero, child: Container(height: 1, color: Pal.hairline)),
+        PopupMenuItem<String>(enabled: false, height: Sizes.row, child: Text('ENGINES TO ADD', style: microStyle())),
+        for (final e in engines) _engineItem(ctl, e),
+      ],
       PopupMenuItem<String>(enabled: false, height: 9, padding: EdgeInsets.zero, child: Container(height: 1, color: Pal.hairline)),
       PopupMenuItem<String>(
         key: const Key('build-install'),
         value: _install,
         height: Sizes.row,
         enabled: ctl.firmwareDir != null,
-        child: Text('Install a release zip…', style: ui(TypeSize.body, color: Pal.text2)),
+        child: Text('Install a build or an engine…', style: ui(TypeSize.body, color: Pal.text2)),
       ),
       PopupMenuItem<String>(
         key: const Key('build-folder'),
@@ -115,10 +122,65 @@ Future<void> showBuildChooser(BuildContext anchor, AppController ctl) async {
     await ctl.playVirtual();
     return;
   }
+  if (chosen.startsWith(_engine)) {
+    await ctl.toggleEngine(chosen.substring(_engine.length));
+    return;
+  }
   await ctl.useBuild(chosen);
 }
 
-const _install = '\u0000install', _folder = '\u0000folder', _mock = '\u0000mock';
+const _install = '\u0000install', _folder = '\u0000folder', _mock = '\u0000mock', _engine = '\u0000engine:';
+
+/// An engine row: ticked, it is loaded with the build that plays (a click restarts Virtual with
+/// the new set); greyed with the firmware's reason when it cannot be added.
+PopupMenuItem<String> _engineItem(AppController ctl, EngineChoice e) {
+  final l = e.loaded;
+  final right = e.reason ?? e.note ?? [e.engine.facts, if (l != null) '${l.count} voices loaded'].where((x) => x.isNotEmpty).join(' · ');
+  return PopupMenuItem<String>(
+    key: Key('engine-${e.engine.name}'),
+    value: '$_engine${e.path}',
+    enabled: e.choosable,
+    height: e.engine.description != null ? Sizes.row + 16 : Sizes.row,
+    child: Row(
+      children: [
+        SizedBox(
+          width: 22,
+          child: Icon(
+            e.ticked ? Icons.check_box_outlined : Icons.check_box_outline_blank,
+            key: Key('engine-${e.engine.name}-${e.ticked ? 'on' : 'off'}'),
+            size: 16,
+            color: e.choosable ? (e.ticked ? Pal.text1 : Pal.text3) : Pal.text3.withValues(alpha: 0.5),
+          ),
+        ),
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(e.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: ui(TypeSize.body, color: e.choosable ? Pal.text1 : Pal.text3)),
+              if (e.engine.description != null)
+                Text(e.engine.description!, maxLines: 1, overflow: TextOverflow.ellipsis, style: ui(TypeSize.small, color: Pal.text3)),
+            ],
+          ),
+        ),
+        const SizedBox(width: Space.l),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 260),
+          child: Tooltip(
+            message: right,
+            child: Text(
+              right,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+              style: ui(TypeSize.small, color: l != null && e.reason == null ? Pal.ok : Pal.text3),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
 
 /// The Virtual control's label while it plays: "Virtual · Sax v1 ▾" (a long folder name cut;
 /// [compact], a narrow window: "Virtual ▾", the title in the tooltip and the status).
@@ -129,12 +191,13 @@ String virtualLabel(AppController ctl, {bool compact = false}) {
   return 'Virtual · $t ▾';
 }
 
-/// A file dialog for a release zip (`striso_virtual-<version>-<platform>.zip`) or a library; what
-/// is picked is installed into the firmware folder and played.
+/// A file dialog for a release zip (`striso_virtual-<version>-<platform>.zip`), a library, or an
+/// engine (its zip or its library); a build is installed into the firmware folder and played, an
+/// engine into the engine folder and added to the build that plays.
 Future<void> installBuild(BuildContext context, AppController ctl) async {
   final f = await openFile(
     acceptedTypeGroups: [
-      XTypeGroup(label: 'striso_virtual', extensions: ['zip', virtualLibName().split('.').last]),
+      XTypeGroup(label: 'striso_virtual or an engine', extensions: ['zip', virtualLibName().split('.').last]),
     ],
   );
   if (f != null) await ctl.installAndUseFirmware(f.path);

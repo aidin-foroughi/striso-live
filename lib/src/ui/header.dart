@@ -335,7 +335,7 @@ class ModeControl extends StatelessWidget {
               IconBtn(
                 Icons.swap_horiz,
                 key: const Key('build-swap'),
-                tooltip: 'Back to ${buildOf(prev).title}, on the same key',
+                tooltip: 'Back to ${ctl.swapTitle ?? buildOf(prev).title}',
                 onPressed: ctl.swapBuild,
               ),
           ],

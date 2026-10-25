@@ -461,4 +461,66 @@ void main() {
       } catch (_) {}
     });
   });
+
+  // an awva engine component (the awva build's sax.<ext> and sax.json), as the striso_virtual
+  // package's test finds it
+  String? component(String name) {
+    final ext = Platform.isWindows ? 'dll' : (Platform.isMacOS ? 'dylib' : 'so');
+    for (final r in [
+      ?Platform.environment['STRISO_ENGINE_DIR'],
+      for (final w in ['awva-sax', 'awva-clarinet', 'awva-flute', 'awva-brassfam']) '../worktrees/$w/build/sdk/components',
+      '../awva/build/sdk/components',
+    ]) {
+      final f = File('$r/$name.$ext');
+      if (f.existsSync()) return f.absolute.path;
+    }
+    return null;
+  }
+
+  final sax = component('sax');
+  testWidgets(
+    'an engine installed from the picker and ticked: added to the build when it reports engines (Stce), else greyed and not loaded',
+    skip: skip != null || sax == null,
+    (tester) async {
+      final dir = await tester.runAsync(() async => Directory.systemTemp.createTempSync('sv_engines'));
+      final ctl = AppController(
+        options: AppOptions(noUsb: true, virtualLib: lib),
+        store: Store('${dir!.path}${Platform.pathSeparator}settings.json'),
+      );
+      await run(tester, ctl.playVirtual());
+      await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+      final own = ctl.voices.length;
+      // Install… takes the engine (with its manifest), kept in the engine folder, ticked: Virtual
+      // starts again with it
+      expect(await run(tester, ctl.installAndAddEngine(sax!)), isTrue, reason: ctl.banner?.text);
+      await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+      final e = ctl.engineList().single;
+      expect(e.title, 'sax', reason: 'its manifest names it');
+      expect(e.engine.path, startsWith(ctl.engineDir!));
+      if (ctl.engineReport == null) {
+        // this build does not report engines: none are given to it
+        expect(e.reason, 'this build cannot add engines');
+        expect(e.ticked, isFalse);
+        expect(ctl.virtual.engineDir, isNull);
+        expect(ctl.voices.length, own, reason: 'nothing loaded that the app could not show');
+      } else {
+        final l = ctl.engineReport!.loaded.single;
+        expect(l.id, 'sax');
+        expect(l.first, own);
+        expect(ctl.voices.length, own + l.count);
+        expect(ctl.voiceName, startsWith('sax:'), reason: 'its first voice, once');
+        expect(ctl.engines().firstWhere((x) => x.engine == 'sax').color, l.color);
+        expect(e.ticked, isTrue);
+        expect(await run(tester, ctl.swapBuild()), isTrue);
+        await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+        expect(ctl.voices.length, own, reason: '⇄: the build without it');
+      }
+      await finish(tester, ctl);
+      await tester.runAsync(() async {
+        try {
+          dir.deleteSync(recursive: true);
+        } catch (_) {}
+      });
+    },
+  );
 }

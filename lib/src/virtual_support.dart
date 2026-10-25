@@ -103,6 +103,14 @@ class VirtualStrisoRuntime implements VirtualRuntime {
   /// How the user knows the build (its manifest's title, else its folder's name); the label.
   String? buildTitle;
 
+  /// The engine folder the next board loads (sv_options.engine_dir, staged by the controller),
+  /// and its library files by name; null: none.
+  String? engineDir;
+  List<String> engineFiles = const [];
+
+  /// Called before a board is made (the controller stages the engines for it).
+  void Function()? beforeOpen;
+
   /// --mock-demo: the Dart mock whatever library there is.
   final bool forceMock;
 
@@ -167,8 +175,9 @@ class VirtualStrisoRuntime implements VirtualRuntime {
 
   @override
   Future<Board> open() async {
+    if ((mockOnly && mock == null) || (!mockOnly && (instrument == null || !instrument!.alive))) beforeOpen?.call();
     if (mockOnly) {
-      mock ??= MockBoard();
+      mock ??= MockBoard(engineFiles: engineFiles);
       return TransportBoard(Mode.virtual, MockTransport(board: mock), label: 'Demo (mock)', hand: mock);
     }
     final l = _lib;
@@ -176,10 +185,13 @@ class VirtualStrisoRuntime implements VirtualRuntime {
     var inst = instrument;
     if (inst == null || !inst.alive) {
       final flash = _readFlash();
-      final b = VirtualBoard(libPath: l.path, flash: flash);
+      final b = VirtualBoard(libPath: l.path, flash: flash, engineDir: engineDir);
       b.startRealtime(); // its own clock until the output takes it over
       inst = instrument = VirtualInstrument(b);
-      log('virtual: ${l.path}, firmware ${l.firmwareVersion}${flash != null ? ', its settings from $flashFile' : ''}');
+      log(
+        'virtual: ${l.path}, firmware ${l.firmwareVersion}${flash != null ? ', its settings from $flashFile' : ''}'
+        '${engineDir != null ? ', engines ${engineFiles.join(' ')} from $engineDir' : ''}',
+      );
       onChanged?.call();
       if (!await waitBack()) throw const VirtualError('The virtual Striso did not start.');
     }
