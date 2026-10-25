@@ -92,6 +92,24 @@ void main() {
     expect(File(p).readAsBytesSync(), libBytes);
   });
 
+  test('macOS: a quarantined download is installed without its quarantine (the real xattr)', () async {
+    Future<bool> quarantined(String path) async => '${(await Process.run('xattr', ['-l', path])).stdout}'.contains('com.apple.quarantine');
+    const mark = '0081;00000000;Safari;';
+    // a library a browser downloaded: copied in, the copy cleared
+    final d = Directory('${tmp.path}${Platform.pathSeparator}downloaded build')..createSync();
+    final f = File('${d.path}${Platform.pathSeparator}$lib')..writeAsBytesSync(libBytes);
+    expect((await Process.run('xattr', ['-w', 'com.apple.quarantine', mark, f.path])).exitCode, 0);
+    expect(await quarantined(f.path), isTrue);
+    final p = await installFirmware(f.path, fwDir(), apiVersion: svApiVersion);
+    expect(await quarantined(p), isFalse, reason: 'installed without the quarantine');
+    // a release zip from the browser: quarantined itself, what it unpacks is not
+    final zip = zipOf(platform: 'macos-universal');
+    expect((await Process.run('xattr', ['-w', 'com.apple.quarantine', mark, zip])).exitCode, 0);
+    final q = await installFirmware(zip, fwDir(), apiVersion: svApiVersion, platform: 'macos-universal');
+    expect(await quarantined(q), isFalse);
+    expect(await quarantined(File(q).parent.path), isFalse);
+  }, skip: Platform.isMacOS ? false : 'macOS only');
+
   test('Windows: a missing C++ runtime is said plainly (MSVCP140_ATOMIC_WAIT.dll is 14.28)', () {
     expect(StrisoVirtualLib.missingRuntime(windows: false), isNull);
     expect(StrisoVirtualLib.missingRuntime(windows: true, open: (_) {}), isNull);

@@ -119,6 +119,18 @@ void main() {
       });
     });
 
+    test('two MIDI 1.0 ports of one device (macOS: one entity, a multi-port interface) stay two inputs', () {
+      fakeAsync((async) {
+        final r = Rig(async, chosen: ['P1', 'P2']);
+        r.fake.plug('P1', name: 'Interface port 1', link: 'entity:42');
+        r.fake.plug('P2', name: 'Interface port 2', link: 'entity:42');
+        expect(r.inputs.start(), isTrue);
+        expect(r.inputs.devices.map((d) => '${d.id}:${d.state.name}'), ['P1:open', 'P2:open'], reason: 'no MIDI 2.0 view: nothing is hidden');
+        expect(r.fake.play('P2', [0x90, 60, 100]), 1);
+        r.inputs.stop();
+      });
+    });
+
     test('unplugged and back: not connected, then reopened by the next refresh', () {
       fakeAsync((async) {
         final r = Rig(async, chosen: ['A']);

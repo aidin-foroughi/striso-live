@@ -245,18 +245,23 @@ class MidiInputs {
   /// Two inputs that are two views of one physical port (the same non-empty [MidiDevice.link]:
   /// a MIDI 2.0 endpoint and the WinMM port the service makes for it) count as one device: the
   /// MIDI 2.0 view is the one listed, chosen and opened (full resolution in midi2 mode, the same
-  /// notes in MPE), the other stays hidden and closed, so no note arrives twice. The id that
-  /// stands for [id]'s device now: itself, unless a better view of it is present.
+  /// notes in MPE), the other stays hidden and closed, so no note arrives twice. Only a MIDI 2.0
+  /// view makes them one: two MIDI 1.0 inputs of one link (on macOS, two ports of one entity:
+  /// a multi-port interface) are two inputs. The id that stands for [id]'s device now: a MIDI 2.0
+  /// view of it when one is present; when [id] itself is gone, a view of it that is there (the
+  /// 2.0 view went: its 1.0 port); else itself.
   String _canon(String id) {
     final d = _find(id);
+    if (d != null && d.present && d.midi2) return id;
     final link = d != null && d.link.isNotEmpty ? d.link : _linkOf[id];
     if (link == null || link.isEmpty) return id;
-    MidiDevice? best;
+    String? any;
     for (final x in _list) {
       if (x.link != link || !x.present) continue;
-      if (best == null || (x.midi2 && !best.midi2)) best = x;
+      if (x.midi2) return x.id;
+      any ??= x.id;
     }
-    return best?.id ?? id;
+    return d != null && d.present ? id : (any ?? id);
   }
 
   bool _hidden(MidiDevice d) => d.link.isNotEmpty && _canon(d.id) != d.id;

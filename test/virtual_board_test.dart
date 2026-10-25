@@ -201,6 +201,14 @@ void main() {
     expect(ctl.status, startsWith('Virtual ·'));
     expect(ctl.playable, isTrue);
     expect(ctl.voices.length, ctl.virtual.instrument!.board.state.voices);
+    // mono legato on the firmware itself: key 9 switches it, StcY reports it, the app reads it back
+    expect(ctl.legato, isNotNull, reason: 'this firmware reports legato= in StcY');
+    final was = ctl.legato!;
+    expect(ctl.legatoSwitchable, isTrue);
+    expect(await run(tester, ctl.toggleLegato()), isTrue);
+    await waitFor(tester, () => ctl.legato == !was);
+    expect(await run(tester, ctl.toggleLegato()), isTrue);
+    await waitFor(tester, () => ctl.legato == was);
     // playing it by hand: the stream shows the key
     ctl.playBoard!.press(30, pres: 0.5, strike: 0.6);
     await waitFor(tester, () => ctl.live.activeCount() > 0);

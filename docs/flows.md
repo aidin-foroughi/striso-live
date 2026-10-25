@@ -299,3 +299,60 @@ The flows are the same. What differs is named where it happens: the library's fi
 (`libstriso_virtual.dylib`), the quarantine problem and its fix (macOS), the WinUSB driver and the
 C++ runtime problems (Windows), the microphone permission for Through PC (macOS, in Setup › Audio),
 and how the firmware folder is opened (`open`, `explorer`).
+
+## 10. Later: engines as sounds (a proposal, not built)
+
+The virtual board can load engine components (awva's C ABI, `nsc.h`: one engine per DLL / dylib)
+from a folder, `sv_options.engine_dir` (striso-control-firmware combined 239de55). They are listed
+after the compiled-in engines in the voice list (`Stcv`) and play through the board's own voice
+controls, so a loaded engine gets exactly what a compiled-in one would. This is how a new engine
+can be tried without a firmware build: the build stays, the engine is added.
+
+**Where it shows.** In the build chooser, under the builds, a second list:
+
+```
+│ VIRTUAL · PLAY A BUILD                                          │
+│ ● v2.2.4-330                                       239de55     │
+│   Sax v1                                           56f7266     │
+│ ─────────────────────────────────────────────────────────────── │
+│ ENGINES TO ADD                                                  │
+│ ☑ Trumpet stage 3            awva 1f77d1a · 9 presets           │  ← loaded with the build that plays
+│ ☐ Bowed v4                   awva 84fa4ab · 12 presets          │
+│   Double reed v0             built for another engine ABI (1)   │  ← greyed, with why
+│ ─────────────────────────────────────────────────────────────── │
+│   Install a release zip…   (a build or an engine)               │
+│   Open the firmware folder                                      │
+```
+
+- **An engine is a checkbox, a build is a choice.** Exactly one build plays; any number of
+  engines are loaded with it. Ticking or unticking restarts Virtual on the same build with the new
+  set (about 0.3 s, the same key as a build switch), and the choice is remembered with the build.
+- **Named like builds**: a `manifest.json` next to the library (`title`, `description`,
+  `version`, `platform`, `abi`, `sha256`, the awva commit), else the folder's name. They live in
+  `<app data>/engines/<name>/` beside `firmware/`. Install a release zip… takes either kind (the
+  manifest says which: `"kind": "engine"`).
+- **Trying it is one more click than a build**: tick it, then pick it in Play's engine row, where
+  it appears after the compiled-in engines (the firmware lists it). It has no voice key on the
+  Striso, so the same-key rule cannot apply; the app selects its first preset once, on the tick.
+  ⇄ in the header then compares "the build with the engine" against "the build without it" (the
+  previous set), on that voice.
+- **Greyed with the reason**, as builds are: another engine ABI (`NSC_ABI`), not an engine
+  component, the Microsoft C++ runtime missing (Windows), kept in quarantine (macOS, with Clear
+  quarantine), and engines the firmware refused when it loaded them.
+- **The app passes only a folder.** It stages the ticked engines into one folder per run
+  (`<app data>/engines/.loaded/`, links or copies) and hands it to `sv_create` as `engine_dir`. It
+  never reads an engine itself beyond its manifest and a probe of its ABI version (the same probe
+  as builds: load, read, unload).
+
+**What the firmware would need to report** (read-only, no app-side guessing):
+
+- Which entries of the voice list come from a loaded engine, and from which file: a flag or a
+  source in `Stcv`, or a short `StcE` listing (`E <engine> <file> ok|<why>`), so the engine row
+  can mark them and a refusal can be shown with the firmware's own reason.
+- The engine's colour for the engine row: the manifest could carry one, or the firmware the
+  voice-key colour it would give it (today a loaded engine gets a colour of its own).
+
+**What the app would need**: `sv_options.engine_dir` in the bindings (the struct's size grows; the
+firmware checks it), the second list in the chooser, and the staging folder. Nothing else changes:
+voices, parameters, hero knobs (StcH) and presets of a loaded engine come from the firmware like
+any other's.
