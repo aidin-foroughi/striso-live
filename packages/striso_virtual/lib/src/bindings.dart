@@ -120,7 +120,7 @@ List<String> strisoVirtualCandidates({String? explicit}) {
     if (d.parent.path == d.path) break;
   }
   for (final fw in fws) {
-    for (final preset in ['host-virtual', 'host']) {
+    for (final preset in ['host-virtual', 'host-virtual-universal', 'host']) {
       out.add('$fw/build/$preset/virtual/$name');
     }
   }

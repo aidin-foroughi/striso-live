@@ -186,8 +186,8 @@ resets; Alt+click locks against Mutate.
 | `--mock-demo` | Virtual on the Dart mock board instead (no native library) |
 | `--no-usb` | never touch USB |
 | `--fake-save[=fail]` | Save to Striso runs every step except the drive (works in the demo) |
-| `--hidden` | Windows: the window starts minimized and off-screen |
-| `--smoke=<s>` | log a line and quit after s seconds (implies `--hidden` on Windows) |
+| `--hidden` | the window stays out of sight (Windows: minimized and off-screen; macOS: invisible, no Dock icon) |
+| `--smoke=<s>` | log a line and quit after s seconds (implies `--hidden`) |
 | `--no-audio` | no Through PC or Record (the audio library is not loaded) |
 
 `STRISO_LIVE_HOME` moves the data folder (tests, smoke runs).

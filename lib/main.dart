@@ -5,8 +5,8 @@
 //   --no-usb          never touch USB (smoke tests, screenshots)
 //   --fake-save[=fail] Save to Striso goes through every step except the drive
 //   --no-audio        no Through PC / Record (the audio library is not loaded)
-//   --smoke=<s>       log a smoke line and quit after s seconds (with --hidden in the runner:
-//                     the window stays minimized and off-screen)
+//   --smoke=<s>       log a smoke line and quit after s seconds (the runner keeps the window
+//                     out of sight: minimized and off-screen on Windows, invisible on macOS)
 //
 // Every error goes to the console drawer and the log file; none opens a native dialog.
 
@@ -100,9 +100,10 @@ void main(List<String> args) {
     final smoke = args.where((a) => a.startsWith('--smoke=')).map((a) => double.tryParse(a.substring(8))).firstOrNull;
     if (smoke != null) {
       Timer(Duration(milliseconds: (smoke * 1000).round()), () async {
+        final midi = ctl.midi;
         appLog.info(
           'smoke: ok after ${smoke}s, ${ctl.connected ? 'connected (${ctl.mode?.name})' : 'not connected'}, ${ctl.voices.length} voices, '
-          'audio ${ctl.audio.state.name}',
+          'audio ${ctl.audio.state.name}, ${midi == null ? 'no MIDI' : 'MIDI inputs (${midi.devices.length}): ${midi.devices.map((d) => '${d.name} [${d.text}]').join(', ')}'}',
         );
         // the same way out as closing the window: the exit handler lets go of the board
         if (!closeOwnWindow()) await ServicesBinding.instance.exitApplication(AppExitType.cancelable);

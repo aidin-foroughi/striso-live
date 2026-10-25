@@ -14,6 +14,15 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
 
+    // --hidden or --smoke=<s> (smoke tests): the window stays invisible and off-screen, takes no
+    // clicks, and the app no Dock icon or focus (as the Windows runner's minimized, off-screen one)
+    if CommandLine.arguments.contains(where: { $0 == "--hidden" || $0.hasPrefix("--smoke=") }) {
+      NSApp.setActivationPolicy(.prohibited)
+      self.alphaValue = 0
+      self.ignoresMouseEvents = true
+      self.setFrameOrigin(NSPoint(x: -32000, y: -32000))
+    }
+
     super.awakeFromNib()
   }
 }
