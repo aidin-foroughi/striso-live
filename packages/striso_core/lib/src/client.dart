@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'board_state.dart';
+import 'engines.dart';
 import 'protocol.dart';
 import 'transport.dart';
 import 'tuning.dart';
@@ -346,6 +347,20 @@ class StrisoClient {
       return Take.done;
     }, timeout: timeout);
     return r.state['h'] as HeroKnobs?;
+  }
+
+  /// The engines the virtual board loaded from its engine folder (Stce, docs/flows.md 10); null
+  /// without a reply (a build that cannot load engines does not answer).
+  Future<EngineReport?> getEngines({Duration timeout = const Duration(milliseconds: 500)}) async {
+    final r = await request(
+      commandChar('e'),
+      (l, s) {
+        if (!isEngineReportLine(l)) return Take.no;
+        return l.trim() == 'e end' ? Take.done : Take.more;
+      },
+      timeout: timeout,
+    );
+    return parseEngineReport(r.lines);
   }
 
   /// The state's change counter (Stcy): it goes up whenever anything the board reports changed.

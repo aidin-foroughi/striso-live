@@ -228,6 +228,28 @@ const List<_Engine> _engines = [
   _Engine('trumpet', ['bb classical', 'bb jazz', 'c trumpet', 'piccolo', 'cornet', 'harmon', 'cup mute', 'straight', 'plunger'], _trumpet, 9400),
 ];
 
+/// The engine ABI the mock loads (NSC_ABI), as the virtual board reports it in Stce.
+const mockEngineAbi = 1;
+
+/// An engine component as the mock "loads" it from its engine folder: what the firmware's Stce
+/// reports for it (docs/flows.md 10), recorded in that form. [refuse]: the reason and detail it
+/// is refused with, else it loads with [presets] in [color].
+class MockComponent {
+  final List<String> presets;
+  final int color;
+  final (String, String)? refuse;
+  const MockComponent(this.presets, {this.color = 0x808080, this.refuse});
+}
+
+/// The components the mock knows, by the library's name without its extension (the awva builds':
+/// sax and clarinet load; flute is for another engine ABI). Any other file is refused as a
+/// library the OS would not load.
+const mockComponents = <String, MockComponent>{
+  'sax': MockComponent(['soprano sax', 'alto sax', 'tenor sax', 'baritone sax'], color: 0xc08040),
+  'clarinet': MockComponent(['clarinet', 'bass clarinet'], color: 0x40a0ff),
+  'flute': MockComponent([], refuse: ('abi', '2 1')),
+};
+
 class _Entry {
   final String engine;
   final String? preset;
@@ -459,7 +481,15 @@ class MockBoard implements PlayableBoard {
   double _motionAcc = 0, _idleAcc = 0;
   Timer? _timer;
 
+  /// The engine folder's library files the mock loads (names; MockComponent), and whether it
+  /// answers Stce at all (false: a build that cannot load engines).
+  final List<String> engineFiles;
+  final bool answersEngines;
+  final _engineLines = <String>[];
+
   MockBoard({
+    this.engineFiles = const [],
+    this.answersEngines = true,
     this.autoplay = true,
     this.motionEnabled = true,
     this.idleFrames = 500,
@@ -478,6 +508,7 @@ class MockBoard implements PlayableBoard {
         }
       }
     }
+    _loadEngines();
     voice = _entries.indexWhere((e) => e.engine == 'va'); // DEFAULT_ENGINE = va
     values = _presetValues(_entries[voice].eng.params, _entries[voice].seed);
     _config = config;
@@ -600,6 +631,12 @@ class MockBoard implements PlayableBoard {
     } else if (ch == 'H') {
       final name = _entries[voice].name;
       _print('H $voice ${heroReply?.call(name) ?? mockHeroReplies[name] ?? '| rvmix dlmix'}\r\n');
+    } else if (ch == 'e') {
+      if (answersEngines) {
+        for (final l in _engineLines) {
+          _print('$l\r\n');
+        }
+      }
     } else if (ch == 'Y') {
       _print('${_stateLine()}\r\n');
     } else if (ch == 'y') {
@@ -616,6 +653,37 @@ class MockBoard implements PlayableBoard {
     } else if (ch == 'P') {
       _print('profile over 1500 blocks, voice ${_entries[voice].name}, mock\r\n');
     }
+  }
+
+  // the engine folder, as the virtual board loads it: in file name order, after its own engines
+  void _loadEngines() {
+    final files = [...engineFiles]..sort();
+    _engineLines.add('e engines $mockEngineAbi ${files.length}');
+    for (final f in files) {
+      final dot = f.lastIndexOf('.');
+      final name = dot > 0 ? f.substring(0, dot) : f;
+      final c = mockComponents[name];
+      if (c == null) {
+        _engineLines.add('e err library $f|mock: $f is not a component the mock knows');
+        continue;
+      }
+      final r = c.refuse;
+      if (r != null) {
+        _engineLines.add('e err ${r.$1} $f|${r.$2}');
+        continue;
+      }
+      final first = _entries.length;
+      final eng = _Engine(name, c.presets.isEmpty ? null : c.presets, _reed, 9000);
+      if (c.presets.isEmpty) {
+        _entries.add(_Entry(name, null, eng, first * 7));
+      } else {
+        for (var j = 0; j < c.presets.length; j++) {
+          _entries.add(_Entry(name, c.presets[j], eng, first * 7 + j));
+        }
+      }
+      _engineLines.add('e ok $first ${_entries.length - first} ${c.color.toRadixString(16).padLeft(6, '0')} $name $f');
+    }
+    _engineLines.add('e end');
   }
 
   void _printParams(int target) {

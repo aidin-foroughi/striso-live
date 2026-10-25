@@ -220,6 +220,51 @@ void main() {
       await c.disconnect();
     });
 
+    test('Stce: the loaded engines and the refused ones, as the virtual board reports them', () async {
+      final t = MockTransport(board: MockBoard(engineFiles: ['sax.dll', 'flute.dll', 'notes.dll']));
+      final c = StrisoClient(t);
+      await c.connect();
+      final own = MockBoard().voiceCount;
+      final r = await c.getEngines();
+      expect(r, isNotNull);
+      expect(r!.abi, mockEngineAbi);
+      expect(r.files, 3);
+      expect(r.loaded.single.id, 'sax');
+      expect(r.loaded.single.first, own, reason: 'after the build\'s own entries');
+      expect(r.loaded.single.count, 4);
+      expect(r.loaded.single.color, 0xc08040);
+      expect(r.refusedFile('flute.dll')?.reason, 'abi');
+      expect(r.refusedFile('flute.dll')?.detail, '2 1');
+      expect(r.refusedFile('notes.dll')?.reason, 'library');
+      final voices = await c.listVoices();
+      expect(voices.length, own + 4);
+      expect(r.ofVoice(own + 1)?.id, 'sax');
+      expect(voices[own + 1].name, 'sax:alto sax');
+      expect(r.ofVoice(own - 1), isNull);
+      await c.disconnect();
+      // a build that cannot load engines does not answer
+      final n = StrisoClient(MockTransport(board: MockBoard(answersEngines: false)));
+      await n.connect();
+      expect(await n.getEngines(timeout: const Duration(milliseconds: 150)), isNull);
+      await n.disconnect();
+    });
+
+    test('Stce parsing: a file name with spaces, an unknown reason as it is, a cut reply is none', () {
+      final r = parseEngineReport([
+        'e engines 1 2',
+        'e ok 70 2 0a0b0c reed my reed.dll',
+        'e err new-reason other one.dll|its detail | with a bar',
+        'e end',
+      ])!;
+      expect(r.loaded.single.file, 'my reed.dll');
+      expect(r.loaded.single.color, 0x0a0b0c);
+      expect(r.refused.single.reason, 'new-reason');
+      expect(r.refused.single.file, 'other one.dll');
+      expect(r.refused.single.detail, 'its detail | with a bar');
+      expect(parseEngineReport(['e engines 1 0']), isNull);
+      expect(parseEngineReport(['e engines 1 0', 'e end'])!.loaded, isEmpty);
+    });
+
     test('unplug is reported and pending commands resolve', () async {
       final t = MockTransport();
       final c = StrisoClient(t);
