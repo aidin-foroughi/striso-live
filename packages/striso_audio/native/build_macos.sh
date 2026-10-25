@@ -16,7 +16,7 @@ for a in "$@"; do
 done
 mkdir -p "$OUT"
 LIB="$OUT/libstriso_audio.dylib"
-FLAGS="-O2 -std=gnu11 -fblocks -arch arm64 -arch x86_64 -mmacosx-version-min=10.15 -Wall -Wno-deprecated-declarations -Wno-unused-function"
+FLAGS="-O2 -std=gnu11 -fblocks -arch arm64 -arch x86_64 -mmacosx-version-min=11.0 -Wall -Wno-deprecated-declarations -Wno-unused-function"
 clang $FLAGS -fvisibility=hidden -DSA_BUILD_DLL -I"$HERE/include" -I"$HERE/third_party/miniaudio" \
   -dynamiclib -install_name @rpath/libstriso_audio.dylib -o "$LIB" \
   "$HERE/src/striso_audio.c" "$HERE/src/sa_core.c" "$HERE/src/sa_platform.c" "$HERE/src/selftest.c" \

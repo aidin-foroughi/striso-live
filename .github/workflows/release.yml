@@ -183,7 +183,7 @@ jobs:
           tar xjf libusb.tar.bz2
           cd "libusb-${LIBUSB_VERSION}"
           ./configure --disable-dependency-tracking --disable-static --prefix="$RUNNER_TEMP/libusb" \
-            CFLAGS="-arch arm64 -arch x86_64 -mmacosx-version-min=10.15 -O2" LDFLAGS="-arch arm64 -arch x86_64 -mmacosx-version-min=10.15"
+            CFLAGS="-arch arm64 -arch x86_64 -mmacosx-version-min=11.0 -O2" LDFLAGS="-arch arm64 -arch x86_64 -mmacosx-version-min=11.0"
           make -j4
           make install
           lipo -archs "$RUNNER_TEMP/libusb/lib/libusb-1.0.0.dylib"
