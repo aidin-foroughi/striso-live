@@ -78,6 +78,15 @@ void main() {
     }
   });
 
+  // a build of the firmware before MIDI 2.0 (C API 1): $STRISO_VIRTUAL_API1_LIB
+  final old = Platform.environment['STRISO_VIRTUAL_API1_LIB'];
+  test('a library of C API 1 is refused, with what to do', skip: old == null || !File(old).existsSync() ? 'no STRISO_VIRTUAL_API1_LIB' : false, () {
+    expect(
+      () => StrisoVirtualLib.load(explicit: old),
+      throwsA(predicate((e) => '$e'.contains('its C API is version 1, this app speaks version 2: use a firmware build for this app'))),
+    );
+  });
+
   test('another C API version is refused, with what to do', () {
     expect(StrisoVirtualLib.apiMismatch(svApiVersion), isNull);
     expect(StrisoVirtualLib.apiMismatch(svApiVersion + 1), contains('use a firmware build for this app'));

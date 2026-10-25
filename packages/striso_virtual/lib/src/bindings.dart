@@ -5,7 +5,7 @@
 import 'dart:ffi';
 import 'dart:io';
 
-const svApiVersion = 1;
+const svApiVersion = 2;
 
 // sv_usb_state
 const svUsbDetached = 0, svUsbAttached = 1, svUsbBootloader = 2;
@@ -88,6 +88,8 @@ typedef SvBU32Fn = Uint32 Function(Pointer<Void>);
 typedef SvBU64Fn = Uint64 Function(Pointer<Void>);
 typedef SvBytesFn = Int32 Function(Pointer<Void>, Pointer<Uint8>, Int32);
 typedef SvBytesDartFn = int Function(Pointer<Void>, Pointer<Uint8>, int);
+typedef SvWordsFn = Int32 Function(Pointer<Void>, Pointer<Uint32>, Int32);
+typedef SvWordsDartFn = int Function(Pointer<Void>, Pointer<Uint32>, int);
 typedef SvKeyFn = Int32 Function(Pointer<Void>, Int32, Int32, Int32, Int32, Int32, Int32);
 typedef SvKeyDartFn = int Function(Pointer<Void>, int, int, int, int, int, int);
 typedef SvBIIFn = Int32 Function(Pointer<Void>, Int32, Int32);
@@ -151,6 +153,9 @@ class StrisoVirtualLib {
   late final SvBytesDartFn consoleRead = _l.lookupFunction<SvBytesFn, SvBytesDartFn>('sv_console_read');
   late final SvBytesDartFn midiWrite = _l.lookupFunction<SvBytesFn, SvBytesDartFn>('sv_midi_write');
   late final SvBytesDartFn midiRead = _l.lookupFunction<SvBytesFn, SvBytesDartFn>('sv_midi_read');
+
+  /// MIDI 2.0 in (API 2): whole Universal MIDI Packets, 32-bit words.
+  late final SvWordsDartFn umpWrite = _l.lookupFunction<SvWordsFn, SvWordsDartFn>('sv_ump_write');
   late final SvKeyDartFn injectKey = _l.lookupFunction<SvKeyFn, SvKeyDartFn>('sv_inject_key');
   late final SvBIIDartFn injectControl = _l.lookupFunction<SvBIIFn, SvBIIDartFn>('sv_inject_control');
   late final SvMotionDartFn injectMotion = _l.lookupFunction<SvMotionFn, SvMotionDartFn>('sv_inject_motion');

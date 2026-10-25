@@ -310,6 +310,32 @@ void main() {
       print('MIDI note: rms ${_rms(before).toStringAsExponential(2)} before, ${_rms(x).toStringAsExponential(2)} held, ${_rms(after).toStringAsExponential(2)} after');
     });
 
+    test('a MIDI 2.0 note through sv_ump_write reaches a voice and sounds, and stops', () {
+      final b = VirtualBoard();
+      addTearDown(b.dispose);
+      expect(b.selectVoice(15), isTrue); // bowed:violin
+      b.render(4800);
+      final before = b.render(9600);
+      // UMP type 4 (MIDI 2.0 channel voice), group 0, channel 1 (the first MPE member):
+      // channel pressure (32 bit) at about 55%, then a note-on, note 62, velocity 0xB000 of 0xFFFF
+      const press = [0x40D10000, 0x8CCCCCCC], on = [0x40913E00, 0xB0000000], off = [0x40813E00, 0x50000000];
+      expect(b.umpWrite([...press, ...on]), 4);
+      final held = <double>[];
+      for (var i = 0; i < 50; i++) {
+        held.addAll(b.render(480));
+      }
+      expect(b.state.controls.any((c) => c[1] > 0), isTrue, reason: 'a voice has the note\'s pressure');
+      expect(b.umpWrite(off), 2);
+      b.render(48000 * 4);
+      final after = b.render(9600);
+      final x = Float32List.fromList(held);
+      expect(_rms(before), lessThan(1e-4));
+      expect(_rms(x), greaterThan(1e-3), reason: 'the note sounds');
+      expect(_rms(after), lessThan(1e-4), reason: 'and stops after its note-off');
+      // ignore: avoid_print
+      print('UMP note: rms ${_rms(before).toStringAsExponential(2)} before, ${_rms(x).toStringAsExponential(2)} held, ${_rms(after).toStringAsExponential(2)} after');
+    });
+
     test('a parameter change alters the render; the same inputs render the same', () {
       Float32List take(double? gain) {
         final b = VirtualBoard();

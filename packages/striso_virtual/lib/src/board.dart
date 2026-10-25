@@ -202,6 +202,16 @@ class VirtualBoard {
     return lib.midiWrite(_h, _io, n) >= 0;
   }
 
+  /// Universal MIDI Packets (32-bit words, whole packets) into the board's MIDI 2.0 input
+  /// (sv_ump_write): MIDI 2.0 channel voice messages play the synth in their resolution. Returns
+  /// the words taken (n), or < 0 (svEBusy: its queue is full, svENoDev: not attached).
+  int umpWrite(List<int> words) {
+    final n = words.length;
+    if (n * 4 > 65536) throw ArgumentError('at most 16384 words at a time');
+    _io.cast<Uint32>().asTypedList(n).setAll(0, words);
+    return lib.umpWrite(_h, _io.cast<Uint32>(), n);
+  }
+
   /// The board's USB MIDI out: 4-byte USB-MIDI packets.
   Uint8List midiRead() {
     final n = lib.midiRead(_h, _io, 65536);
