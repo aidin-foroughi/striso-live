@@ -8,8 +8,8 @@
 # /Applications is not writable without sudo), clears the download quarantine (the app is not
 # notarized) and opens it. Run it again to update.
 #
-# Options (environment variables, e.g. curl ... | STRISO_LIVE_VERSION=v1.1.0 bash):
-#   STRISO_LIVE_VERSION=v1.1.0   a release tag (default: the latest release)
+# Options (environment variables, e.g. curl ... | STRISO_LIVE_VERSION=v1.3.0 bash):
+#   STRISO_LIVE_VERSION=v1.3.0   a release tag (default: the latest release)
 #   STRISO_LIVE_DIR=<folder>     install into this folder
 #   STRISO_LIVE_NO_OPEN=1        do not open the app afterwards
 #   STRISO_LIVE_DRY_RUN=1        only print what would be downloaded and where it would go

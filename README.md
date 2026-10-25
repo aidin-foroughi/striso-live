@@ -34,6 +34,11 @@ anyway**.
 
 The firmware, its build and flash tools are in
 [striso-control-firmware](https://github.com/aidin-foroughi/striso-control-firmware) (`tools/`).
+**Striso Live 1.3 needs firmware v2.2.4-231 or newer**: one that reports its settings layout, its
+state and its hero knobs (StcX, StcY, Stcy, StcH). With an older firmware the app connects, reads
+the version and stops with *This Striso needs a firmware update* (the version it found, Copy
+version, Play Virtual); there is no fallback for older firmware. Virtual loads `striso_virtual`
+builds of C API 2, with the same firmware requirement. What changed is in `CHANGELOG.md`.
 
 It shows the playing on the real key layout (pressure, tilt, strikes, motion), browses voices and
 presets, edits the live parameters (voice and effects) with undo, mutate and a morph pad, keeps
@@ -255,11 +260,12 @@ windows-latest and macos-latest (with a universal libusb for macOS) for every pu
 every pull request, and uploads the zips and the dmg as workflow artifacts. It clones the firmware
 next to the app so the cross-checks run.
 
-**Releases.** Set the version in `pubspec.yaml`, commit, then push a matching tag:
-`git tag v1.1.0 && git push origin v1.1.0`. `.github/workflows/release.yml` tests, builds the
-Windows zip and installer and the universal macOS dmg and zip, and publishes a GitHub Release with
-them, fixed-name copies for the install scripts (`StrisoLive-macos.zip`,
-`StrisoLive-windows-x64.zip`, each with a `.sha256`), `SHA256SUMS.txt` and generated notes. Run by
+**Releases.** Set the version in `pubspec.yaml`, add its section to `CHANGELOG.md`, commit, then
+push a matching tag: `git tag -a v1.3.0 -m "Striso Live 1.3.0" && git push origin main v1.3.0`.
+`.github/workflows/release.yml` tests, builds the Windows zip and installer and the universal macOS
+dmg and zip, and publishes a GitHub Release with them, fixed-name copies for the install scripts
+(`StrisoLive-macos.zip`, `StrisoLive-windows-x64.zip`, each with a `.sha256`), `SHA256SUMS.txt`
+and the version's section of `CHANGELOG.md` as its notes. Run by
 hand (Actions, Release, Run workflow) it only builds, as workflow artifacts.
 
 Headless USB check (no window; read-only: V, v, p, f, S, s):

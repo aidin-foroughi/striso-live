@@ -7,8 +7,8 @@
 # %LOCALAPPDATA%\Programs\Striso Live (the installer's folder too: its uninstaller is kept), adds a
 # Start menu shortcut and starts the app. Run it again to update.
 #
-# Options (environment variables, set before running, e.g. $env:STRISO_LIVE_VERSION = 'v1.1.0'):
-#   STRISO_LIVE_VERSION=v1.1.0   a release tag (default: the latest release)
+# Options (environment variables, set before running, e.g. $env:STRISO_LIVE_VERSION = 'v1.3.0'):
+#   STRISO_LIVE_VERSION=v1.3.0   a release tag (default: the latest release)
 #   STRISO_LIVE_DIR=<folder>     install into this folder
 #   STRISO_LIVE_NO_OPEN=1        do not start the app afterwards
 #   STRISO_LIVE_NO_SHORTCUT=1    no Start menu shortcut

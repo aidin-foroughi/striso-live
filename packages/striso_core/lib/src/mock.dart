@@ -485,11 +485,15 @@ class MockBoard implements PlayableBoard {
   /// answers Stce at all (false: a build that cannot load engines).
   final List<String> engineFiles;
   final bool answersEngines;
+
+  /// The firmware as released upstream (v2.2.4): it does not answer StcX, StcY, Stcy or StcH.
+  final bool stockFirmware;
   final _engineLines = <String>[];
 
   MockBoard({
     this.engineFiles = const [],
     this.answersEngines = true,
+    this.stockFirmware = false,
     this.autoplay = true,
     this.motionEnabled = true,
     this.idleFrames = 500,
@@ -624,11 +628,11 @@ class MockBoard implements PlayableBoard {
       _rxPayload.clear();
     } else if (ch == 'N') {
       _printTuning();
-    } else if (ch == 'X') {
+    } else if (ch == 'X' && !stockFirmware) {
       for (final l in mockSettingsLayoutReply) {
         _print('$l\r\n');
       }
-    } else if (ch == 'H') {
+    } else if (ch == 'H' && !stockFirmware) {
       final name = _entries[voice].name;
       _print('H $voice ${heroReply?.call(name) ?? mockHeroReplies[name] ?? '| rvmix dlmix'}\r\n');
     } else if (ch == 'e') {
@@ -637,9 +641,9 @@ class MockBoard implements PlayableBoard {
           _print('$l\r\n');
         }
       }
-    } else if (ch == 'Y') {
+    } else if (ch == 'Y' && !stockFirmware) {
       _print('${_stateLine()}\r\n');
-    } else if (ch == 'y') {
+    } else if (ch == 'y' && !stockFirmware) {
       _stateLine();
       _print('y $_stateCount\r\n');
     } else if (ch == 'U') {

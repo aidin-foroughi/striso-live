@@ -28,6 +28,9 @@ class _BusyTransport implements Transport {
 class FakeUsb implements UsbBackend {
   bool present = true;
   int busy = 0, opened = 0, probes = 0;
+
+  /// The board runs the firmware as released upstream (no StcX, StcY, StcH).
+  bool stock = false;
   MockTransport? last;
 
   @override
@@ -43,7 +46,7 @@ class FakeUsb implements UsbBackend {
       return _BusyTransport();
     }
     opened++;
-    return last = MockTransport(board: MockBoard(autoplay: false, idleFrames: 0));
+    return last = MockTransport(board: MockBoard(autoplay: false, idleFrames: 0, stockFirmware: stock, firmware: stock ? 'striso_control_strisoboard_v2.2.4' : 'striso_control_strisoboard_v2.2.4-voices-mock'));
   }
 
   /// Pull the cable.
@@ -128,6 +131,20 @@ void main() {
     await finish(tester, ctl);
   });
 
+  testWidgets('an older firmware: no session, the problem says which firmware the app needs and what to do', (tester) async {
+    final usb = FakeUsb()..stock = true;
+    final ctl = make(usb, intent: 'connected');
+    await pumpUntil(tester, ctl.start());
+    await waitFor(tester, () => ctl.problem != null);
+    expect(ctl.connected, isFalse);
+    final p = ctl.problem!;
+    expect(p.title, 'This Striso needs a firmware update');
+    expect(p.detail, contains(minFirmware));
+    expect(p.detail, contains('runs strisoboard_v2.2.4.'));
+    expect(p.detail, contains('Flash a newer firmware'));
+    expect(p.actions, containsAll([Fix.copyVersion, Fix.playVirtual]));
+    await finish(tester, ctl);
+  });
   testWidgets('first launch (nothing chosen yet): a Striso on USB connects by itself; one plugged in later too, after 4 s', (tester) async {
     final usb = FakeUsb();
     final ctl = make(usb);

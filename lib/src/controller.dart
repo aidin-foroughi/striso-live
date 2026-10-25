@@ -141,6 +141,11 @@ class BuildProbe {
   const BuildProbe(this.stamp, {this.api, this.firmwareVersion, this.failure});
 }
 
+/// The oldest firmware this app works with: the first that reports its settings layout (StcX), its
+/// state and change counter (StcY, Stcy) and its hero knobs (StcH), striso-control-firmware
+/// 59ff425. There is no older path: an older firmware is told to update.
+const minFirmware = 'v2.2.4-231';
+
 /// "2026-10-25_v2.2.4-308-g3e05282_all" or "strisoboard_v2.2.4-308-g3e05282" -> "3e05282".
 String? commitOf(String? v) => v == null ? null : RegExp(r'-g([0-9a-f]{7,})').firstMatch(v)?.group(1);
 
@@ -768,7 +773,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
         if (s.mode == Mode.virtual) {
           return Problem(
             '$title is too old for Striso Live',
-            'It runs ${virtual.version ?? 'an old firmware'}; the app needs StcX, Stcy and StcH. Pick a newer build.',
+            'It runs ${virtual.version ?? 'an old firmware'}; Striso Live needs firmware $minFirmware or newer (it reports its settings layout, state and hero knobs). Pick a newer build.',
             const [Fix.pickBuild],
           );
         }
@@ -776,8 +781,8 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
         return Problem(
           'This Striso needs a firmware update',
           fw == null
-              ? 'Striso Live needs the current firmware, and this Striso did not say which it runs. Flash the latest release, then plug it in again.'
-              : 'Striso Live needs the current firmware; this Striso runs $fw. Flash the latest release, then plug it in again.',
+              ? 'Striso Live needs firmware $minFirmware or newer, and this Striso did not say which it runs. Flash a newer firmware, then plug it in again.'
+              : 'Striso Live needs firmware $minFirmware or newer (it reports its settings layout, state and hero knobs); this Striso runs $fw. Flash a newer firmware, then plug it in again.',
           [if (fw != null) Fix.copyVersion, Fix.playVirtual],
         );
       case FailKind.library:
