@@ -81,6 +81,7 @@ class MidiInputs {
 
   final _chosen = <String>{};
   final _names = <String, String>{}; // last known names of chosen ids (shown while unplugged)
+  final _linkOf = <String, String>{}; // the physical port each id was last seen with
   final _listeners = <void Function()>[];
   final _result = <String, int>{}; // the last open's result per chosen id
   final _samples = <({int t, Map<String, int> msgs})>[];
@@ -200,8 +201,10 @@ class MidiInputs {
     _listeners.clear();
   }
 
-  /// Chooses or drops an input; while started it opens or closes at once.
+  /// Chooses or drops an input (either view of a device chooses the device); while started it
+  /// opens or closes at once.
   void select(String id, bool on) {
+    id = _canon(id);
     final changed = on ? _chosen.add(id) : _chosen.remove(id);
     if (!changed) return;
     final d = _find(id);
@@ -239,12 +242,52 @@ class MidiInputs {
     return null;
   }
 
+  /// Two inputs that are two views of one physical port (the same non-empty [MidiDevice.link]:
+  /// a MIDI 2.0 endpoint and the WinMM port the service makes for it) count as one device: the
+  /// MIDI 2.0 view is the one listed, chosen and opened (full resolution in midi2 mode, the same
+  /// notes in MPE), the other stays hidden and closed, so no note arrives twice. The id that
+  /// stands for [id]'s device now: itself, unless a better view of it is present.
+  String _canon(String id) {
+    final d = _find(id);
+    final link = d != null && d.link.isNotEmpty ? d.link : _linkOf[id];
+    if (link == null || link.isEmpty) return id;
+    MidiDevice? best;
+    for (final x in _list) {
+      if (x.link != link || !x.present) continue;
+      if (best == null || (x.midi2 && !best.midi2)) best = x;
+    }
+    return best?.id ?? id;
+  }
+
+  bool _hidden(MidiDevice d) => d.link.isNotEmpty && _canon(d.id) != d.id;
+
+  /// A chosen id whose device now has a better view: the choice follows the device.
+  void _followViews() {
+    var changed = false;
+    for (final id in [..._chosen]) {
+      final c = _canon(id);
+      if (c == id) continue;
+      _chosen.remove(id);
+      _chosen.add(c);
+      _names[c] = _find(c)?.name ?? _names[id] ?? c;
+      _names.remove(id);
+      _result.remove(id);
+      log?.call('midi: ${_names[c]} is the same device as ${_find(id)?.name ?? id}: one input');
+      changed = true;
+    }
+    if (changed) onPrefs?.call(toJson());
+  }
+
   /// One refresh: notice plugs and unplugs, open what is chosen and there, read the activity.
   /// The timer calls it; tests may too.
   void tick() {
     if (!_running) return;
     _gen = backend.refresh();
     _list = backend.devices();
+    for (final d in _list) {
+      if (d.link.isNotEmpty) _linkOf[d.id] = d.link;
+    }
+    _followViews();
     var again = false;
     for (final id in _chosen) {
       final d = _find(id);
@@ -323,10 +366,12 @@ class MidiInputs {
     return n;
   }
 
-  /// Per input (the listed ones and the chosen ones that are not there), for the picker.
+  /// Per input (the listed ones and the chosen ones that are not there), for the picker. A device
+  /// with two views is listed once, as its MIDI 2.0 view.
   List<MidiInputStatus> get devices {
     final out = <MidiInputStatus>[];
     for (final d in _list) {
+      if (_hidden(d)) continue;
       out.add(_status(d.id, d));
     }
     for (final id in [..._chosen]..sort()) {

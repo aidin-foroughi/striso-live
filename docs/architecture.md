@@ -111,7 +111,9 @@ sense (e.g. `ready` while Idle) and says so in the log.
   `striso_audio` library). Bytes go from the driver thread through a parser to
   `sv_midi_write` (USB-MIDI packets) with no Dart on the path. The firmware's own MIDI input
   handles them. The app maps nothing. Hot-plug: re-enumerated every second while live; a chosen
-  input that comes back is reopened.
+  input that comes back is reopened. Two views of one port (`sa_midi_device.link`: a MIDI 2.0
+  endpoint and its WinMM port on Windows, by the service's association; the entity on macOS)
+  are one input: the MIDI 2.0 view is listed, chosen and opened, the other stays closed.
 
 ### The status line
 

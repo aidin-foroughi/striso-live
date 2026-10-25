@@ -9,7 +9,7 @@ import 'midi.dart';
 import 'native.dart' show StrisoAudioLib;
 
 /// striso_midi.h's SA_MIDI_API_VERSION this binding is written for.
-const midiApiVersion = 2;
+const midiApiVersion = 3;
 
 /// sa_midi_device (552 bytes).
 final class SaMidiDevice extends Struct {
@@ -35,6 +35,8 @@ final class SaMidiDevice extends Struct {
   external int os_error;
   @Int32()
   external int protocol;
+  @Array(256)
+  external Array<Uint8> link;
 }
 
 /// sa_midi_event (16 bytes).
@@ -156,6 +158,7 @@ class NativeMidiBackend implements MidiBackend {
           isVirtual: d.is_virtual != 0,
           osError: d.os_error,
           protocol: d.protocol == 2 ? 2 : 1,
+          link: _cstr(d.link, 256),
         ),
       );
     }

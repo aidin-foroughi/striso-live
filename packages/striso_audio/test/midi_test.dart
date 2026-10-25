@@ -82,6 +82,43 @@ void main() {
       });
     });
 
+    test('one device, two views (a MIDI 2.0 endpoint and its WinMM port): listed once, opened once, the 2.0 one', () {
+      fakeAsync((async) {
+        final r = Rig(async, chosen: ['W']); // the WinMM port, chosen in an earlier run
+        r.fake.plug('W', name: 'Striso board #279', link: 'swd-striso');
+        r.fake.plug('K', name: 'Keyboard');
+        expect(r.inputs.start(), isTrue);
+        expect(r.inputs.devices.map((d) => d.id), ['W', 'K']);
+        expect(r.st('W').state, MidiInputState.open);
+        // the service's MIDI 2.0 endpoint of the same device appears a moment later
+        r.fake.plug('U', name: 'Striso', link: 'swd-striso');
+        r.fake.midi2.add('U');
+        r.seconds(1.1);
+        expect(r.inputs.devices.map((d) => '${d.id}:${d.state.name}:${d.midi2}'), ['K:off:false', 'U:open:true'], reason: 'listed once, the 2.0 view');
+        expect(r.fake.calls, containsAllInOrder(['open W', 'open U', 'close W']));
+        expect(r.inputs.chosen, {'U'});
+        expect(r.prefs.last['inputs'], [
+          {'id': 'U', 'name': 'Striso'},
+        ]);
+        expect(r.logs.any((l) => l.contains('is the same device as')), isTrue);
+        // the hidden view is closed: what it plays goes nowhere, nothing arrives twice
+        expect(r.fake.play('W', [0x90, 60, 100]), 0);
+        // choosing either view chooses the device
+        r.inputs.select('U', false);
+        expect(r.inputs.chosen, isEmpty);
+        r.inputs.select('W', true);
+        expect(r.inputs.chosen, {'U'});
+        expect(r.st('U').state, MidiInputState.open);
+        // the 2.0 view goes (the service stopped): the 1.0 port is the device now
+        r.fake.unplug('U');
+        r.fake.midi2.remove('U');
+        r.seconds(1.1);
+        expect(r.inputs.devices.map((d) => '${d.id}:${d.state.name}'), ['W:open', 'K:off']);
+        expect(r.inputs.chosen, {'W'});
+        r.inputs.stop();
+      });
+    });
+
     test('unplugged and back: not connected, then reopened by the next refresh', () {
       fakeAsync((async) {
         final r = Rig(async, chosen: ['A']);

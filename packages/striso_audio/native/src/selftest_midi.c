@@ -119,9 +119,9 @@ static void test_inject(void) {
             found = i;
             break;
         }
-    check(found >= 0 && d.is_virtual && d.open && d.present && d.messages == 4 && d.last_us >= t0 && d.last_us <= t1 && sa_midi_sizeof_device() == 552 &&
+    check(found >= 0 && d.is_virtual && d.open && d.present && d.messages == 4 && d.last_us >= t0 && d.last_us <= t1 && sa_midi_sizeof_device() == 808 &&
               sa_midi_sizeof_event() == 16,
-          "midi inject: a virtual device of that id, open, 4 messages, its time on sa_clock_us; struct sizes 552 and 16");
+          "midi inject: a virtual device of that id, open, 4 messages, its time on sa_clock_us; struct sizes 808 and 16");
 
     /* the monitor: the same 4 messages, oldest first, with the device's slot */
     const int ne = sa_midi_events(ev, 64);

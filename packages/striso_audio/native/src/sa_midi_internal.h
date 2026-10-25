@@ -33,8 +33,13 @@ int sa_ump_words(uint32_t w);
 
 #if defined(_WIN32)
 /* Windows MIDI Services (striso_midi_wms.cpp) */
+#define SA_WMS_MIDI1_MAX 16
 typedef struct {
     char id[256], name[256];
+    /* the WinMM input ports the service makes for this endpoint: their WinMM device numbers and names */
+    int midi1_count;
+    int midi1_number[SA_WMS_MIDI1_MAX];
+    char midi1_name[SA_WMS_MIDI1_MAX][64];
 } sa_wms_endpoint;
 int sa_wms_init(void); /* 1: there (its service and SDK), 0: not (sa_wms_status says why) */
 void sa_wms_shutdown(void);

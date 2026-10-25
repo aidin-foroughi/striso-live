@@ -104,6 +104,7 @@ typedef struct {
     int64_t last_us;
     sa_midi_parser parser;
     int protocol; /* 1 bytes, 2 UMP */
+    char link[256]; /* sa_midi_device.link */
 #if defined(_WIN32)
     UINT index;
     HMIDIIN h;
@@ -116,6 +117,7 @@ typedef struct {
 typedef struct {
     char id[256], name[256];
     int protocol;
+    char link[256];
 #if defined(_WIN32)
     UINT index;
     int wms;
@@ -322,9 +324,14 @@ static int os_enumerate(osdev* out, int max) {
         out[k].index = i;
         out[k].protocol = 1;
         out[k].wms = 0;
+        out[k].link[0] = 0;
         k++;
     }
-    /* MIDI 2.0: Windows MIDI Services' UMP-native endpoints */
+    const int nwinmm = k;
+    /* MIDI 2.0: Windows MIDI Services' UMP-native endpoints. The WinMM ports the service makes
+     * for an endpoint carry the same notes: they get the endpoint's id as their link, so the app
+     * opens one of the two (the service's own association, by port number and name; never a
+     * guess from the names alone). */
     static sa_wms_endpoint e[SA_MIDI_MAX];
     const int n2 = sa_wms_enumerate(e, max - k);
     for (int i = 0; i < n2 && k < max; i++) {
@@ -333,6 +340,15 @@ static int os_enumerate(osdev* out, int max) {
         out[k].protocol = 2;
         out[k].wms = 1;
         out[k].index = 0;
+        out[k].link[0] = 0;
+        for (int j = 0; j < e[i].midi1_count; j++) {
+            for (int w = 0; w < nwinmm; w++) {
+                if ((int)out[w].index == e[i].midi1_number[j] || (e[i].midi1_name[j][0] && strcmp(out[w].name, e[i].midi1_name[j]) == 0)) {
+                    copy_str(out[w].link, e[i].id, sizeof(out[w].link));
+                    copy_str(out[k].link, e[i].id, sizeof(out[k].link));
+                }
+            }
+        }
         k++;
     }
     return k;
@@ -342,6 +358,7 @@ static void os_take(mdev* d, const osdev* o) {
     d->index = o->index;
     d->wms = o->wms;
     d->protocol = o->protocol;
+    copy_str(d->link, o->link, sizeof(d->link));
 }
 
 static int32_t os_open(mdev* d, int slot) {
@@ -545,6 +562,13 @@ static int os_enumerate(osdev* out, int max) {
         out[k].src = e;
         SInt32 proto = 0;
         out[k].protocol = MIDIObjectGetIntegerProperty(e, kMIDIPropertyProtocolID, &proto) == noErr && proto == kMIDIProtocol_2_0 ? 2 : 1;
+        /* the entity (one port of one device): two sources of one entity are two views of it */
+        out[k].link[0] = 0;
+        MIDIEntityRef ent = 0;
+        SInt32 euid = 0;
+        if (MIDIEndpointGetEntity(e, &ent) == noErr && ent && MIDIObjectGetIntegerProperty(ent, kMIDIPropertyUniqueID, &euid) == noErr) {
+            snprintf(out[k].link, sizeof(out[k].link), "entity:%d", (int)euid);
+        }
         k++;
     }
     return k;
@@ -553,6 +577,7 @@ static int os_enumerate(osdev* out, int max) {
 static void os_take(mdev* d, const osdev* o) {
     d->src = o->src;
     d->protocol = o->protocol;
+    copy_str(d->link, o->link, sizeof(d->link));
 }
 
 static int32_t os_open(mdev* d, int slot) {
@@ -575,7 +600,10 @@ static int os_enumerate(osdev* out, int max) {
     (void)max;
     return 0;
 }
-static void os_take(mdev* d, const osdev* o) { d->protocol = o->protocol; }
+static void os_take(mdev* d, const osdev* o) {
+    d->protocol = o->protocol;
+    copy_str(d->link, o->link, sizeof(d->link));
+}
 static int32_t os_open(mdev* d, int slot) {
     (void)d;
     (void)slot;
@@ -661,6 +689,10 @@ static int refresh_locked(void) {
         d->present = 1;
         d->seen = M.refreshes;
         if (!d->open) os_take(d, &M.os[j]);
+        if (strcmp(d->link, M.os[j].link) != 0) {
+            copy_str(d->link, M.os[j].link, sizeof(d->link));
+            changed = 1;
+        }
         order[k++] = s;
     }
     for (int i = 0; i < SA_MIDI_MAX; i++) {
@@ -759,6 +791,7 @@ SA_API int32_t sa_midi_get(int32_t i, sa_midi_device* out) {
     out->is_virtual = d->is_virtual;
     out->os_error = d->os_error;
     out->protocol = d->protocol ? d->protocol : 1;
+    copy_str(out->link, d->link, sizeof(out->link));
     lk(&g_deliver);
     out->messages = d->messages;
     out->last_us = d->last_us;

@@ -63,6 +63,11 @@ class MidiDevice {
   final int protocol;
   bool get midi2 => protocol == 2;
 
+  /// The physical port: two inputs with the same non-empty link are two views of one port
+  /// (Windows: a MIDI 2.0 endpoint and the WinMM port Windows MIDI Services makes for it, by the
+  /// service's own association; macOS: the source's entity). '' : none known.
+  final String link;
+
   const MidiDevice({
     required this.name,
     required this.id,
@@ -75,6 +80,7 @@ class MidiDevice {
     this.isVirtual = false,
     this.osError = 0,
     this.protocol = 1,
+    this.link = '',
   });
 
   @override
@@ -200,7 +206,7 @@ class MidiParser {
 
 class _FakeDev {
   final String id;
-  String name;
+  String name, link = '';
   bool present = true, open = false, isVirtual = false, gone = false, midi2 = false;
   int error = midiOk, messages = 0, lastUs = 0;
   final int slot;
@@ -218,6 +224,7 @@ class _FakeDev {
     present: present,
     isVirtual: isVirtual,
     protocol: midi2 ? 2 : 1,
+    link: link,
   );
 }
 
@@ -259,6 +266,7 @@ class FakeMidiBackend implements MidiBackend {
   final calls = <String>[];
 
   final _system = <String, String>{}; // what is plugged now: id -> name (in plug order)
+  final _links = <String, String>{}; // id -> link (the physical port) of what is plugged
   final _devs = <String, _FakeDev>{};
   final _order = <String>[];
   final _events = <MidiEvent>[];
@@ -268,11 +276,18 @@ class FakeMidiBackend implements MidiBackend {
 
   FakeMidiBackend({this.available = true});
 
-  /// A device appears (seen at the next refresh).
-  void plug(String id, {String? name}) => _system[id] = name ?? id;
+  /// A device appears (seen at the next refresh). [link]: its physical port, the same for two
+  /// views of one port (a MIDI 2.0 endpoint and its WinMM port).
+  void plug(String id, {String? name, String link = ''}) {
+    _system[id] = name ?? id;
+    _links[id] = link;
+  }
 
   /// It disappears (an open one is closed with [midiErrGone] at the next refresh).
-  void unplug(String id) => _system.remove(id);
+  void unplug(String id) {
+    _system.remove(id);
+    _links.remove(id);
+  }
 
   /// The driver delivers [bytes] from that device: through the parser to the sink, when it is open.
   int play(String id, List<int> bytes) {
@@ -327,7 +342,7 @@ class FakeMidiBackend implements MidiBackend {
   @override
   int refresh() {
     refreshes++;
-    final before = [for (final id in _order) '$id/${_devs[id]!.present}/${_devs[id]!.name}'];
+    final before = [for (final id in _order) '$id/${_devs[id]?.present}/${_devs[id]?.name}']; // closeAll may have dropped a gone one
     if (inited) {
       for (final d in _devs.values) {
         if (!d.isVirtual) d.present = false;
@@ -336,6 +351,7 @@ class FakeMidiBackend implements MidiBackend {
         final d = _dev(e.key, e.value);
         if (d.isVirtual) continue;
         d.name = e.value;
+        d.link = _links[e.key] ?? '';
         d.present = true;
       }
       for (final d in _devs.values) {

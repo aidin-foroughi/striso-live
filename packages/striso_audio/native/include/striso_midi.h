@@ -50,7 +50,7 @@ extern "C" {
 
 /* Bumped whenever a struct or a function below changes. (Separate from SA_API_VERSION: a library
  * without MIDI has no sa_midi_api_version, and the audio binding's version check stays as it is.) */
-#define SA_MIDI_API_VERSION 2
+#define SA_MIDI_API_VERSION 3
 
 /* errors (besides SA_OK, SA_ERR_NOT_FOUND, SA_ERR_BAD_ARG, SA_ERR_NOT_INITIALISED of striso_audio.h) */
 #define SA_ERR_MIDI_IN_USE -20  /* Windows: another program has that input open (MMSYSERR_ALLOCATED) */
@@ -62,7 +62,7 @@ extern "C" {
 #define SA_MIDI_MAX 64          /* devices (ids) the library keeps at once */
 #define SA_MIDI_RING 4096       /* monitor events kept until read */
 
-/* One input of the list. 552 bytes, no implicit padding. */
+/* One input of the list. 808 bytes, no implicit padding. */
 typedef struct sa_midi_device {
     char name[256];      /* UTF-8, NUL terminated (Windows: WinMM's name, at most 31 characters) */
     char id[256];        /* stable id (see above) */
@@ -75,6 +75,9 @@ typedef struct sa_midi_device {
     int32_t is_virtual;  /* 1: made by sa_midi_inject, no system port */
     int32_t os_error;    /* the system's code of the last failure (MMRESULT, OSStatus), 0 none */
     int32_t protocol;    /* 1: MIDI 1.0 bytes (to the sink), 2: MIDI 2.0 UMP (to the UMP sink) */
+    char link[256];      /* the physical device: two inputs with the same non-empty link are two views of one
+                            port (Windows: a MIDI 2.0 endpoint and the WinMM port Windows MIDI Services makes
+                            for it, by the service's own association; macOS: the source's entity). "" : none */
 } sa_midi_device;
 
 /* One channel message that went to the sink (or would have: the monitor records them with no sink

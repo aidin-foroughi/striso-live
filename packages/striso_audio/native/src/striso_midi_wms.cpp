@@ -18,6 +18,7 @@
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Devices.Midi2.h>
 #include <winrt/Windows.Devices.Midi2.Enumeration.h>
+#include <winrt/Windows.Devices.Midi2.Enumeration.Legacy.h>
 
 #include <condition_variable>
 #include <deque>
@@ -181,6 +182,10 @@ extern "C" void sa_wms_shutdown(void) {
 
 extern "C" void sa_wms_diagnostic(int on) { g_diagnostic = on; }
 
+static winrt::Windows::Devices::Midi2::Enumeration::Midi1PortFlow MidiEndpointDeviceInformationFilters_Midi1Source() {
+    return winrt::Windows::Devices::Midi2::Enumeration::Midi1PortFlow::MidiMessageSource;
+}
+
 extern "C" int sa_wms_enumerate(sa_wms_endpoint* out, int max) {
     if (!g_on) return 0;
     int k = 0;
@@ -201,6 +206,20 @@ extern "C" int sa_wms_enumerate(sa_wms_endpoint* out, int max) {
                 out[k].id[sizeof(out[k].id) - 1] = 0;
                 strncpy(out[k].name, name.empty() ? "MIDI 2.0 endpoint" : name.c_str(), sizeof(out[k].name) - 1);
                 out[k].name[sizeof(out[k].name) - 1] = 0;
+                // the WinMM ports the service makes for this endpoint (the same device twice otherwise)
+                out[k].midi1_count = 0;
+                try {
+                    for (auto const& p : winrt::Windows::Devices::Midi2::Enumeration::Legacy::MidiLegacyPortDeviceInformation::FindAllForAssociatedEndpoint(
+                             e.EndpointDeviceId(), MidiEndpointDeviceInformationFilters_Midi1Source())) {
+                        if (out[k].midi1_count >= SA_WMS_MIDI1_MAX) break;
+                        const int j = out[k].midi1_count++;
+                        out[k].midi1_number[j] = (int)p.Number();
+                        const std::string pn = utf8(p.Name());
+                        strncpy(out[k].midi1_name[j], pn.c_str(), sizeof(out[k].midi1_name[j]) - 1);
+                        out[k].midi1_name[j][sizeof(out[k].midi1_name[j]) - 1] = 0;
+                    }
+                } catch (...) {
+                }
                 k++;
             }
         } catch (...) {
