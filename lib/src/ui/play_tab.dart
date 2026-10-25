@@ -15,6 +15,7 @@ import 'board_view.dart';
 import 'chrome.dart';
 import 'knobs.dart';
 import 'live_panel.dart';
+import 'presets.dart';
 import 'scale_picker.dart';
 
 class PlayTab extends StatelessWidget {
@@ -141,12 +142,14 @@ class EnginePanel extends StatelessWidget {
               ListRow(
                 key: Key('preset-${v.index}'),
                 label: v.preset ?? info.label,
-                current: v.index == ctl.current,
+                current: v.index == ctl.current && ctl.openPreset == null,
                 pending: v.index == ctl.pendingVoice,
                 dot: col,
                 tooltip: '${v.name} (voice ${v.index})',
                 onTap: () => ctl.selectVoice(v.index),
+                menu: ctl.factoryPresetOf(v.index) == null ? null : (context) => boardPresetMenu(context, ctl, ctl.factoryPresetOf(v.index)!),
               ),
+            BoardPresetsSection(ctl, cur, col),
             const SizedBox(height: Space.xl),
             const Micro('My sounds'),
             const SizedBox(height: Space.xs),
@@ -776,7 +779,7 @@ class SoundName extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            ctl.lastSound ?? ctl.nowPreset,
+            ctl.soundTitle,
             key: const Key('now-preset'),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
@@ -808,7 +811,7 @@ class SoundName extends StatelessWidget {
       children: [
         Flexible(
           child: Text(
-            ctl.lastSound ?? ctl.nowPreset,
+            ctl.soundTitle,
             key: const Key('now-preset'),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,

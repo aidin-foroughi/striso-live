@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'board_state.dart';
 import 'engines.dart';
+import 'presets.dart';
 import 'protocol.dart';
 import 'transport.dart';
 import 'tuning.dart';
@@ -315,15 +316,11 @@ class StrisoClient {
   /// The settings-key layout (StcX): what every key does with Settings held. Null when the
   /// firmware does not answer (then it needs an update).
   Future<SettingsLayout?> getSettingsLayout() async {
-    final r = await request(
-      commandChar('X'),
-      (l, s) {
-        final t = l.trim();
-        if (!t.startsWith('X ')) return Take.no;
-        return t == 'X end' ? Take.done : Take.more;
-      },
-      timeout: const Duration(milliseconds: 1200),
-    );
+    final r = await request(commandChar('X'), (l, s) {
+      final t = l.trim();
+      if (!t.startsWith('X ')) return Take.no;
+      return t == 'X end' ? Take.done : Take.more;
+    }, timeout: const Duration(milliseconds: 1200));
     return parseSettingsLayout(r.lines);
   }
 
@@ -352,15 +349,82 @@ class StrisoClient {
   /// The engines the virtual board loaded from its engine folder (Stce, docs/flows.md 10); null
   /// without a reply (a build that cannot load engines does not answer).
   Future<EngineReport?> getEngines({Duration timeout = const Duration(milliseconds: 500)}) async {
-    final r = await request(
-      commandChar('e'),
-      (l, s) {
-        if (!isEngineReportLine(l)) return Take.no;
-        return l.trim() == 'e end' ? Take.done : Take.more;
-      },
-      timeout: timeout,
-    );
+    final r = await request(commandChar('e'), (l, s) {
+      if (!isEngineReportLine(l)) return Take.no;
+      return l.trim() == 'e end' ? Take.done : Take.more;
+    }, timeout: timeout);
     return parseEngineReport(r.lines);
+  }
+
+  // the sound presets (presets.dart, doc/presets_console.md) -------------------------------------
+
+  /// The presets (StcJ): factory then the user's; null without a whole reply.
+  Future<PresetList?> listPresets() async {
+    final r = await request(presetListCommand(), (l, s) {
+      if (!isPresetListLine(l)) return Take.no;
+      return l.trim().startsWith('J end') ? Take.done : Take.more;
+    }, timeout: const Duration(milliseconds: 1500));
+    return parsePresetList(r.lines);
+  }
+
+  /// One user preset's text as stored (Stcj), or the board's reason; null without a reply.
+  Future<({String? text, String? why})?> presetText(int id) async {
+    final r = await request(presetTextCommand(id), (l, s) {
+      final t = l.trim();
+      if (s['in'] != true) {
+        if (t.startsWith('j err ')) return Take.done;
+        if (RegExp(r'^j \d+ \d+$').hasMatch(t)) {
+          s['in'] = true;
+          return Take.more;
+        }
+        return Take.no;
+      }
+      return t == 'j end' || t.startsWith('j err ') ? Take.done : Take.more;
+    }, timeout: const Duration(milliseconds: 2000));
+    return parsePresetText(r.lines);
+  }
+
+  Future<PresetReply?> _upload(int kind, List<int> bytes) async {
+    final r = await request(presetUploadCommand(kind, bytes), (l, s) {
+      final p = parsePresetReply(PresetCodes.upload, l);
+      if (p == null) return Take.no;
+      s['r'] = p;
+      return Take.done;
+    }, timeout: const Duration(seconds: 6)); // a write that compacts first erases a sector: 1 to 4 s
+    return r.state['r'] as PresetReply?;
+  }
+
+  /// Installs a preset file (StcF kind 1): stored as sent, or refused with the board's reason.
+  Future<PresetReply?> installPreset(List<int> text) => _upload(1, text);
+
+  /// Saves the current voice as a preset (StcF kind 2): the board writes its text.
+  Future<PresetReply?> savePresetAs(String title, String description) => _upload(2, saveAsBytes(title, description));
+
+  /// Deletes a user preset.
+  Future<PresetReply?> deletePreset(int id) async {
+    final r = await request(presetDeleteCommand(id), (l, s) {
+      final p = parsePresetReply(PresetCodes.delete, l);
+      if (p == null) return Take.no;
+      s['r'] = p;
+      return Take.done;
+    }, timeout: const Duration(seconds: 6));
+    return r.state['r'] as PresetReply?;
+  }
+
+  /// Opens a preset as the sound (StcO): the voice it plays and what it clamped and skipped. "busy"
+  /// (the last open not taken by the synth yet) is asked again after a few blocks.
+  Future<OpenReport?> openPreset(int id) async {
+    for (var tries = 0; ; tries++) {
+      final got = <String>[];
+      final r = await request(presetOpenCommand(id), (l, s) {
+        if (!isOpenLine(l)) return Take.no;
+        got.add(l);
+        return openDone(got) ? Take.done : Take.more;
+      }, timeout: const Duration(milliseconds: 1500));
+      final o = parseOpenReport(r.lines);
+      if (o == null || o.ok || o.why != 'busy' || tries >= 5) return o;
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
   }
 
   /// The state's change counter (Stcy): it goes up whenever anything the board reports changed.

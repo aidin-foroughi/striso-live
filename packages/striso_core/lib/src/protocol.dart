@@ -234,7 +234,7 @@ class StreamParser {
         stats.lines++;
         onLine(line);
       } else if (b != 0x0d) {
-        if (_text.length < 2048) _text.add(b);
+        if (_text.length < 9000) _text.add(b); // a preset text's line may be 8 KB (Stcj)
       }
     }
   }

@@ -14,6 +14,7 @@ import 'chrome.dart';
 import 'console.dart';
 import 'header.dart';
 import 'play_tab.dart';
+import 'presets.dart';
 import 'setup_tab.dart';
 import 'sound_tab.dart';
 import 'stage.dart';
@@ -137,8 +138,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final reduced = ctl.options.reducedMotion || MediaQuery.maybeDisableAnimationsOf(context) == true;
     return Scaffold(
       backgroundColor: Pal.bg0,
-      body: ListenableBuilder(
-        listenable: ctl,
+      body: PresetDropTarget(
+        ctl,
+        child: ListenableBuilder(
+          listenable: ctl,
         builder: (context, _) => Stack(
           children: [
             AnimatedSwitcher(
@@ -183,6 +186,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             ToastLayer(ctl),
             if (ctl.shortcutsOpen) Positioned.fill(child: ShortcutOverlay(ctl)),
           ],
+        ),
         ),
       ),
     );

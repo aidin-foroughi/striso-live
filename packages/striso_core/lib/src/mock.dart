@@ -5,11 +5,13 @@
 // Port of tools/app/js/mock.js.
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'layout.dart';
 import 'playable.dart';
+import 'presets.dart';
 import 'protocol.dart';
 import 'board_state.dart';
 import 'settings_map.dart';
@@ -120,6 +122,7 @@ const List<_P> _reed = [
   ('growl', 'mod', 0.0, 1.0, 0, 0.0),
   ('vibrato', 'mod', 0.0, 1.0, 0, 0.25),
 ];
+
 /// voice_trumpet.h param_table (names, groups, ranges as the firmware's; plausible defaults).
 const List<_P> _trumpet = [
   ('gain', 'level', 0.1, 4.0, 0, 1.0),
@@ -306,11 +309,16 @@ const List<(double, double, int, List<double>?)> _mockTunings = [
   (685.7142, 1200, 0x550055, null),
   (585.2169, 1024.130, 0x55aa00, null),
   (1024.130, 1901.955, 0x55aa00, null),
-  (696.7741, 1200, 0x00aa55, [
-    0.0, -4.39774, -6.74692, 10.3616, 5.96386, -4.09683, -0.78306, // C Db C# D Eb D# E
-    -5.18080, -1.86703, 1.86703, 5.18080, 0.78306, -1.56612, // F Gb F# G Ab G#
-    -5.96386, -10.3616, 1.08397, 4.39774, // A Bb A# B
-  ]),
+  (
+    696.7741,
+    1200,
+    0x00aa55,
+    [
+      0.0, -4.39774, -6.74692, 10.3616, 5.96386, -4.09683, -0.78306, // C Db C# D Eb D# E
+      -5.18080, -1.86703, 1.86703, 5.18080, 0.78306, -1.56612, // F Gb F# G Ab G#
+      -5.96386, -10.3616, 1.08397, 4.39774, // A Bb A# B
+    ],
+  ),
 ];
 
 /// The firmware's StcH replies (after the voice index), as recorded from the virtual board for
@@ -486,14 +494,24 @@ class MockBoard implements PlayableBoard {
   final List<String> engineFiles;
   final bool answersEngines;
 
-  /// The firmware as released upstream (v2.2.4): it does not answer StcX, StcY, Stcy or StcH.
+  /// The firmware as released upstream (v2.2.4): it does not answer StcX, StcY, Stcy, StcH or
+  /// the preset commands.
   final bool stockFirmware;
+
+  /// The preset store (doc/presets_console.md): off answers "store off" to the user's presets;
+  /// the user's presets by id, as stored (the text byte for byte), the next id, and how many may
+  /// be kept.
+  bool presetStore;
+  final userPresets = <int, String>{};
+  int _nextPresetId = 1;
+  int presetLimit = 128;
   final _engineLines = <String>[];
 
   MockBoard({
     this.engineFiles = const [],
     this.answersEngines = true,
     this.stockFirmware = false,
+    this.presetStore = true,
     this.autoplay = true,
     this.motionEnabled = true,
     this.idleFrames = 500,
@@ -556,6 +574,28 @@ class MockBoard implements PlayableBoard {
           final n = int.tryParse(String.fromCharCodes(p)) ?? -1;
           if (n >= 49 && n <= 256) usbAudioTarget = n;
           if (n == 0 || (n >= 49 && n <= 256)) _print('usb audio target $usbAudioTarget frames (${usbAudioTarget * 1000000 ~/ 48000} us)\r\n');
+        } else if (_rxCmd == PresetCodes.text) {
+          _presetText(p[0] | p[1] << 8);
+        } else if (_rxCmd == PresetCodes.delete) {
+          _presetDelete(p[0] | p[1] << 8);
+        } else if (_rxCmd == PresetCodes.open) {
+          _presetOpen(p[0] | p[1] << 8);
+        } else if (_rxCmd == PresetCodes.upload && _upKind == null) {
+          // the 5-byte payload: then the bytes (an upload)
+          _upKind = p[0];
+          final n = p[1] | p[2] << 8 | p[3] << 16 | p[4] << 24;
+          _rxCmd = PresetCodes.upload;
+          _rxPayload.clear();
+          if (n == 0) {
+            _presetUpload(_upKind!, const []);
+            _upKind = null;
+          } else {
+            _rxNeed = n;
+          }
+        } else if (_rxCmd == PresetCodes.upload) {
+          final k = _upKind!;
+          _upKind = null;
+          _presetUpload(k, List<int>.of(p));
         } else if (_rxCmd == 'K') {
           _print(settingsKey(p[0]) ? 'K ok ${p[0]}\r\n' : 'K err ${p[0]}\r\n');
         } else {
@@ -603,14 +643,7 @@ class MockBoard implements PlayableBoard {
         _print('${n == voice ? '*' : ' '} $n ${_entries[n].name}\r\n');
       }
     } else if (c >= 0x80) {
-      final n = c - 0x80;
-      if (n < _entries.length) {
-        voice = n;
-        values = _presetValues(_entries[n].eng.params, _entries[n].seed);
-        _print('voice $n ${_entries[n].name}\r\n');
-      } else {
-        _print('no voice $n\r\n');
-      }
+      _select(c - 0x80);
     } else if ('pfgk'.contains(ch)) {
       final target = 'pfgk'.indexOf(ch);
       if (listDelay > Duration.zero) {
@@ -641,6 +674,16 @@ class MockBoard implements PlayableBoard {
           _print('$l\r\n');
         }
       }
+    } else if (!stockFirmware && ch == PresetCodes.list) {
+      _presetList();
+    } else if (!stockFirmware && (ch == PresetCodes.text || ch == PresetCodes.delete || ch == PresetCodes.open)) {
+      _rxNeed = 2;
+      _rxCmd = ch;
+      _rxPayload.clear();
+    } else if (!stockFirmware && ch == PresetCodes.upload) {
+      _rxNeed = 5;
+      _rxCmd = ch;
+      _rxPayload.clear();
     } else if (ch == 'Y' && !stockFirmware) {
       _print('${_stateLine()}\r\n');
     } else if (ch == 'y' && !stockFirmware) {
@@ -688,6 +731,198 @@ class MockBoard implements PlayableBoard {
       _engineLines.add('e ok $first ${_entries.length - first} ${c.color.toRadixString(16).padLeft(6, '0')} $name $f');
     }
     _engineLines.add('e end');
+  }
+
+  int? _upKind;
+
+  // the factory presets: the voice entries, by engine number (its order in the voice list) and
+  // its preset
+  int _factoryId(int n) {
+    final engines = <String>[];
+    for (final e in _entries) {
+      if (!engines.contains(e.engine)) engines.add(e.engine);
+    }
+    final k = engines.indexOf(_entries[n].engine);
+    final j = _entries.sublist(0, n).where((e) => e.engine == _entries[n].engine).length;
+    return factoryPresetBase + 256 * k + j;
+  }
+
+  int _entryOf(int id) {
+    for (var n = 0; n < _entries.length; n++) {
+      if (_factoryId(n) == id) return n;
+    }
+    return -1;
+  }
+
+  String _word(String? s) => s == null || s.isEmpty ? '-' : s.replaceAll(RegExp(r'[\s\x00-\x1f\x7f]'), '_');
+  String _rest(String s) => s.replaceAll(RegExp(r'[\x00-\x1f\x7f]'), ' ');
+  String _title(String s) => _rest(s).replaceAll('|', '/');
+
+  Map<String, Object?>? _json(String text) {
+    try {
+      final j = jsonDecode(text);
+      return j is Map<String, Object?> ? j : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _presetList() {
+    var n = 0;
+    for (var i = 0; i < _entries.length; i++) {
+      _print('J ${_factoryId(i)} ${_word(_entries[i].engine)} - ${_title(_entries[i].preset ?? _entries[i].engine)}|\r\n');
+      n++;
+    }
+    if (!presetStore) {
+      _print('J store off\r\n');
+    } else {
+      for (final e in userPresets.entries) {
+        final j = _json(e.value);
+        final eng = j?['engine'];
+        if (j == null || eng is! Map) {
+          _print('J ${e.key} ? - (unreadable)|\r\n');
+        } else {
+          final d = j['description'] is String ? _rest(j['description'] as String) : '';
+          _print('J ${e.key} ${_word(eng['id'] as String?)} ${_word(eng['version'] as String?)} ${_title('${j['title'] ?? ''}')}|$d\r\n');
+        }
+        n++;
+      }
+    }
+    _print('J end $n\r\n');
+  }
+
+  // a voice entry's values as a preset text (the board writes it: kind 2, and j of a factory id)
+  String _presetOf(int n, String title, String? description) {
+    final e = _entries[n];
+    final params = e.eng.params;
+    final vals = n == voice ? values : _presetValues(params, e.seed);
+    final m = <String, Object?>{
+      'format': 'awva-preset/1',
+      'engine': {'id': e.engine, 'version': firmware, 'params_hash': 'm0c4${e.engine.length.toRadixString(16).padLeft(4, '0')}'},
+      'title': title,
+      if (description != null && description.isNotEmpty) 'description': description,
+      'params': {for (var i = 0; i < params.length; i++) params[i].$1: vals[i].clamp(params[i].$3, params[i].$4)},
+    };
+    return '${const JsonEncoder.withIndent('  ').convert(m)}\n';
+  }
+
+  void _presetText(int id) {
+    String? t;
+    if (id >= factoryPresetBase) {
+      final n = _entryOf(id);
+      if (n < 0) {
+        _print('j err no preset $id\r\n');
+        return;
+      }
+      if (_entries[n].preset == null) {
+        _print('j err no text $id\r\n'); // an engine without presets
+        return;
+      }
+      t = _presetOf(n, _entries[n].preset!, null);
+    } else if (!presetStore) {
+      _print('j err store off\r\n');
+      return;
+    } else {
+      t = userPresets[id];
+      if (t == null) {
+        _print('j err no preset $id\r\n');
+        return;
+      }
+    }
+    final bytes = utf8.encode(t);
+    _print('j $id ${bytes.length}\r\n');
+    final lines = t.endsWith('\n') ? t.substring(0, t.length - 1).split('\n') : t.split('\n');
+    for (final l in lines) {
+      _print('$l\r\n');
+    }
+    _print('j end\r\n');
+  }
+
+  void _presetUpload(int kind, List<int> bytes) {
+    if (!presetStore) return _print('F err store off\r\n');
+    if (kind != 1 && kind != 2) return _print('F err kind\r\n');
+    String text;
+    if (kind == 1) {
+      if (bytes.isEmpty) return _print('F err empty\r\n');
+      if (bytes.length > presetMaxText) return _print('F err too long\r\n');
+      text = utf8.decode(bytes, allowMalformed: true);
+      final j = _json(text);
+      if (j == null) return _print('F err syntax\r\n');
+      if (j['format'] != 'awva-preset/1') return _print('F err no_format\r\n');
+      final eng = j['engine'];
+      if (eng is! Map || eng['id'] is! String) return _print('F err no_engine\r\n');
+      if (!_entries.any((e) => e.engine == eng['id'])) return _print('F err engine ${_word(eng['id'] as String)}\r\n');
+    } else {
+      if (bytes.length > presetMaxFields) return _print('F err too long\r\n');
+      final f = _json(utf8.decode(bytes, allowMalformed: true));
+      final title = f?['title'] ?? '', desc = f?['description'] ?? '';
+      if (f == null || title is! String || desc is! String) return _print('F err fields\r\n');
+      if (utf8.encode(title).length > presetMaxTitle || utf8.encode(desc).length > presetMaxDescription) return _print('F err fields\r\n');
+      text = _presetOf(voice, title, desc);
+    }
+    if (userPresets.length >= presetLimit) return _print('F err too many\r\n');
+    final id = _nextPresetId++;
+    userPresets[id] = text;
+    _print('F ok $id\r\n');
+  }
+
+  void _presetDelete(int id) {
+    final c = PresetCodes.delete;
+    if (id >= factoryPresetBase) return _print('$c err factory $id\r\n');
+    if (!presetStore) return _print('$c err store off\r\n');
+    if (userPresets.remove(id) == null) return _print('$c err no preset $id\r\n');
+    _print('$c ok $id\r\n');
+  }
+
+  void _presetOpen(int id) {
+    if (id >= factoryPresetBase) {
+      final n = _entryOf(id);
+      if (n < 0) return _print('O err no preset $id\r\n');
+      _select(n, quiet: true);
+      return _print('O ok $id voice $n exact\r\n');
+    }
+    if (!presetStore) return _print('O err store off\r\n');
+    final t = userPresets[id];
+    if (t == null) return _print('O err no preset $id\r\n');
+    final j = _json(t);
+    final eng = j?['engine'];
+    if (j == null || eng is! Map) return _print('O err unreadable $id\r\n');
+    final n = _entries.indexWhere((e) => e.engine == eng['id']);
+    if (n < 0) return _print('O err engine ${_word('${eng['id']}')}\r\n');
+    _select(n, quiet: true);
+    // by name: out of range clamped, unknown skipped, absent missing (keeps the voice's value)
+    final params = _entries[n].eng.params;
+    final given = j['params'] is Map ? (j['params'] as Map).cast<String, Object?>() : const <String, Object?>{};
+    final clamped = <String>[], skipped = <String>[];
+    var missing = 0;
+    for (final k in given.keys) {
+      if (!params.any((p) => p.$1 == k)) skipped.add(k);
+    }
+    for (var i = 0; i < params.length; i++) {
+      final v = given[params[i].$1];
+      if (v is! num) {
+        missing++;
+        continue;
+      }
+      final c = v.toDouble().clamp(params[i].$3, params[i].$4);
+      if (c != v.toDouble()) clamped.add(params[i].$1);
+      values[i] = conformTo(params[i].$3, params[i].$4, params[i].$5, c, 0);
+    }
+    if (clamped.isEmpty && skipped.isEmpty && missing == 0) return _print('O ok $id voice $n exact\r\n');
+    _print('O ok $id voice $n clamped ${clamped.length} skipped ${skipped.length} missing $missing\r\n');
+    if (clamped.isNotEmpty) _print('O clamped ${clamped.take(16).map(_word).join(' ')}\r\n');
+    if (skipped.isNotEmpty) _print('O skipped ${skipped.take(16).map(_word).join(' ')}\r\n');
+  }
+
+  // a voice-list entry chosen (0x80 + n, a preset opened)
+  void _select(int n, {bool quiet = false}) {
+    if (n < _entries.length) {
+      voice = n;
+      values = _presetValues(_entries[n].eng.params, _entries[n].seed);
+      if (!quiet) _print('voice $n ${_entries[n].name}\r\n');
+    } else if (!quiet) {
+      _print('no voice $n\r\n');
+    }
   }
 
   void _printParams(int target) {
@@ -739,7 +974,9 @@ class MockBoard implements PlayableBoard {
     usbAudioUnderruns = usbAudioHostSkipped = 0;
     final t = usbAudioTarget;
     _print('usb audio (UAC2): streaming 48000 Hz 24 bit (alt 1), source synth\r\n');
-    _print('since last U: packets sent $ms missed $skip (host skipped $skip, flushed early 0); built $ms (47:${ms ~/ 400} 48:${ms - 2 * (ms ~/ 400)} 49:${ms ~/ 400})\r\n');
+    _print(
+      'since last U: packets sent $ms missed $skip (host skipped $skip, flushed early 0); built $ms (47:${ms ~/ 400} 48:${ms - 2 * (ms ~/ 400)} 49:${ms ~/ 400})\r\n',
+    );
     _print('rate: ${ms * 48} frames in $ms ms of host clock = 48000.000 Hz\r\n');
     _print('ring: level ${t + 8} now, $t filtered, ${t - 31}..${t + 32} before packets (target $t = ${t * 1000000 ~/ 48000} us, of 512)\r\n');
     _print('faults: underruns $und overruns 0 primes $und (silent packets 0), fast starts 1\r\n');
@@ -831,7 +1068,10 @@ class MockBoard implements PlayableBoard {
     }
     if (f.engine != null) {
       // config_voice: the engine with the preset it had last
-      final list = [for (var n = 0; n < _entries.length; n++) if (_entries[n].engine == f.engine) n];
+      final list = [
+        for (var n = 0; n < _entries.length; n++)
+          if (_entries[n].engine == f.engine) n,
+      ];
       if (list.isEmpty) return false;
       if (list.contains(voice)) remembered[f.engine!] = list.indexOf(voice);
       final n = list[(remembered[f.engine!] ?? 0).clamp(0, list.length - 1)];

@@ -1358,6 +1358,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   @override
   void boardLive(Board b) {
     final c = b.client;
+    unawaited(refreshBoardPresets());
     if (b.mode == Mode.striso) _trace('live');
     waveT = clockMs();
     // the parameter lists load behind the live view (the pollers wait their turn)
@@ -1401,6 +1402,8 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     heroes = null;
     boardState = null;
     _stateCount = null;
+    boardPresets = null;
+    lastOpen = null;
     engineReport = null;
     _resetUi();
   }
@@ -1480,6 +1483,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     voices = v;
     final cur = v.where((x) => x.current).firstOrNull;
     current = cur?.index ?? -1;
+    if (lastOpen != null && lastOpen!.report.voice != current) lastOpen = null;
     notifyListeners();
   }
 
@@ -1494,6 +1498,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     final c = client;
     if (c == null || !canSend || n == current) return;
     pendingVoice = n;
+    lastOpen = null; // a voice chosen: no longer the preset
     notifyListeners();
     final r = await c.selectVoice(n);
     pendingVoice = -1;
@@ -2337,6 +2342,222 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     if (!identical(c, client) || h == null) return;
     heroes = h;
     notifyListeners();
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // the board's sound presets (striso_core presets.dart, doc/presets_console.md): the app sends
+  // files and titles and shows what the board reads back; it keeps no preset data of its own
+
+  /// The board's presets as it last listed them (StcJ); null: not read, or a firmware without them.
+  PresetList? boardPresets;
+
+  /// The last preset opened and what the board said it did with it; it goes when the board plays
+  /// another voice.
+  ({BoardPreset preset, OpenReport report})? lastOpen;
+
+  /// The user preset that plays now (opened, and the board still on its voice).
+  BoardPreset? get openPreset => lastOpen != null && lastOpen!.report.voice == current ? lastOpen!.preset : null;
+
+  /// The sound's name: the preset opened, else the one of your sounds recalled, else the voice's.
+  String get soundTitle => openPreset?.title ?? lastSound ?? nowPreset;
+
+  bool presetBusy = false;
+
+  /// The user's presets on the board for an engine.
+  List<BoardPreset> userPresetsOf(String engine) => [...?boardPresets?.user.where((p) => p.engine == engine)];
+
+  /// The factory preset of a voice entry, as the board lists it (the same order).
+  BoardPreset? factoryPresetOf(int voiceIndex) {
+    final f = boardPresets?.presets.where((p) => p.factory).toList();
+    return f != null && voiceIndex >= 0 && voiceIndex < f.length ? f[voiceIndex] : null;
+  }
+
+  Future<void> refreshBoardPresets() async {
+    final c = client;
+    if (c == null) return;
+    final l = await c.listPresets();
+    if (!identical(c, client)) return;
+    boardPresets = l;
+    notifyListeners();
+  }
+
+  Future<T?> _preset<T>(Future<T?> Function(StrisoClient c) f) async {
+    final c = client;
+    if (c == null || !canSend) {
+      toast(connecting ? 'Connecting…' : 'Connect first: presets are on the board', 'warn');
+      return null;
+    }
+    presetBusy = true;
+    notifyListeners();
+    try {
+      return await f(c);
+    } finally {
+      presetBusy = false;
+      notifyListeners();
+    }
+  }
+
+  // the console carries text below 0x80 only: a byte above starts one of the board's stream
+  // messages, so the board's replies (and a preset's text) stay ASCII
+  static bool _ascii(String s) => s.codeUnits.every((u) => u < 0x80);
+
+  /// Why a title or description cannot be saved as it is (null: it can).
+  static String? presetFieldsProblem(String title, String description) {
+    if (title.trim().isEmpty) return 'Give it a title';
+    if (utf8.encode(title.trim()).length > presetMaxTitle) return 'The title is at most $presetMaxTitle characters';
+    if (utf8.encode(description.trim()).length > presetMaxDescription) return 'The description is at most $presetMaxDescription characters';
+    if (!_ascii(title) || !_ascii(description)) return 'The board keeps plain ASCII: no accents or symbols';
+    return null;
+  }
+
+  /// Save as: the board saves the current voice as a preset with this title and description.
+  Future<BoardPreset?> savePresetAs(String title, String description) async {
+    final why = presetFieldsProblem(title, description);
+    if (why != null) {
+      toast(why, 'warn');
+      return null;
+    }
+    final r = await _preset((c) => c.savePresetAs(title, description));
+    if (r == null) return null;
+    if (!r.ok) {
+      toast('Not saved: ${presetWhy(r.why)}', 'error');
+      log('StcF 2: err ${r.why}', LogKind.err);
+      return null;
+    }
+    await refreshBoardPresets();
+    final p = boardPresets?.presets.where((x) => x.id == r.id).firstOrNull;
+    toast('Saved "${p?.title ?? title.trim()}" on the Striso');
+    return p;
+  }
+
+  /// Load: the preset as the sound; when it was not exact for this engine, the report stays up
+  /// (what was clamped, skipped, missing), as the board said it.
+  Future<OpenReport?> openBoardPreset(BoardPreset p) async {
+    final r = await _preset((c) => c.openPreset(p.id));
+    if (r == null) {
+      if (canSend) toast('The board did not answer the open', 'error');
+      return null;
+    }
+    if (!r.ok) {
+      toast('Not loaded: ${presetWhy(r.why)}', 'error');
+      return r;
+    }
+    lastOpen = (preset: p, report: r);
+    if (!r.exact) showBanner(openReportText(p, r), info: true);
+    await syncVoice();
+    return r;
+  }
+
+  /// Delete a user preset from the board.
+  Future<bool> deleteBoardPreset(BoardPreset p) async {
+    final r = await _preset((c) => c.deletePreset(p.id));
+    if (r == null) return false;
+    if (!r.ok) {
+      toast('Not deleted: ${presetWhy(r.why)}', 'error');
+      return false;
+    }
+    if (lastOpen?.preset.id == p.id) lastOpen = null;
+    await refreshBoardPresets();
+    toast('Deleted "${p.title}"');
+    return true;
+  }
+
+  /// Share: the preset's text as the board has it (any preset), for a .json file.
+  Future<String?> presetFileText(BoardPreset p) async {
+    final r = await _preset((c) => c.presetText(p.id));
+    if (r == null) return null;
+    if (r.text == null) {
+      toast('Cannot share "${p.title}": ${presetWhy(r.why)}', 'error');
+      return null;
+    }
+    return r.text;
+  }
+
+  Future<bool> sharePreset(BoardPreset p, String path) async {
+    final t = await presetFileText(p);
+    if (t == null) return false;
+    try {
+      await File(path).writeAsString(t, flush: true);
+    } catch (e) {
+      toast('Not written: $e', 'error');
+      return false;
+    }
+    toast('Shared "${p.title}" as ${path.split(RegExp(r'[\\/]')).last}');
+    return true;
+  }
+
+  /// Install: a preset file sent to the board as it is; the board checks and stores it. Then
+  /// offered to load.
+  Future<BoardPreset?> installPresetFile(String path) async {
+    final List<int> bytes;
+    try {
+      bytes = await File(path).readAsBytes();
+    } catch (e) {
+      toast('Cannot read ${path.split(RegExp(r'[\\/]')).last}: $e', 'error');
+      return null;
+    }
+    final name = path.split(RegExp(r'[\\/]')).last;
+    if (bytes.isEmpty) {
+      toast('$name is empty', 'error');
+      return null;
+    }
+    if (bytes.length > presetMaxText) {
+      toast('$name is too large for a preset (${bytes.length} bytes, at most $presetMaxText)', 'error');
+      return null;
+    }
+    if (bytes.any((b) => b >= 0x80)) {
+      toast('$name has characters beyond plain ASCII, which the board cannot take', 'error');
+      return null;
+    }
+    final r = await _preset((c) => c.installPreset(bytes));
+    if (r == null) return null;
+    if (!r.ok) {
+      toast('$name was not installed: ${presetWhy(r.why)}', 'error');
+      log('StcF 1 $name: err ${r.why}', LogKind.err);
+      return null;
+    }
+    await refreshBoardPresets();
+    final p = boardPresets?.presets.where((x) => x.id == r.id).firstOrNull;
+    if (p != null) {
+      toastAction('Installed "${p.title}" (${engineInfo(p.engine).label})', 'Load', () => openBoardPreset(p));
+    } else {
+      toast('Installed $name');
+    }
+    return p;
+  }
+
+  /// The board's reason, in words (the reason itself when the app does not know it).
+  static String presetWhy(String? why) {
+    if (why == null) return 'no answer';
+    if (why.startsWith('engine ')) return 'its engine (${why.substring(7)}) is not on this Striso';
+    if (why.startsWith('no preset')) return 'it is no longer on the board';
+    if (why.startsWith('factory')) return 'factory presets stay';
+    if (why.startsWith('no text')) return 'this voice has no preset text';
+    return switch (why) {
+      'store off' => 'this firmware keeps no presets of your own',
+      'syntax' || 'no_format' || 'no_engine' || 'bad_hash' || 'bad_value' => 'it is not a preset file ($why)',
+      'too_long' => 'a field in it is too long',
+      'too long' => 'it is too long',
+      'empty' => 'it is empty',
+      'fields' => 'the title or description is too long',
+      'full' => 'the board\'s preset store is full',
+      'too many' => 'the board holds all the presets it can (128): delete some first',
+      'flash' => 'the flash refused the write (try again)',
+      'cut off' => 'the transfer was cut off (try again)',
+      'busy' => 'the board was busy (try again)',
+      _ => why,
+    };
+  }
+
+  /// The open report in words, as the board gave it.
+  static String openReportText(BoardPreset p, OpenReport r) {
+    String names(List<String> n, int count) => n.isEmpty ? '' : ': ${n.join(', ')}${count > n.length ? ' and ${count - n.length} more' : ''}';
+    final parts = [
+      if (r.clamped > 0) '${r.clamped} clamped to this engine\'s range${names(r.clampedNames, r.clamped)}',
+      if (r.skipped > 0) '${r.skipped} skipped (this engine has no such parameter)${names(r.skippedNames, r.skipped)}',
+      if (r.missing > 0) '${r.missing} not in the preset (kept as the voice has them)',
+    ];
+    return '"${p.title}" was made for another version of ${engineInfo(p.engine).label}: ${parts.join('; ')}. Save it again if you like it.';
   }
 
   // ---------------------------------------------------------------------------------------------

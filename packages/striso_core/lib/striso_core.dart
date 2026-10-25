@@ -12,6 +12,7 @@ export 'src/live_state.dart';
 export 'src/mock.dart';
 export 'src/params.dart';
 export 'src/playable.dart';
+export 'src/presets.dart';
 export 'src/protocol.dart';
 export 'src/save_touch.dart';
 export 'src/settings_map.dart';

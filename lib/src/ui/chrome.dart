@@ -455,7 +455,7 @@ Future<bool> showSuggest(BuildContext context, Suggestion r) async {
 class InputField extends StatelessWidget {
   final TextEditingController controller;
   final String hint;
-  final ValueChanged<String>? onSubmitted;
+  final ValueChanged<String>? onSubmitted, onChanged;
   final bool autofocus;
   final int? maxLength;
   final double? width;
@@ -465,6 +465,7 @@ class InputField extends StatelessWidget {
     required this.controller,
     required this.hint,
     this.onSubmitted,
+    this.onChanged,
     this.autofocus = false,
     this.maxLength = 48,
     this.width,
@@ -482,6 +483,7 @@ class InputField extends StatelessWidget {
         autofocus: autofocus,
         maxLength: maxLength,
         onSubmitted: onSubmitted,
+        onChanged: onChanged,
         style: style,
         cursorColor: Pal.accent,
         decoration: InputDecoration(
