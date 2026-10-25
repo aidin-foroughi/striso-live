@@ -286,6 +286,30 @@ void main() {
       expect(_rms(after), lessThan(1e-4));
     });
 
+    test('a MIDI note through the board\'s USB MIDI in sounds (the firmware\'s own MIDI note path), and stops', () {
+      final b = VirtualBoard();
+      addTearDown(b.dispose);
+      expect(b.selectVoice(15), isTrue); // bowed:violin
+      b.render(4800);
+      final before = b.render(9600);
+      // MPE as a Striso sends it: channel pressure first, then the note-on, on member channel 2
+      expect(b.midiWrite([0x0D, 0xD1, 70, 0, 0x09, 0x91, 62, 90]), isTrue);
+      final on = <double>[];
+      for (var i = 0; i < 50; i++) {
+        on.addAll(b.render(480));
+      }
+      expect(b.state.controls.any((c) => c[1] > 0), isTrue, reason: 'a voice has the note\'s pressure');
+      expect(b.midiWrite([0x08, 0x81, 62, 40]), isTrue);
+      b.render(48000 * 4);
+      final after = b.render(9600);
+      final x = Float32List.fromList(on);
+      expect(_rms(before), lessThan(1e-4));
+      expect(_rms(x), greaterThan(1e-3), reason: 'the note sounds');
+      expect(_rms(after), lessThan(1e-4), reason: 'and stops after its note-off');
+      // ignore: avoid_print
+      print('MIDI note: rms ${_rms(before).toStringAsExponential(2)} before, ${_rms(x).toStringAsExponential(2)} held, ${_rms(after).toStringAsExponential(2)} after');
+    });
+
     test('a parameter change alters the render; the same inputs render the same', () {
       Float32List take(double? gain) {
         final b = VirtualBoard();

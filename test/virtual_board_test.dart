@@ -343,6 +343,11 @@ void main() {
       [1, 0xE, 74, 71],
       [1, 0x8, 60, 30],
     ]);
+    // and a note plays: the firmware's MIDI note path gives a voice its pressure
+    final vb = ctl.virtual.instrument!.board;
+    expect(ctl.midi!.backend.inject('test controller', const [0xD1, 70, 0x91, 62, 90]), greaterThanOrEqualTo(0));
+    await waitFor(tester, () => vb.state.controls.any((v) => v[1] > 0), ms: 4000);
+    ctl.midi!.backend.inject('test controller', const [0x81, 62, 40]);
     await run(tester, ctl.userDisconnect());
     expect(ctl.midi!.running, isFalse);
     await finish(tester, ctl);

@@ -193,6 +193,15 @@ class VirtualBoard {
     return b.takeBytes();
   }
 
+  /// USB-MIDI packets (4 bytes each: cable/CIN, then the message) into the board's USB MIDI in, as
+  /// a host sends them; false when it is not attached. (The app's MIDI inputs call sv_midi_write
+  /// from the driver's thread; this is the same input for tests.)
+  bool midiWrite(List<int> packets) {
+    final n = packets.length;
+    _io.asTypedList(n).setAll(0, packets);
+    return lib.midiWrite(_h, _io, n) >= 0;
+  }
+
   /// The board's USB MIDI out: 4-byte USB-MIDI packets.
   Uint8List midiRead() {
     final n = lib.midiRead(_h, _io, 65536);
