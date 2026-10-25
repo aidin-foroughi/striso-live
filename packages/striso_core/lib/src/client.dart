@@ -363,7 +363,7 @@ class StrisoClient {
     final r = await request(presetListCommand(), (l, s) {
       if (!isPresetListLine(l)) return Take.no;
       return l.trim().startsWith('J end') ? Take.done : Take.more;
-    }, timeout: const Duration(milliseconds: 1500));
+    }, timeout: const Duration(milliseconds: 600)); // ~200 lines arrive well within it
     return parsePresetList(r.lines);
   }
 

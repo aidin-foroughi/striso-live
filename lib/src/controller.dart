@@ -1358,7 +1358,6 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   @override
   void boardLive(Board b) {
     final c = b.client;
-    unawaited(refreshBoardPresets());
     if (b.mode == Mode.striso) _trace('live');
     waveT = clockMs();
     // the parameter lists load behind the live view (the pollers wait their turn)
@@ -1370,6 +1369,8 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
           if (b.mode == Mode.striso && same()) _trace('all lists');
           if (same()) _offerRestore();
           if (same()) await refreshTuning();
+          // the board's presets after the lists (a firmware without them answers nothing)
+          if (same()) await refreshBoardPresets();
         })
         .whenComplete(() {
           if (same()) {
