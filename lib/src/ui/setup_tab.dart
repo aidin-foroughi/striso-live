@@ -728,17 +728,19 @@ class VirtualFirmwareRow extends StatelessWidget {
             ),
             const SizedBox(width: Space.s),
             Btn(
-              'Load…',
+              'Install…',
               key: const Key('vfw-load'),
               kind: BtnKind.ghost,
-              tooltip: 'A striso_virtual library from a firmware build (${virtualLibName()})',
+              tooltip:
+                  'A firmware release\u2019s striso_virtual-<version>-${virtualPlatform()}.zip (checked against its manifest), or a ${virtualLibName()}: '
+                  'installed into the firmware folder and played',
               onPressed: () async {
                 final f = await openFile(
                   acceptedTypeGroups: [
-                    XTypeGroup(label: 'striso_virtual', extensions: [virtualLibName().split('.').last]),
+                    XTypeGroup(label: 'striso_virtual', extensions: ['zip', virtualLibName().split('.').last]),
                   ],
                 );
-                if (f != null) await ctl.useFirmware(f.path);
+                if (f != null) await ctl.installAndUseFirmware(f.path);
               },
             ),
             if (ctl.firmwareDir != null)

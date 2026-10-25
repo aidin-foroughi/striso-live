@@ -241,8 +241,9 @@ class _DialPainter extends CustomPainter {
     c.drawArc(rect, ang(0), sweep * math.pi / 180, false, arc..color = Pal.bg3);
     if (!tracksOnly) {
       final a = math.min(f, zero), b = math.max(f, zero);
-      if (b - a > 1e-4)
+      if (b - a > 1e-4) {
         c.drawArc(rect, ang(a), (b - a) * sweep * math.pi / 180, false, arc..color = pending ? Pal.accent.withValues(alpha: 0.45) : Pal.accent);
+      }
     }
     final disc = r - 5;
     c.drawCircle(center, disc, Paint()..color = Pal.bg2);

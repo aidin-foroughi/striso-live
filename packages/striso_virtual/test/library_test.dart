@@ -28,7 +28,7 @@ void main() {
 
   String copy(String name) {
     final d = Directory('${tmp.path}${Platform.pathSeparator}$name')..createSync();
-    return File(lib!).copySync('${d.path}${Platform.pathSeparator}${lib.split(RegExp(r'[\/]')).last}').path;
+    return File(lib!).copySync('${d.path}${Platform.pathSeparator}${lib.split(RegExp(r'[\\/]')).last}').path;
   }
 
   /// Boots a board on the library at [path], reads its version over the console, disposes it.

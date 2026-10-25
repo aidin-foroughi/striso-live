@@ -189,7 +189,7 @@ class StrisoVirtualLib {
       try {
         dl = DynamicLibrary.open(abs);
       } catch (e) {
-        throw StateError(loadError = '$abs could not be loaded: $e');
+        throw StateError(loadError = missingRuntime() ?? '$abs could not be loaded: $e');
       }
       final int api;
       try {
@@ -225,6 +225,26 @@ class StrisoVirtualLib {
     }
     loadError = 'striso_virtual not found: ${tried.join('; ')}';
     throw StateError(loadError!);
+  }
+
+  /// The Windows build of striso_virtual links the Microsoft C++ runtime, MSVCP140_ATOMIC_WAIT.dll
+  /// among it (Visual C++ 2015-2022, 14.28 or later). When one of them is not on this computer the
+  /// load fails with a bare "error 126": this says what to install. Null when they are all there
+  /// (or not on Windows). [open] is for tests.
+  static String? missingRuntime({bool? windows, void Function(String)? open}) {
+    if (!(windows ?? Platform.isWindows)) return null;
+    final o = open ?? (String n) => DynamicLibrary.open(n);
+    final missing = <String>[];
+    for (final n in const ['VCRUNTIME140.dll', 'VCRUNTIME140_1.dll', 'MSVCP140.dll', 'MSVCP140_ATOMIC_WAIT.dll']) {
+      try {
+        o(n);
+      } catch (_) {
+        missing.add(n);
+      }
+    }
+    if (missing.isEmpty) return null;
+    return 'the virtual Striso needs the Microsoft Visual C++ Redistributable 2015-2022 (x64), 14.28 or later '
+        '(${missing.join(', ')} ${missing.length == 1 ? 'is' : 'are'} missing): install it from https://aka.ms/vs/17/release/vc_redist.x64.exe';
   }
 
   /// Why a library with C API [api] is refused (null: it fits). Not compatibility: a guard.

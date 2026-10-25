@@ -94,7 +94,12 @@ class _VirtualBoardHandle extends Board {
 class VirtualStrisoRuntime implements VirtualRuntime {
   /// The library chosen (a path), or null for the first one found.
   String? libPath;
-  final bool mockOnly;
+  /// --mock-demo: the Dart mock whatever library there is.
+  final bool forceMock;
+
+  /// The Dart mock instead of a library: forced, or a widget test that names no library.
+  bool get mockOnly =>
+      forceMock || (libPath == null && Platform.environment['FLUTTER_TEST'] == 'true' && Platform.environment['STRISO_VIRTUAL_LIB'] == null);
 
   /// Where the instrument's config flash is kept (null: not kept, tests).
   final String? flashFile;
@@ -108,8 +113,7 @@ class VirtualStrisoRuntime implements VirtualRuntime {
   /// The instrument changed (started, stopped): SoundRouting attaches or detaches it.
   final void Function()? onChanged;
 
-  VirtualStrisoRuntime({this.libPath, bool mockOnly = false, this.flashFile, required this.log, this.onChanged})
-    : mockOnly = mockOnly || (libPath == null && Platform.environment['FLUTTER_TEST'] == 'true' && Platform.environment['STRISO_VIRTUAL_LIB'] == null);
+  VirtualStrisoRuntime({this.libPath, bool mockOnly = false, this.flashFile, required this.log, this.onChanged}) : forceMock = mockOnly;
 
   /// The library, loaded once; null with [loadError].
   StrisoVirtualLib? get lib {

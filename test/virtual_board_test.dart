@@ -7,10 +7,15 @@
 // striso_virtual package finds it); skips with the reason otherwise.
 import 'dart:io';
 
+import 'dart:convert';
+
+import 'package:archive/archive.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:striso_audio/striso_audio.dart';
 import 'package:striso_core/striso_core.dart';
 import 'package:striso_live/src/controller.dart';
+import 'package:striso_live/src/firmware_library.dart';
 import 'package:striso_live/src/store.dart';
 import 'package:striso_virtual/striso_virtual.dart';
 
@@ -338,7 +343,7 @@ void main() {
     final dir = await tester.runAsync(() async => Directory.systemTemp.createTempSync('sv_fw'));
     String copy(String name) {
       final d = Directory('${dir!.path}${Platform.pathSeparator}$name')..createSync();
-      return File(lib!).copySync('${d.path}${Platform.pathSeparator}${lib.split(RegExp(r'[\/]')).last}').path;
+      return File(lib!).copySync('${d.path}${Platform.pathSeparator}${lib.split(RegExp(r'[\\/]')).last}').path;
     }
 
     final a = copy('2026-10-01 build a'), b = copy('2026-10-24 build b');
@@ -359,6 +364,43 @@ void main() {
     expect(ctl.state, isA<Idle>());
     // and back to a good one
     expect(await run(tester, ctl.useFirmware(a)), isTrue);
+    await run(tester, ctl.playVirtual());
+    await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+    await finish(tester, ctl);
+    await tester.runAsync(() async {
+      try {
+        dir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+  });
+
+  testWidgets('a firmware release zip installed from the picker: checked, kept in the firmware folder, played', skip: skip != null, (tester) async {
+    final dir = await tester.runAsync(() async => Directory.systemTemp.createTempSync('sv_install'));
+    final bytes = File(lib!).readAsBytesSync();
+    final name = lib.split(RegExp(r'[\\/]')).last;
+    final top = 'striso_virtual-test-${virtualPlatform()}';
+    final a = Archive()
+      ..addFile(ArchiveFile.bytes('$top/$name', bytes))
+      ..addFile(
+        ArchiveFile.string(
+          '$top/manifest.json',
+          jsonEncode({
+            'version': 'test build',
+            'platform': virtualPlatform(),
+            'library': name,
+            'sha256': sha256.convert(bytes).toString(),
+            'api_version': svApiVersion,
+          }),
+        ),
+      );
+    final zip = File('${dir!.path}${Platform.pathSeparator}$top.zip')..writeAsBytesSync(ZipEncoder().encode(a));
+    final ctl = AppController(
+      options: const AppOptions(noUsb: true),
+      store: Store('${dir.path}${Platform.pathSeparator}settings.json'),
+    );
+    expect(await run(tester, ctl.installAndUseFirmware(zip.path)), isTrue, reason: ctl.banner?.text);
+    expect(ctl.firmwarePath, startsWith('${dir.path}${Platform.pathSeparator}firmware${Platform.pathSeparator}test build'));
+    expect(ctl.firmwareBuilds().map((b) => b.name), contains('test build'));
     await run(tester, ctl.playVirtual());
     await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
     await finish(tester, ctl);

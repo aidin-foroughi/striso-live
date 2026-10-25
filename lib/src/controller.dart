@@ -11,6 +11,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:striso_audio/striso_audio.dart';
 import 'package:striso_core/striso_core.dart';
+import 'package:striso_virtual/striso_virtual.dart' show svApiVersion;
 
 import 'app_log.dart';
 import 'firmware_library.dart';
@@ -647,6 +648,28 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     notifyListeners();
     if (wasLive) await playVirtual();
     return true;
+  }
+
+  /// Installs a firmware build (a release zip, or a library) into the firmware folder, then plays
+  /// it (useFirmware). macOS: its quarantine cleared. False with a banner when it cannot be.
+  Future<bool> installAndUseFirmware(String source) async {
+    final dir = firmwareDir;
+    if (dir == null) {
+      showBanner('There is no firmware folder in this run.');
+      return false;
+    }
+    final String lib;
+    try {
+      lib = await installFirmware(source, dir, apiVersion: svApiVersion);
+    } on FirmwareInstallError catch (e) {
+      showBanner('That firmware build cannot be installed: $e');
+      return false;
+    } catch (e) {
+      showBanner('That firmware build cannot be installed: $e');
+      return false;
+    }
+    log('virtual firmware installed: $lib');
+    return useFirmware(lib);
   }
 
   /// The header's mode control.
