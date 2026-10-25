@@ -18,7 +18,8 @@ own booleans.
    virtual) last reported and asks it again after every request, on its change counter (`Stcy`)
    or on an event. It never models board state by guessing what a command did, and keeps no copy
    of firmware tables. When the UI needs something the firmware cannot tell, the firmware gets a
-   read-only command: `StcX` (settings-key layout), `StcY` (state), `Stcy` (change counter).
+   read-only command: `StcX` (settings-key layout), `StcY` (state), `Stcy` (change counter), `StcH`
+   (hero knobs).
 3. **One `Board` interface.** Both modes give the UI a `Board`: the console protocol
    (`StrisoClient`: version, lists, voice select, parameters, `K`, `N`, `X`, `Y`, `y`, load), what
    plays it by hand, where Save writes, and a `lost` event. Voices, presets, parameters with undo,
@@ -125,6 +126,8 @@ One line from the state and the resources, e.g.:
   read-back at the gesture's end.
 - Undo/redo, A/B, Mutate, Reset and Recall write and then read back. The history keeps what the
   board reported before and after.
+- The hero knobs are the ones `StcH` names for the current voice (read on connect and when `Stcy`
+  moves). A name its parameter list lacks is shown as an error, never replaced by a guess.
 - The settings overlay is drawn from `StcX` (kind, group, engine, LED colour, whether `K` takes
   it). The Dart mock board (widget tests only) answers `X` with a recording of the firmware's
   reply.

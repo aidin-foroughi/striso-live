@@ -154,3 +154,23 @@ int? parseChangeCount(String line) {
   final m = _yCount.firstMatch(line.trim());
   return m == null ? null : int.parse(m.group(1)!);
 }
+
+/// The hero knobs of the current voice as the firmware names them (StcH): the voice parameters in
+/// display order (the preset's own list, else its engine's) and the effect amounts.
+class HeroKnobs {
+  final int voice;
+  final List<String> params, fx;
+  const HeroKnobs(this.voice, this.params, this.fx);
+  @override
+  String toString() => 'HeroKnobs($voice: ${params.join(' ')} | ${fx.join(' ')})';
+}
+
+final _hLine = RegExp(r'^H (\d+)((?: [^\s|]+)*) \|((?: [^\s|]+)*)\s*$');
+
+/// `H <voice index> <name>... | <fx name>...`; null when it is not one.
+HeroKnobs? parseHeroes(String line) {
+  final m = _hLine.firstMatch(line.trim());
+  if (m == null) return null;
+  List<String> words(String? s) => (s ?? '').trim().isEmpty ? const [] : s!.trim().split(' ');
+  return HeroKnobs(int.parse(m.group(1)!), words(m.group(2)), words(m.group(3)));
+}

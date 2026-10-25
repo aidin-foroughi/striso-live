@@ -289,6 +289,35 @@ void main() {
       expect(parseBoardState('y 4'), isNull);
     });
 
+    test('StcH: the hero knobs as the firmware replies', () {
+      final va = parseHeroes('H 1 cut_base res cut_env drive saw2_detune sub release vibrato | rvmix dlmix')!;
+      expect(va.voice, 1);
+      expect(va.params, ['cut_base', 'res', 'cut_env', 'drive', 'saw2_detune', 'sub', 'release', 'vibrato']);
+      expect(va.fx, ['rvmix', 'dlmix']);
+      expect(parseHeroes('H 2 cut_base cut_env release saw2_detune drift res sub vibrato | rvmix dlmix')!.params[4], 'drift');
+      final strisy = parseHeroes('H 0 | rvmix dlmix\r')!;
+      expect(strisy.params, isEmpty);
+      expect(strisy.fx, ['rvmix', 'dlmix']);
+      expect(parseHeroes('H 0 |')!.fx, isEmpty);
+      expect(parseHeroes('H 1 cut_base res'), isNull, reason: 'no bar: not a reply');
+      expect(parseHeroes('Y 1 voice=1'), isNull);
+    });
+
+    test('the mock replays the firmware\'s StcH for its voice', () async {
+      final board = MockBoard(autoplay: false, idleFrames: 0);
+      final c = StrisoClient(MockTransport(board: board));
+      await c.connect();
+      final voices = await c.listVoices();
+      for (final name in ['strisy', 'va:classic', 'va:pad', 'trumpet:cup mute']) {
+        final v = voices.firstWhere((x) => x.name == name);
+        await c.selectVoice(v.index);
+        final h = (await c.getHeroes())!;
+        expect(h.voice, v.index);
+        expect('${h.params.join(' ')} | ${h.fx.join(' ')}'.trim(), mockHeroReplies[name]!.trim(), reason: name);
+      }
+      await c.disconnect();
+    });
+
     test('the mock answers X, Y and y; y goes up when its state changes, not between idle reads', () async {
       final board = MockBoard(autoplay: false, idleFrames: 0);
       final c = StrisoClient(MockTransport(board: board));

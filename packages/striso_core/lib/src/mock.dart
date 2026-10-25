@@ -180,12 +180,12 @@ const List<_P> _fx = [
   ('dl_time', 'delay', 0.02, 1.5, 0, 0.38),
   ('dl_sync', 'delay', 0, 7, 1, 3),
   ('dl_fb', 'delay', 0.0, 0.95, 0, 0.35),
-  ('dl_mix', 'delay', 0.0, 1.0, 0, 0.2),
+  ('dlmix', 'delay', 0.0, 1.0, 0, 0.2),
   ('dl_pong', 'delay', 0, 1, 2, 1),
   ('reverb', 'reverb', 0, 1, 2, 1),
   ('rv_size', 'reverb', 0.0, 1.0, 0, 0.55),
   ('rv_damp', 'reverb', 0.0, 1.0, 0, 0.4),
-  ('rv_mix', 'reverb', 0.0, 1.0, 0, 0.22),
+  ('rvmix', 'reverb', 0.0, 1.0, 0, 0.22),
   ('trem', 'tremolo', 0, 1, 2, 0),
   ('tr_rate', 'tremolo', 0.1, 12.0, 0, 4.0),
   ('tr_depth', 'tremolo', 0.0, 1.0, 0, 0.4),
@@ -290,6 +290,77 @@ const List<(double, double, int, List<double>?)> _mockTunings = [
     -5.96386, -10.3616, 1.08397, 4.39774, // A Bb A# B
   ]),
 ];
+
+/// The firmware's StcH replies (after the voice index), as recorded from the virtual board for
+/// every voice (striso-control-firmware mod-midiin 576794a). The mock (widget tests only) answers
+/// with the one of its current voice's name.
+const Map<String, String> mockHeroReplies = {
+  'strisy': '| rvmix dlmix',
+  'va:classic': 'cut_base res cut_env drive saw2_detune sub release vibrato | rvmix dlmix',
+  'va:pad': 'cut_base cut_env release saw2_detune drift res sub vibrato | rvmix dlmix',
+  'va:lead': 'cut_base res cut_env drive saw2_detune sub release vibrato | rvmix dlmix',
+  'va:bass': 'cut_base res cut_env drive sub acc_level acc_cutoff release | rvmix dlmix',
+  'va:brass': 'cut_base res cut_env drive saw2_detune sub release vibrato | rvmix dlmix',
+  'va:keys': 'cut_base res cut_env drive saw2_detune sub release vibrato | rvmix dlmix',
+  'va:acid': 'cut_base res cut_env drive acc_cutoff acc_level acc_decay release | rvmix dlmix',
+  'va:strings': 'cut_base res cut_env drive saw2_detune sub release vibrato | rvmix dlmix',
+  'modal:vibraphone': 'hard decay upper keytrack hfdamp damper tremdepth rub | rvmix dlmix',
+  'modal:marimba': 'hard decay upper keytrack hfdamp damper tremdepth rub | rvmix dlmix',
+  'modal:glockenspiel': 'hard decay upper keytrack hfdamp damper tremdepth rub | rvmix dlmix',
+  'modal:bell': 'hard decay upper keytrack hfdamp damper tremdepth rub | rvmix dlmix',
+  'modal:kalimba': 'hard decay upper keytrack hfdamp damper tremdepth rub | rvmix dlmix',
+  'modal:wine glass': 'hard decay upper keytrack hfdamp damper tremdepth rub | rvmix dlmix',
+  'bowed:violin': 'force_hi pos rosin bright body_amt damp vibrato ensemble | rvmix dlmix',
+  'bowed:viola': 'force_hi pos rosin bright body_amt damp vibrato ensemble | rvmix dlmix',
+  'bowed:cello': 'force_hi pos rosin bright body_amt damp vibrato ensemble | rvmix dlmix',
+  'bowed:bass': 'force_hi pos rosin bright body_amt damp vibrato ensemble | rvmix dlmix',
+  'bowed:section': 'ensemble ens_detune ens_spread force_hi pos bright body_amt vibrato | rvmix dlmix',
+  'bowed:ponticello': 'force_hi pos rosin bright body_amt damp vibrato ensemble | rvmix dlmix',
+  'bowed:flautando': 'force_hi pos rosin bright body_amt damp vibrato ensemble | rvmix dlmix',
+  'bowed:sordino': 'force_hi pos rosin bright body_amt damp vibrato ensemble | rvmix dlmix',
+  'bowed:pizzicato': 'pizz_decay pizz_bright pos bright body_amt damp rel vibrato | rvmix dlmix',
+  'wind:clarinet': 'reed_open attack bright breath growl vib body tongue | rvmix dlmix',
+  'wind:bass clarinet': 'reed_open attack bright breath growl vib body tongue | rvmix dlmix',
+  'wind:soprano sax': 'reed_open attack bright breath growl vib body tongue | rvmix dlmix',
+  'wind:alto sax': 'reed_open attack bright breath growl vib body tongue | rvmix dlmix',
+  'wind:tenor sax': 'reed_open attack bright breath growl vib body tongue | rvmix dlmix',
+  'wind:baritone sax': 'reed_open attack bright breath growl vib body tongue | rvmix dlmix',
+  'wind:oboe': 'reed_open attack bright breath growl vib body tongue | rvmix dlmix',
+  'wind:bassoon': 'reed_open attack bright breath growl vib body tongue | rvmix dlmix',
+  'wind:flute': 'jet jet_off breath turb bright attack vib body | rvmix dlmix',
+  'ep:stage': 'hard decay bell tick drive grit tone wobble | rvmix dlmix',
+  'ep:suitcase': 'hard decay bell tick drive grit tone wobble | rvmix dlmix',
+  'ep:mk2': 'hard decay bell tick drive grit tone wobble | rvmix dlmix',
+  'ep:dyno': 'hard decay bell tick drive grit tone wobble | rvmix dlmix',
+  'ep:ballad': 'hard decay bell tick drive grit tone wobble | rvmix dlmix',
+  'ep:bark': 'hard decay bell tick drive grit tone wobble | rvmix dlmix',
+  'ep:neosoul': 'hard decay bell tick drive grit tone wobble | rvmix dlmix',
+  'ep:fm80s': 'hard decay bell tick drive grit tone wobble | rvmix dlmix',
+  'ep:lofi': 'hard decay bell tick drive grit tone wobble | rvmix dlmix',
+  'ep:wurli': 'wurli hard decay drive grit tone wobble dyn | rvmix dlmix',
+  'ep:wurlibark': 'hard decay bell tick drive grit tone wobble | rvmix dlmix',
+  'ep:pianet': 'hard decay bell tick drive grit tone wobble | rvmix dlmix',
+  'ep:felt': 'hard decay bell tick drive grit tone wobble | rvmix dlmix',
+  'ep:celesta': 'hard decay bell tick drive grit tone wobble | rvmix dlmix',
+  'brass:trumpet': 'brassiness lip_loud tone_hz breath mute release vibrato pair | rvmix dlmix',
+  'brass:flugelhorn': 'brassiness lip_loud tone_hz breath mute release vibrato pair | rvmix dlmix',
+  'brass:trombone': 'brassiness lip_loud tone_hz breath mute release vibrato pair | rvmix dlmix',
+  'brass:horn': 'brassiness lip_loud tone_hz breath mute release vibrato pair | rvmix dlmix',
+  'brass:euphonium': 'brassiness lip_loud tone_hz breath mute release vibrato pair | rvmix dlmix',
+  'brass:tuba': 'brassiness lip_loud tone_hz breath mute release vibrato pair | rvmix dlmix',
+  'brass:harmon': 'mute mute_bp mute_hz wah brassiness tone_hz vibrato release | rvmix dlmix',
+  'brass:plunger': 'mute mute_lp mute_hz wah brassiness tone_hz vibrato release | rvmix dlmix',
+  'brass:section': 'pair detune brassiness lip_loud tone_hz breath vibrato release | rvmix dlmix',
+  'trumpet:bb classical': 'brassy bell attack p_loud breath vibrato release room | rvmix dlmix',
+  'trumpet:bb jazz': 'brassy bell growl fall doit shake vibrato breath | rvmix dlmix',
+  'trumpet:c trumpet': 'brassy bell attack p_loud breath vibrato release room | rvmix dlmix',
+  'trumpet:piccolo': 'brassy bell attack p_loud breath vibrato release room | rvmix dlmix',
+  'trumpet:cornet': 'brassy bell attack p_loud breath vibrato release room | rvmix dlmix',
+  'trumpet:harmon': 'mute wah brassy bell attack breath vibrato room | rvmix dlmix',
+  'trumpet:cup mute': 'mute wah brassy bell attack breath vibrato room | rvmix dlmix',
+  'trumpet:straight': 'mute wah brassy bell attack breath vibrato room | rvmix dlmix',
+  'trumpet:plunger': 'mute wah growl brassy bell fall vibrato breath | rvmix dlmix',
+};
 
 /// The firmware's StcX reply, as recorded from the virtual board (striso-control-firmware's
 /// virtual/tests/transcripts/settings_layout.txt). The mock (widget tests only) answers with it.
@@ -522,6 +593,9 @@ class MockBoard implements PlayableBoard {
       for (final l in mockSettingsLayoutReply) {
         _print('$l\r\n');
       }
+    } else if (ch == 'H') {
+      final name = _entries[voice].name;
+      _print('H $voice ${heroReply?.call(name) ?? mockHeroReplies[name] ?? '| rvmix dlmix'}\r\n');
     } else if (ch == 'Y') {
       _print('${_stateLine()}\r\n');
     } else if (ch == 'y') {
@@ -629,6 +703,9 @@ class MockBoard implements PlayableBoard {
 
   /// The fine tune in cents (the knob on the tuning keys), e.g. -31.77 for A = 432 Hz.
   void fineTune(double cents) => noteOffset = toFloat32(cents / 100);
+
+  /// Replaces the recorded StcH reply (after the voice index) for a voice name (tests).
+  String? Function(String voice)? heroReply;
 
   int _stateCount = 0;
   String _stateSeen = '';

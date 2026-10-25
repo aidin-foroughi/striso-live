@@ -337,6 +337,17 @@ class StrisoClient {
     return r.state['y'] as BoardState?;
   }
 
+  /// The current voice's hero knobs (StcH); null without a reply.
+  Future<HeroKnobs?> getHeroes({Duration timeout = const Duration(milliseconds: 500)}) async {
+    final r = await request(commandChar('H'), (l, s) {
+      final h = parseHeroes(l);
+      if (h == null) return Take.no;
+      s['h'] = h;
+      return Take.done;
+    }, timeout: timeout);
+    return r.state['h'] as HeroKnobs?;
+  }
+
   /// The state's change counter (Stcy): it goes up whenever anything the board reports changed.
   Future<int?> getChangeCount({Duration timeout = const Duration(milliseconds: 400)}) async {
     final r = await request(commandChar('y'), (l, s) {

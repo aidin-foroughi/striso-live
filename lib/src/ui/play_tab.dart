@@ -837,6 +837,24 @@ class HeroPanel extends StatelessWidget {
                       ? 'Reading the parameters from the board…'
                       : 'This voice has no live parameters.',
                 ),
+              if (ctl.heroMissing.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: Space.m),
+                  child: Row(
+                    key: const Key('hero-missing'),
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Padding(padding: EdgeInsets.only(top: 6), child: Pip(Pal.error)),
+                      const SizedBox(width: Space.s),
+                      Flexible(
+                        child: Text(
+                          'The board names hero knobs it does not list: ${ctl.heroMissing.join(', ')}',
+                          style: ui(TypeSize.small, color: Pal.error),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               if (knobs.isNotEmpty) grid(knobs, 0),
               if (fx.isNotEmpty) ...[const SizedBox(height: Space.xl), grid(fx, 1)],
               if (ctl.hasSound) ...[

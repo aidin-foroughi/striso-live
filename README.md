@@ -160,8 +160,9 @@ whose `INFO_UF2.TXT` names the Striso (and only when there is exactly one), back
 
 - **Play**: the engine row (the Striso's voice-key colours), this engine's presets and your
   sounds; the board with key, scale (66 scales in groups, searchable, with degree formulas) and
-  labels; the chord, roman numeral, progression and key; the hero knobs of the voice (per engine
-  and preset, by the firmware's parameter names) and the reverb and delay amounts.
+  labels; the chord, roman numeral, progression and key; the hero knobs of the voice and the
+  effect amounts, as the firmware names them for the voice it plays (StcH; a name the board does
+  not list shows as an error).
 - **Sound**: every voice and effect parameter, undo/redo, Reset, Mutate, A/B, Save sound, Copy as
   C; My sounds; the morph pad (closed until you open it).
 - **Setup**: Sensitivity, Key equalizer or Settings keys on the big board; Save to Striso;
@@ -231,8 +232,7 @@ build\striso_audio\Release\striso_audio_check --capture 3 take.wav       # the S
 Run it from the build: `build\windows\x64\runner\Release\StrisoLive.exe` (Windows) or
 `open "build/macos/Build/Products/Release/Striso Live.app"`; `--demo --no-usb` without a board.
 
-**Firmware cross-checks.** Some `striso_core` tests compare with the firmware source: the hero
-knob names with `voice_*.h` and `fx.h`, the settings map with `synth_control.cpp`, and the config
+**Firmware cross-checks.** Some `striso_core` tests compare with the firmware source: the config
 writer byte for byte with the firmware's `tools/striso.py` (through its `tools/.venv`, see
 `tools/requirements.txt` there). They look for a
 [striso-control-firmware](https://github.com/aidin-foroughi/striso-control-firmware) checkout in

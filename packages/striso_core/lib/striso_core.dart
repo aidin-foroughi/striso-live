@@ -6,7 +6,6 @@ export 'src/board_state.dart';
 export 'src/client.dart';
 export 'src/config_uf2.dart';
 export 'src/harmony.dart';
-export 'src/hero.dart';
 export 'src/layout.dart';
 export 'src/live_state.dart';
 export 'src/mock.dart';

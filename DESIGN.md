@@ -384,11 +384,9 @@ The board reads as an instrument at rest and as light while playing, and the two
    the `stage` type; no columns, no toolbar; label sizes ×1.3. Why: on stage you need the board
    and the chord from two metres away. Implementation: a `stage` flag in the controller, a
    different `HomePage` layout branch, 320 ms transition.
-2. **Hero knobs per engine/preset.** A `const Map<String, List<String>> heroParams` in
-   `striso_core` (e.g. bowed: `bow_force, bow_speed, bow_pos, rosin, body, damping, vibrato,
-   vib_hz`; va: `cut_base, res, cut_env, drive, saw2_detune, sub, release, vibrato`), with
-   optional per-preset overrides keyed by voice name. Fallback: the first 8 continuous params
-   in group order. Why: the Play tab must offer the right six knobs, not the first six.
+2. **Hero knobs per engine/preset.** The firmware names them for the voice it plays (`StcH`: the
+   engine's list, or a preset's own; then the effect amounts). Why: the Play tab must offer the
+   right six knobs, not the first six.
 3. **Restore the edited sound after a reconnect.** The board forgets edits on reboot (Save to
    Striso, power cycle). Keep the last snapshot per voice in the store; on reconnect, if the
    board's values differ, toast "Your edited viola is back: Restore" with a ghost action.

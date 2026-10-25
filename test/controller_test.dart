@@ -287,4 +287,20 @@ void main() {
     expect(usb.last!.board.values[p.index], closeTo(v, 1e-6));
     await finish(tester, ctl);
   });
+
+  testWidgets('hero knobs are the board\u2019s (StcH); a name the board does not list is an error, not a guess', (tester) async {
+    final usb = FakeUsb();
+    final ctl = make(usb, intent: 'connected');
+    await pumpUntil(tester, ctl.start());
+    await waitFor(tester, () => ctl.dot == Dot.on && !ctl.listsLoading && ctl.mainKnobs().isNotEmpty);
+    expect(ctl.mainKnobs().map((p) => p.name), mockHeroReplies[ctl.voiceName]!.split(' | ').first.split(' '));
+    expect(ctl.mainFx().map((p) => p.name), ['rvmix', 'dlmix']);
+    expect(ctl.heroMissing, isEmpty);
+    // the board names a knob its list does not have
+    usb.last!.board.heroReply = (v) => 'cut_base no_such_knob res | rvmix';
+    await pumpUntil(tester, ctl.syncVoice());
+    expect(ctl.mainKnobs().map((p) => p.name), ['cut_base', 'res'], reason: 'only what the board lists');
+    expect(ctl.heroMissing, ['no_such_knob']);
+    await finish(tester, ctl);
+  });
 }

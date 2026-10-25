@@ -271,6 +271,9 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   /// What every key does with Settings held, as the board lists it (StcX).
   SettingsLayout settingsLayout = SettingsLayout.empty;
 
+  /// The current voice's hero knobs as the board names them (StcH).
+  HeroKnobs? heroes;
+
   /// The board's state as it last reported it (StcY), and its change counter (Stcy).
   BoardState? boardState;
   int? _stateCount;
@@ -759,8 +762,9 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     // the app needs the current firmware: it reports its settings layout and its state
     final layout = await c.getSettingsLayout();
     final count = layout == null ? null : await c.getChangeCount();
+    final hero = count == null ? null : await c.getHeroes();
     if (!current()) return null;
-    if (layout == null || count == null) {
+    if (layout == null || count == null || hero == null) {
       return FailEv(
         FailKind.needsUpdate,
         b.mode == Mode.virtual
@@ -769,6 +773,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
       );
     }
     settingsLayout = layout;
+    heroes = hero;
     _stateCount = count;
     _applyState(await c.getState());
     await refreshVoices();
@@ -822,6 +827,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     _confirmTimer = null;
     listsLoading = false;
     settingsLayout = SettingsLayout.empty;
+    heroes = null;
     boardState = null;
     _stateCount = null;
     _resetUi();
@@ -866,6 +872,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     } else {
       await readBack(allTargets);
     }
+    await _readHeroes(c);
     await refreshTuning();
     notifyListeners();
   }
@@ -930,6 +937,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     // the synth thread switches at the next audio block and loads the preset's values
     await Future<void>.delayed(const Duration(milliseconds: 60));
     await refreshParams([0, 1], voiceChanged: true);
+    if (identical(c, client)) await _readHeroes(c);
   }
 
   /// The voice as the board reports it (it can change on the instrument: Settings + a voice key).
@@ -1714,8 +1722,36 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   }
 
   /// About eight knobs that matter most for the current voice, then the effect amounts.
-  List<Param> mainKnobs() => heroKnobs(voiceName, params[0]!.params);
-  List<Param> mainFx() => heroFx(params[1]!.params);
+  /// The hero knobs, as the board names them for this voice (StcH): its parameters by those names.
+  List<Param> mainKnobs() => _heroParams(0, _heroesNow?.params ?? const []);
+  List<Param> mainFx() => _heroParams(1, _heroesNow?.fx ?? const []);
+
+  /// The heroes the board gave for the voice it plays now (none while the new voice's are read).
+  HeroKnobs? get _heroesNow => heroes != null && heroes!.voice == current ? heroes : null;
+
+  /// Hero names the board gave that its parameter lists do not have: shown as an error, never
+  /// replaced by a guess.
+  List<String> get heroMissing {
+    final h = _heroesNow;
+    if (h == null || listsLoading || params[0]!.params.isEmpty) return const [];
+    return [
+      for (final n in h.params)
+        if (findParam(0, n) == null) n,
+      for (final n in h.fx)
+        if (params[1]!.params.isNotEmpty && findParam(1, n) == null) n,
+    ];
+  }
+
+  List<Param> _heroParams(int t, List<String> names) => [
+    for (final n in names) ?findParam(t, n),
+  ];
+
+  Future<void> _readHeroes(StrisoClient c) async {
+    final h = await c.getHeroes();
+    if (!identical(c, client) || h == null) return;
+    heroes = h;
+    notifyListeners();
+  }
 
   // ---------------------------------------------------------------------------------------------
   // stage mode, the console drawer, the Setup mode, the shortcut overlay

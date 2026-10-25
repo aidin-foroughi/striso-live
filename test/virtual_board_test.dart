@@ -97,6 +97,17 @@ void main() {
     final violin = ctl.voices.firstWhere((v) => v.name == 'bowed:violin');
     await run(tester, ctl.selectVoice(violin.index));
     await waitFor(tester, () => ctl.voiceName == 'bowed:violin' && ctl.params[0]!.params.isNotEmpty);
+    // the hero knobs are the firmware's (StcH): the engine's list, a preset's own, every name listed
+    await waitFor(tester, () => ctl.mainKnobs().isNotEmpty);
+    expect(ctl.mainKnobs().map((p) => p.name), ['force_hi', 'pos', 'rosin', 'bright', 'body_amt', 'damp', 'vibrato', 'ensemble']);
+    expect(ctl.mainFx().map((p) => p.name), ['rvmix', 'dlmix']);
+    expect(ctl.heroMissing, isEmpty);
+    final section = ctl.voices.firstWhere((v) => v.name == 'bowed:section');
+    await run(tester, ctl.selectVoice(section.index));
+    await waitFor(tester, () => ctl.voiceName == 'bowed:section' && ctl.mainKnobs().isNotEmpty);
+    expect(ctl.mainKnobs().first.name, 'ensemble', reason: 'the preset\u2019s own heroes');
+    await run(tester, ctl.selectVoice(violin.index));
+    await waitFor(tester, () => ctl.voiceName == 'bowed:violin' && ctl.mainKnobs().isNotEmpty);
 
     // a live parameter and its undo: the board has the value, then the old one again
     final p = ctl.params[0]!.params.firstWhere((x) => x.kind == Kind.continuous);
