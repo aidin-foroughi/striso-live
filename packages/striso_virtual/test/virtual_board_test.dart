@@ -8,6 +8,7 @@
 // --build --preset host-virtual), found through $STRISO_VIRTUAL_LIB, $STRISO_FW_DIR or
 // ../striso-control-firmware; the tests skip with the reason when it is not there.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -399,14 +400,16 @@ void main() {
 
   // sv_options.engine_dir: the firmware loads the engine components in it and lists them after
   // its own engines. The components are awva's (build/sdk/components in an awva checkout), found
-  // through $STRISO_ENGINE_DIR or ../worktrees/awva-*.
-  final comp = _component('sax');
-  group('engine components (engine_dir)', skip: skip ?? (comp == null ? 'no awva sax component built' : null), () {
+  // through $STRISO_ENGINE_DIR, ../worktrees/awva-* or the firmware's own build (its awva
+  // submodule's components): the sax if there is one, else any with presets.
+  final comp = _component();
+  group('engine components (engine_dir)', skip: skip ?? (comp == null ? 'no awva engine component built' : null), () {
     test('a component in engine_dir is listed after the compiled-in engines, and plays', () async {
       final dir = Directory.systemTemp.createTempSync('sv-engines');
       try {
-        File(comp!).copySync('${dir.path}${Platform.pathSeparator}${comp.split(RegExp(r'[\\/]')).last}');
-        File('${dir.path}${Platform.pathSeparator}broken.${comp.split('.').last}').writeAsStringSync('not a library');
+        final (path, id, presets) = comp!;
+        File(path).copySync('${dir.path}${Platform.pathSeparator}${path.split(RegExp(r'[\\/]')).last}');
+        File('${dir.path}${Platform.pathSeparator}broken.${path.split('.').last}').writeAsStringSync('not a library');
         final plain = VirtualBoard()..startRealtime();
         final cp = await _connect(plain);
         final own = await cp.listVoices();
@@ -417,11 +420,11 @@ void main() {
         final voices = await c.listVoices();
         expect(voices.take(own.length).map((v) => v.name), own.map((v) => v.name), reason: 'its own engines first, as they were');
         final added = voices.skip(own.length).toList();
-        expect(added.map((v) => v.engine).toSet(), {'sax'}, reason: 'the component, and nothing of the broken file');
-        expect(added.map((v) => v.preset), ['soprano sax', 'alto sax', 'tenor sax', 'baritone sax']);
+        expect(added.map((v) => v.engine).toSet(), {id}, reason: 'the component, and nothing of the broken file');
+        expect(added.map((v) => v.preset), presets);
         final r = await c.selectVoice(added[1].index);
         expect(r?.ok, isTrue);
-        expect((await c.listVoices()).where((v) => v.current).single.name, 'sax:alto sax');
+        expect((await c.listVoices()).where((v) => v.current).single.name, '$id:${presets[1]}');
         await c.disconnect();
         b.dispose();
       } finally {
@@ -433,17 +436,39 @@ void main() {
   });
 }
 
-/// An awva engine component library (`<name>.dll` / `.dylib` / `.so`), if one is built.
-String? _component(String name) {
+/// An awva engine component library (`<name>.dll` / `.dylib` / `.so`) and what its manifest
+/// (`<name>.json`) says: its id and presets. The sax if one is built, else the first with two
+/// presets or more.
+(String, String, List<String>)? _component() {
   final ext = Platform.isWindows ? 'dll' : (Platform.isMacOS ? 'dylib' : 'so');
-  final roots = [?Platform.environment['STRISO_ENGINE_DIR']];
-  for (final w in ['awva-sax', 'awva-clarinet', 'awva-flute', 'awva-brassfam']) {
-    roots.add('../../../worktrees/$w/build/sdk/components');
+  final fw = Platform.environment['STRISO_FW_DIR'];
+  final libDir = Platform.environment['STRISO_VIRTUAL_LIB'];
+  final roots = [
+    ?Platform.environment['STRISO_ENGINE_DIR'],
+    for (final w in ['awva-sax', 'awva-clarinet', 'awva-flute', 'awva-brassfam']) '../../../worktrees/$w/build/sdk/components',
+    '../../../awva/build/sdk/components',
+    if (fw != null) for (final b in ['host-virtual', 'host-virtual-universal']) '$fw/build/$b/components',
+    if (libDir != null) '${File(libDir).parent.parent.path}/components',
+  ];
+  (String, String, List<String>)? of(File f) {
+    final m = File('${f.path.substring(0, f.path.length - ext.length - 1)}.json');
+    if (!m.existsSync()) return null;
+    final j = jsonDecode(m.readAsStringSync()) as Map<String, Object?>;
+    final presets = [for (final p in (j['presets'] as List? ?? const [])) '$p'];
+    return presets.length < 2 ? null : (f.absolute.path, j['id'] as String, presets);
   }
-  roots.add('../../../awva/build/sdk/components');
+
   for (final r in roots) {
-    final f = File('$r/$name.$ext');
-    if (f.existsSync()) return f.absolute.path;
+    final sax = File('$r/sax.$ext');
+    if (sax.existsSync()) return of(sax);
+  }
+  for (final r in roots) {
+    final d = Directory(r);
+    if (!d.existsSync()) continue;
+    for (final f in d.listSync().whereType<File>().where((f) => f.path.endsWith('.$ext'))) {
+      final c = of(f);
+      if (c != null) return c;
+    }
   }
   return null;
 }

@@ -462,22 +462,42 @@ void main() {
     });
   });
 
-  // an awva engine component (the awva build's sax.<ext> and sax.json), as the striso_virtual
-  // package's test finds it
-  String? component(String name) {
+  // an awva engine component (the awva build's <name>.<ext> and <name>.json), as the
+  // striso_virtual package's test finds it: the sax if one is built, else any (the firmware's own
+  // build has its awva submodule's)
+  ({String path, String id, String name})? component() {
     final ext = Platform.isWindows ? 'dll' : (Platform.isMacOS ? 'dylib' : 'so');
-    for (final r in [
+    final fw = Platform.environment['STRISO_FW_DIR'];
+    final roots = [
       ?Platform.environment['STRISO_ENGINE_DIR'],
       for (final w in ['awva-sax', 'awva-clarinet', 'awva-flute', 'awva-brassfam']) '../worktrees/$w/build/sdk/components',
       '../awva/build/sdk/components',
-    ]) {
-      final f = File('$r/$name.$ext');
-      if (f.existsSync()) return f.absolute.path;
+      if (fw != null) for (final b in ['host-virtual', 'host-virtual-universal']) '$fw/build/$b/components',
+      if (lib != null) '${File(lib).parent.parent.path}/components',
+    ];
+    ({String path, String id, String name})? of(File f) {
+      final m = File('${f.path.substring(0, f.path.length - ext.length - 1)}.json');
+      if (!m.existsSync()) return null;
+      final j = jsonDecode(m.readAsStringSync()) as Map<String, Object?>;
+      return (path: f.absolute.path, id: j['id'] as String, name: (j['name'] ?? j['id']) as String);
+    }
+
+    for (final r in roots) {
+      final f = File('$r/sax.$ext');
+      if (f.existsSync()) return of(f);
+    }
+    for (final r in roots) {
+      final d = Directory(r);
+      if (!d.existsSync()) continue;
+      for (final f in d.listSync().whereType<File>().where((f) => f.path.endsWith('.$ext'))) {
+        final c = of(f);
+        if (c != null) return c;
+      }
     }
     return null;
   }
 
-  final sax = component('sax');
+  final sax = component();
   testWidgets(
     'an engine installed from the picker and ticked: added to the build when it reports engines (Stce), else greyed and not loaded',
     skip: skip != null || sax == null,
@@ -492,10 +512,10 @@ void main() {
       final own = ctl.voices.length;
       // Install… takes the engine (with its manifest), kept in the engine folder, ticked: Virtual
       // starts again with it
-      expect(await run(tester, ctl.installAndAddEngine(sax!)), isTrue, reason: ctl.banner?.text);
+      expect(await run(tester, ctl.installAndAddEngine(sax!.path)), isTrue, reason: ctl.banner?.text);
       await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
       final e = ctl.engineList().single;
-      expect(e.title, 'sax', reason: 'its manifest names it');
+      expect(e.title, sax.name, reason: 'its manifest names it');
       expect(e.engine.path, startsWith(ctl.engineDir!));
       if (ctl.engineReport == null) {
         // this build does not report engines: none are given to it
@@ -505,11 +525,11 @@ void main() {
         expect(ctl.voices.length, own, reason: 'nothing loaded that the app could not show');
       } else {
         final l = ctl.engineReport!.loaded.single;
-        expect(l.id, 'sax');
+        expect(l.id, sax.id);
         expect(l.first, own);
         expect(ctl.voices.length, own + l.count);
-        expect(ctl.voiceName, startsWith('sax:'), reason: 'its first voice, once');
-        expect(ctl.engines().firstWhere((x) => x.engine == 'sax').color, l.color);
+        expect(ctl.voiceName, startsWith('${sax.id}:'), reason: 'its first voice, once');
+        expect(ctl.engines().firstWhere((x) => x.engine == sax.id).color, l.color);
         expect(e.ticked, isTrue);
         expect(await run(tester, ctl.swapBuild()), isTrue);
         await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
