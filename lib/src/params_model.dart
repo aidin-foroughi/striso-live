@@ -48,6 +48,14 @@ class ParamsModel {
   double mutateAmount = 0.12;
   final math.Random _random;
 
+  /// Values the app sent that the board has not confirmed yet (target, name): shown as pending
+  /// until a read-back of their target.
+  final _pending = <(int, String)>{};
+
+  bool isPending(int t, Param p) => _pending.contains((t, p.name));
+  bool get anyPending => _pending.isNotEmpty;
+  List<int> get pendingTargets => {for (final (t, _) in _pending) t}.toList()..sort();
+
   /// When the app last edited (ms on [clock]): the board's read-back waits for the gesture.
   double editT = -1e9;
   final double Function() clock;
@@ -66,6 +74,7 @@ class ParamsModel {
   /// A fresh list from the board: the preset's values are these (A/B ends).
   void load(int t, ParamSet set) {
     params[t] = set;
+    _pending.removeWhere((x) => x.$1 == t);
     _endAB();
   }
 
@@ -74,6 +83,7 @@ class ParamsModel {
       params[t] = ParamSet.empty;
     }
     history.clear();
+    _pending.clear();
     _endAB();
   }
 
@@ -89,7 +99,10 @@ class ParamsModel {
     if (v == p.value) return false;
     if (record) history.record(t, p.name, p.value, v);
     p.value = v;
-    if (send) host.client?.setParam(t, p.index, v);
+    if (send && host.client != null) {
+      host.client!.setParam(t, p.index, v);
+      _pending.add((t, p.name));
+    }
     _dirty = true;
     return true;
   }
@@ -228,6 +241,8 @@ class ParamsModel {
       final r = await c.getParams(t);
       if (!identical(c, host.client) || r == null) continue;
       final have = params[t]!;
+      // the board has answered for this target: nothing of it is pending any more
+      _pending.removeWhere((x) => x.$1 == t);
       if (have.params.length != r.params.length || (t <= 1 && r.name != have.name)) {
         params[t] = ParamSet(r.name, [for (final p in r.params) p..loadValue = p.value], complete: r.complete);
         continue;

@@ -154,6 +154,8 @@ class _KnobState extends State<Knob> {
                 listenable: ctl.values,
                 builder: (context, _) {
                   final changed = p.value != p.loadValue;
+                  // sent, not yet read back from the board: the arc and the dot stay faint
+                  final pending = ctl.sound.isPending(t, p);
                   final locked = ctl.locks[t]?.contains(p.name) ?? false;
                   final off = widget.enable != null && widget.enable!.value < 0.5;
                   final showValue = _hover || _drag || _focus.hasFocus;
@@ -172,7 +174,7 @@ class _KnobState extends State<Knob> {
                               children: [
                                 Positioned.fill(
                                   child: CustomPaint(
-                                    painter: _DialPainter(p, p.value, focused: _focus.hasFocus, tracksOnly: ctl.listsLoading),
+                                    painter: _DialPainter(p, p.value, focused: _focus.hasFocus, tracksOnly: ctl.listsLoading, pending: pending),
                                   ),
                                 ),
                                 if (locked) const Positioned(right: -6, top: -4, child: Icon(Icons.lock, size: 10, color: Pal.text3)),
@@ -192,7 +194,13 @@ class _KnobState extends State<Knob> {
                                   style: ui(TypeSize.body, color: showValue ? Pal.text1 : Pal.text2),
                                 ),
                               ),
-                              if (changed) ...[const SizedBox(width: Space.xs), const Pip(Pal.accent, size: 4)],
+                              if (pending) ...[
+                                const SizedBox(width: Space.xs),
+                                const Pip(Pal.accent, key: Key('pending'), size: 4, hollow: true),
+                              ] else if (changed) ...[
+                                const SizedBox(width: Space.xs),
+                                const Pip(Pal.accent, size: 4),
+                              ],
                             ],
                           ),
                         ],
@@ -212,8 +220,8 @@ class _KnobState extends State<Knob> {
 class _DialPainter extends CustomPainter {
   final Param p;
   final double value;
-  final bool focused, tracksOnly;
-  _DialPainter(this.p, this.value, {this.focused = false, this.tracksOnly = false});
+  final bool focused, tracksOnly, pending;
+  _DialPainter(this.p, this.value, {this.focused = false, this.tracksOnly = false, this.pending = false});
 
   @override
   void paint(Canvas c, Size size) {
@@ -233,7 +241,8 @@ class _DialPainter extends CustomPainter {
     c.drawArc(rect, ang(0), sweep * math.pi / 180, false, arc..color = Pal.bg3);
     if (!tracksOnly) {
       final a = math.min(f, zero), b = math.max(f, zero);
-      if (b - a > 1e-4) c.drawArc(rect, ang(a), (b - a) * sweep * math.pi / 180, false, arc..color = Pal.accent);
+      if (b - a > 1e-4)
+        c.drawArc(rect, ang(a), (b - a) * sweep * math.pi / 180, false, arc..color = pending ? Pal.accent.withValues(alpha: 0.45) : Pal.accent);
     }
     final disc = r - 5;
     c.drawCircle(center, disc, Paint()..color = Pal.bg2);
@@ -262,7 +271,8 @@ class _DialPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _DialPainter old) => old.value != value || old.focused != focused || old.tracksOnly != tracksOnly;
+  bool shouldRepaint(covariant _DialPainter old) =>
+      old.value != value || old.focused != focused || old.tracksOnly != tracksOnly || old.pending != pending;
 }
 
 /// An on/off parameter: a pill toggle with its name at the right.
@@ -283,23 +293,27 @@ class ToggleCtl extends StatelessWidget {
         builder: (context, _) {
           final on = p.value >= 0.5;
           final locked = ctl.locks[target]?.contains(p.name) ?? false;
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: Space.xs),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Toggle(
-                  value: on,
-                  label: showName ? prettyName(p.name) : null,
-                  onChanged: (v) {
-                    if (_alt) return ctl.toggleLock(target, p);
-                    ctl.onEdit(target, p, v ? 1 : 0, 'begin', 'Switch ${p.name}');
-                    ctl.onEdit(target, p, v ? 1 : 0, 'end');
-                  },
-                ),
-                if (p.value != p.loadValue) ...[const SizedBox(width: Space.xs), const Pip(Pal.accent, size: 4)],
-                if (locked) ...[const SizedBox(width: Space.xs), const Icon(Icons.lock, size: 10, color: Pal.text3)],
-              ],
+          final pending = ctl.sound.isPending(target, p);
+          return Opacity(
+            opacity: pending ? 0.5 : 1,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: Space.xs),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Toggle(
+                    value: on,
+                    label: showName ? prettyName(p.name) : null,
+                    onChanged: (v) {
+                      if (_alt) return ctl.toggleLock(target, p);
+                      ctl.onEdit(target, p, v ? 1 : 0, 'begin', 'Switch ${p.name}');
+                      ctl.onEdit(target, p, v ? 1 : 0, 'end');
+                    },
+                  ),
+                  if (p.value != p.loadValue) ...[const SizedBox(width: Space.xs), const Pip(Pal.accent, size: 4)],
+                  if (locked) ...[const SizedBox(width: Space.xs), const Icon(Icons.lock, size: 10, color: Pal.text3)],
+                ],
+              ),
             ),
           );
         },

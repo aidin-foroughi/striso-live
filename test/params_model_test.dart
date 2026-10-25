@@ -31,8 +31,11 @@ void main() {
     m.load(0, ParamSet(r.name, [for (final p in r.params) p..loadValue = p.value]));
     final p = m.params[0]!.params.firstWhere((q) => q.kind == Kind.continuous);
     final was = p.value, to = conformValue(p, p.min + 0.7 * (p.max - p.min));
+    expect(m.isPending(0, p), isFalse);
     m.onEdit(0, p, to, 'begin', 'Edit');
     m.onEdit(0, p, to, 'end');
+    expect(m.isPending(0, p), isTrue, reason: 'sent, not confirmed by the board yet');
+    expect(m.pendingTargets, [0]);
     expect(m.edited, isTrue);
     expect(m.history.canUndo, isTrue);
     expect(host.edits, greaterThan(0));
@@ -47,6 +50,9 @@ void main() {
     expect(p.value, to);
     await Future<void>.delayed(const Duration(milliseconds: 60));
     // the board's word: a value changed on the board replaces the app's; the preset value stays
+    await m.readBack([0]);
+    expect(m.isPending(0, p), isFalse, reason: 'the board read it back');
+    expect(p.value, to);
     board.setParam(0, p.index, p.min);
     await m.readBack([0]);
     expect(p.value, conformValue(p, p.min));

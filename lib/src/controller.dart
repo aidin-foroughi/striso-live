@@ -220,7 +220,27 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   @override
   void stateChanged() => notifyListeners();
   @override
-  void editedByUser() => _rememberEditsSoon();
+  void editedByUser() {
+    _rememberEditsSoon();
+    _confirmSoon();
+  }
+
+  Timer? _confirmTimer;
+
+  /// The values just sent show as pending until the board reads them back: after the gesture
+  /// (the state poll does it when the board's counter moves; this makes sure it happens).
+  void _confirmSoon() {
+    _confirmTimer?.cancel();
+    _confirmTimer = Timer(const Duration(milliseconds: 500), () {
+      _confirmTimer = null;
+      if (_disposed || !canSend || !sound.anyPending) return;
+      if (clockMs() - sound.editT < 400) {
+        _confirmSoon(); // still moving
+        return;
+      }
+      unawaited(readBack(sound.pendingTargets));
+    });
+  }
   late final harmony = HarmonyTracker(live);
   late final morph = MorphModel(this);
 
@@ -394,6 +414,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   @override
   void dispose() {
     _disposed = true;
+    _confirmTimer?.cancel();
     _editsTimer?.cancel();
     routing.dispose();
     unawaited(session.dispose());
@@ -774,6 +795,8 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
 
   @override
   void boardDown() {
+    _confirmTimer?.cancel();
+    _confirmTimer = null;
     listsLoading = false;
     settingsLayout = SettingsLayout.empty;
     boardState = null;

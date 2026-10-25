@@ -270,4 +270,21 @@ void main() {
     expect(ctl.history.canUndo, isTrue);
     await finish(tester, ctl);
   });
+
+  testWidgets('an edit shows pending until the board reads it back; then the board’s value', (tester) async {
+    final usb = FakeUsb();
+    final ctl = make(usb, intent: 'connected');
+    await pumpUntil(tester, ctl.start());
+    await waitFor(tester, () => ctl.dot == Dot.on && !ctl.listsLoading && ctl.params[0]!.params.isNotEmpty);
+    final p = ctl.params[0]!.params.firstWhere((q) => q.kind == Kind.continuous);
+    final v = conformValue(p, p.min + 0.8 * (p.max - p.min));
+    ctl.onEdit(0, p, v, 'begin', 'x');
+    ctl.onEdit(0, p, v, 'end');
+    expect(ctl.sound.isPending(0, p), isTrue);
+    await waitFor(tester, () => !ctl.sound.isPending(0, p), ms: 4000);
+    expect(ctl.sound.isPending(0, p), isFalse, reason: 'confirmed by the board');
+    expect(p.value, closeTo(v, 1e-6));
+    expect(usb.last!.board.values[p.index], closeTo(v, 1e-6));
+    await finish(tester, ctl);
+  });
 }

@@ -241,7 +241,12 @@ class _TouchRowState extends State<_TouchRow> {
                 ),
                 SizedBox(
                   width: 56,
-                  child: Text(fmt(p.value), textAlign: TextAlign.right, style: ui(TypeSize.body)),
+                  child: Text(
+                    fmt(p.value),
+                    textAlign: TextAlign.right,
+                    // sent, not yet read back from the board
+                    style: ui(TypeSize.body, color: ctl.sound.isPending(2, p) ? Pal.text3 : Pal.text1),
+                  ),
                 ),
                 SizedBox(
                   width: Sizes.control,
