@@ -53,8 +53,10 @@ jobs:
           if [ -f "$t/.venv/Scripts/python.exe" ]; then PY="$t/.venv/Scripts/python.exe"; else PY="$t/.venv/bin/python"; fi
           "$PY" -m pip install --quiet -r "$t/requirements.txt"
 
-      - name: Get packages
-        run: flutter pub get
+      - name: Get packages (the app's and each package's own; flutter analyze reads their tests too)
+        run: |
+          flutter pub get
+          for p in packages/*/; do (cd "$p" && dart pub get); done
 
       - name: Core tests (dart test)
         working-directory: packages/striso_core

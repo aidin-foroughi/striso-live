@@ -75,6 +75,7 @@ jobs:
       - name: Test
         run: |
           flutter pub get
+          for p in packages/*/; do (cd "$p" && dart pub get); done
           (cd packages/striso_core && dart test)
           cmake -S packages/striso_audio/native -B build/striso_audio
           cmake --build build/striso_audio --config Release
@@ -168,6 +169,7 @@ jobs:
       - name: Test
         run: |
           flutter pub get
+          for p in packages/*/; do (cd "$p" && dart pub get); done
           (cd packages/striso_core && dart test)
           sh packages/striso_audio/native/build_macos.sh --selftest
           (cd packages/striso_audio && dart test)

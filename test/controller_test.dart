@@ -9,6 +9,7 @@ import 'package:striso_core/striso_core.dart';
 import 'package:striso_live/src/controller.dart';
 import 'package:striso_live/src/store.dart';
 import 'package:striso_live/src/theme.dart';
+import 'package:striso_live/src/virtual_support.dart' show shortVersion;
 
 class _BusyTransport implements Transport {
   @override
@@ -31,6 +32,9 @@ class FakeUsb implements UsbBackend {
 
   /// The board runs the firmware as released upstream (no StcX, StcY, StcH).
   bool stock = false;
+
+  /// The firmware the board reports (StcV), when not the mock's own.
+  String? firmware;
   MockTransport? last;
 
   @override
@@ -46,7 +50,7 @@ class FakeUsb implements UsbBackend {
       return _BusyTransport();
     }
     opened++;
-    return last = MockTransport(board: MockBoard(autoplay: false, idleFrames: 0, stockFirmware: stock, firmware: stock ? 'striso_control_strisoboard_v2.2.4' : 'striso_control_strisoboard_v2.2.4-voices-mock'));
+    return last = MockTransport(board: MockBoard(autoplay: false, idleFrames: 0, stockFirmware: stock, firmware: firmware ?? (stock ? 'striso_control_strisoboard_v2.2.4' : 'striso_control_strisoboard_v2.2.4-voices-mock')));
   }
 
   /// Pull the cable.
@@ -131,6 +135,28 @@ void main() {
     await finish(tester, ctl);
   });
 
+  // The firmware release (v2.2.4-335, tagged) reports "2026-10-25_v2.2.4-335-0-g<sha>_all"; the app
+  // needs v2.2.4-231 or newer. It compares no version numbers: what it needs is that the firmware
+  // answers StcX, Stcy and StcH, so a tagged build's string is taken as it is, and its commit read.
+  test('a tagged firmware release\'s version string: parsed, its commit read', () {
+    const tagged = '2026-10-25_v2.2.4-335-0-g1a2b3c4_all';
+    final v = parseVersion('striso_control_strisoboard_$tagged 0043002B3132510A33383339 STRISO');
+    expect(v.fw, 'strisoboard_$tagged');
+    expect(commitOf(v.fw), '1a2b3c4');
+    expect(commitOf(tagged), '1a2b3c4');
+    expect(shortVersion(tagged), '1a2b3c4');
+    expect(minFirmware, 'v2.2.4-231');
+  });
+  testWidgets('the firmware release (a tagged build\'s version string) connects: the app asks for what it needs, not a number', (tester) async {
+    final usb = FakeUsb()..firmware = 'striso_control_strisoboard_2026-10-25_v2.2.4-335-0-g1a2b3c4_all';
+    final ctl = make(usb, intent: 'connected');
+    await pumpUntil(tester, ctl.start());
+    await waitFor(tester, () => ctl.dot == Dot.on && !ctl.listsLoading);
+    expect(ctl.problem, isNull);
+    expect(ctl.strisoVersion!.fw, 'strisoboard_2026-10-25_v2.2.4-335-0-g1a2b3c4_all');
+    expect(commitOf(ctl.strisoVersion!.fw), '1a2b3c4');
+    await finish(tester, ctl);
+  });
   testWidgets('an older firmware: no session, the problem says which firmware the app needs and what to do', (tester) async {
     final usb = FakeUsb()..stock = true;
     final ctl = make(usb, intent: 'connected');

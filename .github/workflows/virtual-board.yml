@@ -7,7 +7,8 @@
 # the golden through Dart) and test/virtual_board_test.dart (the app's controller on it: as the USB
 # Striso, as Virtual; Virtual's sound and MIDI when an audio engine is there). The firmware
 # source at the same tag gives the goldens. The tag: the repository variable FIRMWARE_TAG, else the
-# firmware's latest release.
+# firmware's latest release. While the firmware has no release at all (and no FIRMWARE_TAG is set)
+# there is nothing to test against: the job says so in a warning and skips the tests.
 name: Striso Live (virtual board)
 
 on:
@@ -46,7 +47,15 @@ jobs:
           TAG: ${{ vars.FIRMWARE_TAG }}
           PLATFORM: ${{ matrix.platform }}
         run: |
-          tag="${TAG:-$(gh release view --repo "$FIRMWARE_REPO" --json tagName --jq .tagName)}"
+          tag="$TAG"
+          if [ -z "$tag" ]; then
+            tag="$(gh release view --repo "$FIRMWARE_REPO" --json tagName --jq .tagName 2>/dev/null || true)"
+            if [ -z "$tag" ]; then
+              echo "::warning::$FIRMWARE_REPO has no release yet (and FIRMWARE_TAG is not set): no striso_virtual to test against, the virtual board tests are skipped"
+              echo "NO_FIRMWARE=1" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          fi
           zip="striso_virtual-$tag-$PLATFORM.zip"
           dir="$RUNNER_TEMP/striso_virtual"
           mkdir -p "$dir" && cd "$dir"
@@ -63,19 +72,23 @@ jobs:
           { echo "STRISO_VIRTUAL_LIB=$lib"; echo "FIRMWARE_TAG=$tag"; } >> "$GITHUB_ENV"
 
       - name: the firmware source at that tag (the goldens)
+        if: env.NO_FIRMWARE != '1'
         run: git clone --quiet --depth 1 --branch "$FIRMWARE_TAG" "https://github.com/$FIRMWARE_REPO.git" ../striso-control-firmware
 
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        if: env.NO_FIRMWARE != '1'
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
 
       - name: packages/striso_virtual (dart test)
+        if: env.NO_FIRMWARE != '1'
         working-directory: packages/striso_virtual
         env:
           STRISO_FW_DIR: ${{ github.workspace }}/../striso-control-firmware
         run: dart pub get && dart test
 
       - name: the app on the virtual board (flutter test)
+        if: env.NO_FIRMWARE != '1'
         env:
           STRISO_FW_DIR: ${{ github.workspace }}/../striso-control-firmware
         run: flutter pub get && flutter test test/virtual_board_test.dart
