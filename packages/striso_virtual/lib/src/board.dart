@@ -183,15 +183,21 @@ class VirtualBoard {
   bool get inBootloader => usbState == svUsbBootloader;
   int get usbGeneration => lib.usbGeneration(_h);
 
-  /// Bytes to the board's console; false when it is not attached.
-  bool consoleWrite(List<int> bytes) {
-    for (var off = 0; off < bytes.length;) {
+  /// Bytes to the board's console from [from], in pieces of 64 KB; sv_console_write takes a piece
+  /// whole or not at all (0: its buffer cannot hold it now). Returns how far it got (bytes.length:
+  /// all of it; less: the piece there was not taken, write the rest later), -1 when the board is
+  /// not attached.
+  int consoleWrite(List<int> bytes, [int from = 0]) {
+    var off = from;
+    while (off < bytes.length) {
       final n = bytes.length - off > 65536 ? 65536 : bytes.length - off;
       _io.asTypedList(n).setRange(0, n, bytes, off);
-      if (lib.consoleWrite(_h, _io, n) < 0) return false;
+      final r = lib.consoleWrite(_h, _io, n);
+      if (r < 0) return -1;
+      if (r == 0) return off;
       off += n;
     }
-    return true;
+    return off;
   }
 
   /// What the board sent since the last read (empty when nothing, null when not attached).

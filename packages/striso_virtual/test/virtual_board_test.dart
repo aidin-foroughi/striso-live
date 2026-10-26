@@ -63,6 +63,22 @@ void main() {
       b.dispose();
     });
 
+    test('a write past what the console buffers goes through: in pieces, waiting while it drains', () async {
+      // 4.5 MB of zero bytes (no command): past the 4 MB the board buffers, so a piece is refused
+      // (sv_console_write's 0) until the board has read some; the transport waits and goes on
+      final big = Uint8List(4608 * 1024);
+      final sw = Stopwatch()..start();
+      await c.send(big);
+      print('4.5 MB written in ${sw.elapsedMilliseconds} ms');
+      // the board reads its console at about 128 KB/s: the 4 MB still buffered drain first
+      VersionInfo? v;
+      for (final w = Stopwatch()..start(); v == null && w.elapsed < const Duration(seconds: 90);) {
+        v = await c.getVersion();
+      }
+      print('answered ${sw.elapsedMilliseconds} ms after the start');
+      expect(v?.line, startsWith(b.firmwareVersion), reason: 'every byte went through, and the console answers after them');
+    }, timeout: const Timeout(Duration(minutes: 3)));
+
     test('connect: the version, the voice list, every parameter list', () async {
       final v = await c.getVersion();
       expect(v, isNotNull);
@@ -322,7 +338,8 @@ void main() {
           b.selectVoice(1); // va:classic
           b.render(2400);
           if (gain != null) {
-            b.consoleWrite(setParamCommand(Target.voice, 0, gain));
+            final cmd = setParamCommand(Target.voice, 0, gain);
+            expect(b.consoleWrite(cmd), cmd.length);
             b.render(480);
           } else {
             b.render(480);

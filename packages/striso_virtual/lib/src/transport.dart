@@ -62,12 +62,25 @@ class VirtualBoardTransport implements Transport {
     if (!_lost.isCompleted) _lost.complete(UsbError.unplugged);
   }
 
+  /// How long a write waits for the board's console to take more (it reads in real time).
+  static const writeStall = Duration(seconds: 10);
+
   @override
   Future<void> write(Uint8List bytes) async {
     if (!_open) throw StateError('not connected');
-    if (!board.consoleWrite(bytes)) {
-      _gone();
-      throw UsbError.unplugged;
+    var off = 0;
+    final waited = Stopwatch()..start();
+    while (true) {
+      final n = board.consoleWrite(bytes, off);
+      if (n < 0) {
+        _gone();
+        throw UsbError.unplugged;
+      }
+      if (n >= bytes.length) return;
+      if (n > off) waited.reset();
+      off = n;
+      if (waited.elapsed > writeStall) throw StateError('the virtual board\'s console took nothing for ${writeStall.inSeconds} s');
+      await Future<void>.delayed(const Duration(milliseconds: 2)); // its buffer is full: it drains as the board reads
     }
   }
 
