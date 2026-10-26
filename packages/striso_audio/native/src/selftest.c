@@ -656,6 +656,7 @@ static int both_running(const sa_status* s) { return applied(s) && s->capture_st
 static int streaming(const sa_status* s) { return s->streaming != 0 && s->playback_callbacks > 10; }
 static int rec_done(const sa_status* s) { return s->record_state != SA_REC_ON; }
 static int rec_on(const sa_status* s) { return s->record_state == SA_REC_ON; }
+static int rec_refused(const sa_status* s) { return s->record_state == SA_REC_STOPPED && s->record_error == SA_ERR_NOT_RUNNING; }
 
 static void test_session(const char* dir) {
     if (sa_internal_inited()) {
@@ -727,9 +728,8 @@ static void test_session(const char* dir) {
     wait_for(applied, 2000, &s);
     check(s.capture_state == SA_DEV_CLOSED && s.playback_state == SA_DEV_CLOSED, "session: run 0 closes everything");
     sa_record_start(path);
-    sa_sleep_ms(80);
-    sa_get_status(&s);
-    check(s.record_state == SA_REC_STOPPED && s.record_error == SA_ERR_NOT_RUNNING, "session: recording without the input is refused");
+    /* (the engine thread answers it: up to 2 s on a busy machine, a CI runner took over 80 ms) */
+    check(wait_for(rec_refused, 2000, &s), "session: recording without the input is refused");
     sa_shutdown();
     sa_get_status(&s);
     check(s.initialised == 0, "session: shutdown");
