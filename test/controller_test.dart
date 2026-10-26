@@ -136,7 +136,7 @@ void main() {
   });
 
   // The firmware release (v2.2.4-335, tagged) reports "2026-10-25_v2.2.4-335-0-g<sha>_all"; the app
-  // needs v2.2.4-231 or newer. It compares no version numbers: what it needs is that the firmware
+  // needs v2.2.4-338-82 or newer. It compares no version numbers: what it needs is that the firmware
   // answers StcX, Stcy and StcH, so a tagged build's string is taken as it is, and its commit read.
   test('a tagged firmware release\'s version string: parsed, its commit read', () {
     const tagged = '2026-10-25_v2.2.4-335-0-g1a2b3c4_all';
@@ -145,7 +145,7 @@ void main() {
     expect(commitOf(v.fw), '1a2b3c4');
     expect(commitOf(tagged), '1a2b3c4');
     expect(shortVersion(tagged), '1a2b3c4');
-    expect(minFirmware, 'v2.2.4-231');
+    expect(minFirmware, 'v2.2.4-338-82');
   });
   testWidgets('the firmware release (a tagged build\'s version string) connects: the app asks for what it needs, not a number', (tester) async {
     final usb = FakeUsb()..firmware = 'striso_control_strisoboard_2026-10-25_v2.2.4-335-0-g1a2b3c4_all';

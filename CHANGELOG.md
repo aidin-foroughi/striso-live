@@ -2,8 +2,8 @@
 
 ## 1.4.0 (unreleased)
 
-Needs the board firmware next2 or newer (presets, StcW, the dials StcT, the voice keys, the
-engine slots). Voices are selected only with StcW, so with an older firmware voice changes don't
+Needs board firmware v2.2.4-338-82 or newer (next3 4c0ab4e: presets, StcW, the dials StcT, the
+voice keys, the engine slots, Mono, midikey). Voices are selected only with StcW, so with an older firmware voice changes don't
 go through. There is no fallback for it.
 
 - **Shared audio output by default.** Exclusive output was the default, and it played at full

@@ -112,10 +112,10 @@ class BuildProbe {
   const BuildProbe(this.stamp, {this.api, this.firmwareVersion, this.failure});
 }
 
-/// The oldest firmware this app works with: the first that reports its settings layout (StcX), its
-/// state and change counter (StcY, Stcy) and its hero knobs (StcH), striso-control-firmware
-/// 59ff425. There is no older path: an older firmware is told to update.
-const minFirmware = 'v2.2.4-231';
+/// The oldest firmware this app works with: next3 4c0ab4e, the first with everything it uses
+/// (StcX, StcY with mono= and midikey=, Stcy, StcH, StcW, StcT, the voice keys, the presets and the
+/// engine slots). There is no older path: an older firmware is told to update.
+const minFirmware = 'v2.2.4-338-82';
 
 /// "2026-10-25_v2.2.4-308-g3e05282_all" or "strisoboard_v2.2.4-308-g3e05282" -> "3e05282".
 String? commitOf(String? v) => v == null ? null : RegExp(r'-g([0-9a-f]{7,})').firstMatch(v)?.group(1);
