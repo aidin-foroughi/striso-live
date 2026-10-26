@@ -103,13 +103,10 @@ class VirtualStrisoRuntime implements VirtualRuntime {
   /// How the user knows the build (its manifest's title, else its folder's name); the label.
   String? buildTitle;
 
-  /// The engine folder the next board loads (sv_options.engine_dir, staged by the controller),
-  /// and its library files by name; null: none.
-  String? engineDir;
-  List<String> engineFiles = const [];
-
-  /// Called before a board is made (the controller stages the engines for it).
-  void Function()? beforeOpen;
+  /// The file that keeps Virtual's engine-module slots (sv_options.module_store; null: a
+  /// temporary one per board, tests), and the Dart mock's slots, kept across its restarts.
+  final String? moduleStore;
+  final mockModules = MockModuleStore();
 
   /// --mock-demo: the Dart mock whatever library there is.
   final bool forceMock;
@@ -133,7 +130,7 @@ class VirtualStrisoRuntime implements VirtualRuntime {
   /// The instrument changed (started, stopped): SoundRouting attaches or detaches it.
   final void Function()? onChanged;
 
-  VirtualStrisoRuntime({String? libPath, String? title, bool mockOnly = false, this.flashFile, required this.log, this.onChanged})
+  VirtualStrisoRuntime({String? libPath, String? title, bool mockOnly = false, this.flashFile, this.moduleStore, required this.log, this.onChanged})
     : forceMock = mockOnly {
     selectLibrary(libPath, title: title);
   }
@@ -175,9 +172,8 @@ class VirtualStrisoRuntime implements VirtualRuntime {
 
   @override
   Future<Board> open() async {
-    if ((mockOnly && mock == null) || (!mockOnly && (instrument == null || !instrument!.alive))) beforeOpen?.call();
     if (mockOnly) {
-      mock ??= MockBoard(engineFiles: engineFiles);
+      mock ??= MockBoard(modules: mockModules);
       return TransportBoard(Mode.virtual, MockTransport(board: mock), label: 'Demo (mock)', hand: mock);
     }
     final l = _lib;
@@ -185,12 +181,12 @@ class VirtualStrisoRuntime implements VirtualRuntime {
     var inst = instrument;
     if (inst == null || !inst.alive) {
       final flash = _readFlash();
-      final b = VirtualBoard(libPath: l.path, flash: flash, engineDir: engineDir);
+      final b = VirtualBoard(libPath: l.path, flash: flash, moduleStore: moduleStore);
       b.startRealtime(); // its own clock until the output takes it over
       inst = instrument = VirtualInstrument(b);
       log(
         'virtual: ${l.path}, firmware ${l.firmwareVersion}${flash != null ? ', its settings from $flashFile' : ''}'
-        '${engineDir != null ? ', engines ${engineFiles.join(' ')} from $engineDir' : ''}',
+        '${moduleStore != null ? ', engine slots in $moduleStore' : ''}',
       );
       onChanged?.call();
       if (!await waitBack()) throw const VirtualError('The virtual Striso did not start.');

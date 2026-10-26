@@ -39,9 +39,11 @@ String? _lib() {
   }
 }
 
-Future<void> waitFor(WidgetTester tester, bool Function() cond, {int ms = 10000}) async {
-  for (var t = 0; t < ms && !cond(); t += 20) {
-    await tester.pump(const Duration(milliseconds: 20));
+/// [step]: the fake time each pump moves; 5 keeps it near the real time the board runs in (the
+/// client's timeouts are on the fake clock).
+Future<void> waitFor(WidgetTester tester, bool Function() cond, {int ms = 10000, int step = 20}) async {
+  for (var t = 0; t < ms && !cond(); t += step) {
+    await tester.pump(Duration(milliseconds: step));
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
   }
   expect(cond(), isTrue, reason: 'condition not met in $ms ms');
@@ -55,14 +57,14 @@ Future<void> settle(WidgetTester tester, {int ms = 200}) async {
   }
 }
 
-Future<T> run<T>(WidgetTester tester, Future<T> f) async {
+Future<T> run<T>(WidgetTester tester, Future<T> f, {int seconds = 10, int step = 20}) async {
   var done = false;
   late T v;
   f.then((x) {
     v = x;
     done = true;
   });
-  await waitFor(tester, () => done);
+  await waitFor(tester, () => done, ms: seconds * 1000, step: step);
   return v;
 }
 
@@ -462,149 +464,60 @@ void main() {
     });
   });
 
-  // an awva engine component (the awva build's <name>.<ext> and <name>.json), as the
-  // striso_virtual package's test finds it: the sax if one is built, else any (the firmware's own
-  // build has its awva submodule's)
-  ({String path, String id, String name})? component() {
-    final ext = Platform.isWindows ? 'dll' : (Platform.isMacOS ? 'dylib' : 'so');
-    final fw = Platform.environment['STRISO_FW_DIR'];
-    final roots = [
-      ?Platform.environment['STRISO_ENGINE_DIR'],
-      if (fw != null) for (final b in ['host-virtual', 'host-virtual-universal']) '$fw/build/$b/components',
-      if (lib != null) '${File(lib).parent.parent.path}/components',
-      for (final w in ['awva-sax', 'awva-clarinet', 'awva-flute', 'awva-brassfam']) '../worktrees/$w/build/sdk/components',
-      '../awva/build/sdk/components',
-    ];
-    ({String path, String id, String name})? of(File f) {
-      final m = File('${f.path.substring(0, f.path.length - ext.length - 1)}.json');
-      if (!m.existsSync()) return null;
-      final j = jsonDecode(m.readAsStringSync()) as Map<String, Object?>;
-      return (path: f.absolute.path, id: j['id'] as String, name: (j['name'] ?? j['id']) as String);
-    }
-
-    for (final r in roots) {
-      for (final n in ['reed', 'sine', 'sax']) {
-        final f = File('$r/$n.$ext');
-        if (f.existsSync()) return of(f);
-      }
-    }
-    for (final r in roots) {
-      final d = Directory(r);
-      if (!d.existsSync()) continue;
-      for (final f in d.listSync().whereType<File>().where((f) => f.path.endsWith('.$ext'))) {
-        final c = of(f);
-        if (c != null) return c;
-      }
-    }
-    return null;
-  }
-
-  final sax = component();
-  testWidgets(
-    'an engine installed from the picker and ticked: added to the build when it reports engines (Stce), else greyed and not loaded',
-    skip: skip != null || sax == null,
-    (tester) async {
-      final dir = await tester.runAsync(() async => Directory.systemTemp.createTempSync('sv_engines'));
-      final ctl = AppController(
-        options: AppOptions(noUsb: true, virtualLib: lib),
-        store: Store('${dir!.path}${Platform.pathSeparator}settings.json'),
-      );
-      await run(tester, ctl.playVirtual());
-      await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
-      final own = ctl.voices.length;
-      // Install… takes the engine (with its manifest), kept in the engine folder, ticked: Virtual
-      // starts again with it
-      expect(await run(tester, ctl.installAndAddEngine(sax!.path)), isTrue, reason: ctl.banner?.text);
-      await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
-      final e = ctl.engineList().single;
-      expect(e.title, sax.name, reason: 'its manifest names it');
-      expect(e.engine.path, startsWith(ctl.engineDir!));
-      if (ctl.engineReport == null) {
-        // this build does not report engines: none are given to it
-        expect(e.reason, 'this build cannot add engines');
-        expect(e.ticked, isFalse);
-        expect(ctl.virtual.engineDir, isNull);
-        expect(ctl.voices.length, own, reason: 'nothing loaded that the app could not show');
-      } else {
-        final l = ctl.engineReport!.loaded.single;
-        expect(l.id, sax.id);
-        expect(l.first, own);
-        expect(ctl.voices.length, own + l.count);
-        expect(ctl.voiceName == sax.id || ctl.voiceName.startsWith('${sax.id}:'), isTrue, reason: 'its first voice, once (${ctl.voiceName})');
-        expect(ctl.engines().firstWhere((x) => x.engine == sax.id).color, l.color);
-        expect(e.ticked, isTrue);
-        expect(await run(tester, ctl.swapBuild()), isTrue);
-        await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
-        expect(ctl.voices.length, own, reason: '⇄: the build without it');
-      }
-      await finish(tester, ctl);
-      await tester.runAsync(() async {
-        try {
-          dir.deleteSync(recursive: true);
-        } catch (_) {}
-      });
-    },
-  );
-
-  // Stce on the real firmware (mod-stce): a good engine, one built for another engine ABI and a
-  // junk file, each ticked; the chooser shows what the board reported, nothing worked out here.
-  // Needs a build that answers Stce and its test fixtures (tools/virtual.sh builds both).
-  String? fixture(String name) {
-    final ext = Platform.isWindows ? 'dll' : (Platform.isMacOS ? 'dylib' : 'so');
-    final fw = Platform.environment['STRISO_FW_DIR'];
-    for (final r in [
-      if (fw != null) for (final b in ['host-virtual', 'host-virtual-universal']) '$fw/build/$b/virtual/tests/fixtures',
-      if (lib != null) '${File(lib).parent.path}/tests/fixtures',
-    ]) {
-      final f = File('$r/nsc_fixture_$name.$ext');
+  // the engine slots on the real firmware (mod-modules: Stci, Stco, Stcz, sv_options
+  // .module_store): a package with this PC's image put on Virtual from the library, Virtual started
+  // again with it on its first voice, kept in the data folder's module store; a board-only
+  // package refused with the firmware's words; erased. The packages come from the firmware's build
+  // ($STRISO_PACKAGE_DIR, or its virtual/tests/packages; $STRISO_ARM_PACKAGE_DIR, build/firmware/
+  // modules); skipped by a build without slots.
+  String? pkg(String name, List<String> dirs) {
+    for (final d in dirs) {
+      final f = File('$d/$name.nsc');
       if (f.existsSync()) return f.absolute.path;
     }
     return null;
   }
 
-  final abi99 = fixture('abi99');
+  final fw = Platform.environment['STRISO_FW_DIR'];
+  final pcPkg = pkg('accordion', [
+    ?Platform.environment['STRISO_PACKAGE_DIR'],
+    if (fw != null) for (final b in ['host-virtual', 'host']) '$fw/build/$b/virtual/tests/packages',
+    if (lib != null) '${File(lib).parent.path}/tests/packages',
+  ]);
+  final armPkg = pkg('sine', [?Platform.environment['STRISO_ARM_PACKAGE_DIR'], if (fw != null) '$fw/build/firmware/modules']);
   testWidgets(
-    'Stce on the real firmware: the good engine loaded in its colour, another ABI and a junk file greyed with the board\'s reasons',
-    skip: skip != null || sax == null || abi99 == null,
+    'engine slots on the real firmware: put on Virtual, its voices after a restart, a board-only package refused, erased',
+    skip: skip != null || pcPkg == null,
     (tester) async {
-      final dir = await tester.runAsync(() async => Directory.systemTemp.createTempSync('sv_stce'));
+      final dir = await tester.runAsync(() async => Directory.systemTemp.createTempSync('sv_slots'));
       final sep = Platform.pathSeparator;
-      final ext = Platform.isWindows ? 'dll' : (Platform.isMacOS ? 'dylib' : 'so');
-      final junk = File('${dir!.path}${sep}junk.$ext')..writeAsStringSync('not a library');
-      final ctl = AppController(options: AppOptions(noUsb: true, virtualLib: lib), store: Store('${dir.path}${sep}settings.json'));
+      final ctl = AppController(options: AppOptions(noUsb: true, virtualLib: lib), store: Store('${dir!.path}${sep}settings.json'));
       await run(tester, ctl.playVirtual());
       await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
-      final own = ctl.voices.length;
-      expect(await run(tester, ctl.installAndAddEngine(sax!.path)), isTrue, reason: ctl.banner?.text);
-      await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
-      if (ctl.engineReport == null) {
-        markTestSkipped('this build does not answer Stce');
+      if (ctl.moduleSlots == null) {
+        markTestSkipped('this build has no engine slots (Stco)');
         await finish(tester, ctl);
         return;
       }
-      // the good one: loaded where Stcv lists it, in the board's colour
-      final good = ctl.engineReport!.loaded.single;
-      expect(good.id, sax.id);
-      expect(good.first, own);
-      expect(ctl.voices.length, own + good.count);
-      expect(ctl.engines().firstWhere((e) => e.engine == sax.id).color, good.color);
-      expect(ctl.engineList().single.loaded?.color, good.color);
-      // another engine ABI: refused by the board, greyed with its reason, unticked
-      expect(await run(tester, ctl.installAndAddEngine(abi99!)), isTrue);
+      expect(ctl.moduleSlots!.map((s) => s.state).toSet(), {SlotState.empty});
+      final own = ctl.voices.length;
+      expect(await run(tester, ctl.installAndAddEngine(pcPkg!), seconds: 300, step: 5), isTrue, reason: ctl.moduleNote?.text);
       await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
-      final other = ctl.engineList().firstWhere((e) => e.path.contains('nsc_fixture_abi99'));
-      expect(other.reason, 'built for engine ABI 99; this build loads ${ctl.engineReport!.abi}');
-      expect(other.ticked, isFalse);
-      expect(ctl.engineList().firstWhere((e) => e.title == sax.name).ticked, isTrue, reason: 'the good one stays');
-      // a junk file: the system would not load it, its own message in the detail
-      expect(await run(tester, ctl.installAndAddEngine(junk.path)), isTrue);
+      final slot = ctl.moduleSlots!.where((s) => s.holdsEngine).single;
+      expect(slot.state, SlotState.ok);
+      expect(ctl.voices.length, greaterThan(own), reason: 'listed after the built-in engines');
+      expect(ctl.voices.skip(own).map((v) => v.engine).toSet(), {slot.id});
+      expect(ctl.voiceName == slot.id || ctl.voiceName.startsWith('${slot.id}:'), isTrue, reason: 'its first voice (${ctl.voiceName})');
+      expect(File('${dir.path}${sep}virtual${sep}module_store.bin').existsSync(), isTrue, reason: 'kept in the data folder');
+      if (armPkg != null) {
+        expect(await run(tester, ctl.installAndAddEngine(armPkg), seconds: 300, step: 5), isFalse);
+        expect(ctl.moduleNote!.error, isTrue);
+        expect(ctl.moduleNote!.text, startsWith('sine is not on Virtual: '));
+      }
+      expect(await run(tester, ctl.eraseSlot(slot.slot), seconds: 60, step: 5), isTrue, reason: ctl.moduleNote?.text);
       await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
-      final j = ctl.engineList().firstWhere((e) => e.path.endsWith('junk$sep' 'junk.$ext'));
-      expect(j.reason, 'the system would not load it');
-      expect(j.detail, isNotEmpty, reason: 'the system\'s own message');
-      expect(j.choosable, isFalse);
-      // the good one still plays
-      expect(ctl.engineReport!.loaded.map((l) => l.id), [sax.id]);
+      expect(ctl.voices.length, own);
+      expect(ctl.moduleSlots!.where((s) => s.holdsEngine), isEmpty);
       await finish(tester, ctl);
       await tester.runAsync(() async {
         try {
@@ -612,6 +525,7 @@ void main() {
         } catch (_) {}
       });
     },
+    timeout: const Timeout(Duration(minutes: 12)), // Virtual's console takes a package at about 1 KB/s
   );
 
   // the board's sound presets on the real firmware (mod-presets, doc/presets_console.md): what

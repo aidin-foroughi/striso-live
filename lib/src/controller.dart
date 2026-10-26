@@ -92,46 +92,16 @@ class BuildInfo {
   String get path => build.path;
 }
 
-/// An engine as the chooser shows it (docs/flows.md 10): ticked to be loaded with the build,
-/// what the firmware loaded of it in this run, and why it cannot be added (null: it can), all as
-/// the firmware reported (Stce).
-class EngineChoice {
-  final EngineComponent engine;
-  final bool ticked;
-  final LoadedEngine? loaded;
-
-  /// Why it cannot be ticked (null: it can); [note]: something the firmware said that does not
-  /// keep it out (some of its voices did not fit); [detail]: the firmware's detail of a refusal
-  /// (for a library the system would not load, the system's own message).
-  final String? reason, note, detail;
-  const EngineChoice(this.engine, {required this.ticked, this.loaded, this.reason, this.note, this.detail});
-  bool get choosable => reason == null;
-  String get title => engine.title;
-  String get path => engine.path;
-}
-
-/// What Virtual plays: a build, the engines added to it, and the voice it was on (for ⇄).
+/// What Virtual plays: a build, and the voice it was on (for ⇄).
 class VirtualSetup {
   final String build;
-  final List<String> engines;
   final String? voice;
-  const VirtualSetup(this.build, this.engines, {this.voice});
-  bool same(VirtualSetup o) => o.build == build && o.engines.length == engines.length && o.engines.toSet().containsAll(engines);
+  const VirtualSetup(this.build, {this.voice});
+  bool same(VirtualSetup o) => o.build == build;
 }
 
-/// The firmware's reason for refusing an engine (Stce), in words.
-String engineRefusal(RefusedEngine r) {
-  final d = r.detail.split(' ');
-  return switch (r.reason) {
-    'library' => 'the system would not load it',
-    'entry' || 'component' => 'not an engine component',
-    'abi' when d.length == 2 => 'built for engine ABI ${d[0]}; this build loads ${d[1]}',
-    'voices' when d.length == 2 => 'plays ${d[0]} voices; the board needs ${d[1]}',
-    'memory' => 'out of memory',
-    'full' => 'the voice list is full: ${r.detail} of its voices left out',
-    _ => '${r.reason}${r.detail.isEmpty ? '' : ': ${r.detail}'}',
-  };
-}
+/// An engine install under way: the package, the bytes the firmware has, of how many.
+typedef ModuleUpload = ({String name, int bytes, int total});
 
 /// What a probe of a build's library said, with the file's stamp it was true for.
 class BuildProbe {
@@ -455,6 +425,8 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     final dataDir = store.path == null ? null : File(store.path!).parent.path;
     firmwareDir = dataDir == null ? null : '$dataDir${Platform.pathSeparator}firmware';
     engineDir = dataDir == null ? null : '$dataDir${Platform.pathSeparator}engines';
+    final virtualDir = dataDir == null ? null : '$dataDir${Platform.pathSeparator}virtual';
+    if (virtualDir != null) Directory(virtualDir).createSync(recursive: true);
     final chosen = store.get<String>('virtualLib');
     final libPath =
         options.virtualLib ??
@@ -465,11 +437,11 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
       libPath: libPath,
       title: libPath == null ? null : buildOf(libPath).title,
       mockOnly: options.mockDemo,
-      flashFile: dataDir == null ? null : '$dataDir${Platform.pathSeparator}virtual${Platform.pathSeparator}flash.bin',
+      flashFile: virtualDir == null ? null : '$virtualDir${Platform.pathSeparator}flash.bin',
+      moduleStore: virtualDir == null ? null : '$virtualDir${Platform.pathSeparator}module_store.bin',
       log: (s) => log(s),
       onChanged: () => _route(),
     );
-    virtual.beforeOpen = _stageEngines;
     session = Session(host: this, store: store, usb: options.noUsb ? null : usb, virtual: virtual);
     routing = SoundRouting(audio: audio, resources: session.resources, midi: midi, log: (s) => log(s));
     audio.addListener(() {
@@ -983,254 +955,214 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   String? get firmwarePath => virtual.lib?.path;
 
   /// Plays a build: whatever plays ends, the old library is let go of, this one is loaded and
-  /// Virtual starts on it, with the engines remembered with it; then the voice key you were on is
-  /// pressed, so the same key plays the new build's sound (its firmware picks the preset it
-  /// remembers for the key). Remembered for the next start when it plays.
+  /// Virtual starts on it; then the voice key you were on is pressed, so the same key plays the
+  /// new build's sound (its firmware picks the preset it remembers for the key). Remembered for
+  /// the next start when it plays.
   Future<bool> useBuild(String path) => _play(path);
 
-  /// [engines]: the engines to add (remembered with the build; null: the ones it has). [voice]:
-  /// the entry to go to once it plays (⇄ on one build), else [firstOf]'s first voice (an engine
-  /// just added), else the same voice key.
-  Future<bool> _play(String path, {List<String>? engines, String? voice, String? firstOf}) async {
+  /// [voice]: the entry to go to once it plays, else [firstOf]'s first voice (an engine just put
+  /// into a slot), else the same voice key.
+  Future<bool> _play(String path, {String? voice, String? firstOf}) async {
     if (saving) return false;
     final b = buildOf(path);
     final key = isVirtual && canSend ? settingsLayout.voiceKeyOf(currentEngine) : null;
-    final was = _playedSetup ?? (virtual.lib != null && virtual.libPath != null ? VirtualSetup(virtual.libPath!, enginesFor(virtual.libPath!)) : null);
-    final wasNow = was == null ? null : VirtualSetup(was.build, was.engines, voice: isVirtual && voiceName.isNotEmpty ? voiceName : null);
+    final was = _playedSetup ?? (virtual.lib != null && virtual.libPath != null ? VirtualSetup(virtual.libPath!) : null);
+    final wasNow = was == null ? null : VirtualSetup(was.build, voice: isVirtual && voiceName.isNotEmpty ? voiceName : null);
     if (state.mode != null) await session.disconnect(why: IdleWhy.modeSwitch);
-    if (engines != null) _setEngines(b.path, engines);
     final f = virtual.selectLibrary(b.path, title: b.title);
     if (f != null) log('virtual firmware: ${b.title} refused: ${f.message}', LogKind.err);
     notifyListeners();
-    var ok = await session.connect(Mode.virtual);
-    if (ok && _unstaged && engineReport != null) {
-      // the first run of this build with engines: it said what it loads, so now with them
-      await session.disconnect(why: IdleWhy.modeSwitch);
-      ok = await session.connect(Mode.virtual);
-    }
-    if (!ok) return false;
+    if (!await session.connect(Mode.virtual)) return false;
     store.set('virtualLib', b.path);
-    final now = VirtualSetup(b.path, enginesFor(b.path));
+    final now = VirtualSetup(b.path);
     _playedSetup = now;
     if (wasNow != null && !wasNow.same(now)) previousSetup = wasNow;
-    log('virtual firmware: ${b.title} (${virtual.version})${now.engines.isEmpty ? '' : ', engines ${[for (final e in now.engines) engineOf(e).title].join(', ')}'}');
-    final added = firstOf == null ? null : _loadedOf(firstOf);
+    log('virtual firmware: ${b.title} (${virtual.version})');
+    await _goTo(voice: voice, firstOf: firstOf, key: key);
+    return true;
+  }
+
+  Future<void> _goTo({String? voice, String? firstOf, int? key}) async {
+    final added = firstOf == null ? null : voices.where((v) => v.engine == firstOf).firstOrNull;
     final back = voice == null ? null : voices.where((v) => v.name == voice).firstOrNull;
     if (added != null) {
-      await selectVoice(added.first);
+      await selectVoice(added.index);
     } else if (back != null) {
       await selectVoice(back.index);
     } else if (key != null && settingsLayout[key]?.switchable == true) {
       unawaited(pressSettingsKey(key));
     }
     notifyListeners();
-    return true;
   }
 
-  /// ⇄: what played before this, on the same key; on one build (with and without an engine),
-  /// each side on the voice it was on.
+  /// ⇄: the build that played before this, on the same key.
   Future<bool> swapBuild() async {
     final p = previousSetup;
     if (p == null) return false;
-    final sameBuild = p.build == _playedSetup?.build;
-    if (virtual.mockOnly && p.build.isEmpty) return _playMock(p.engines, voice: p.voice);
-    return _play(p.build, engines: p.engines, voice: sameBuild ? p.voice : null);
+    return _play(p.build);
   }
 
   /// The ⇄ button's words: where it goes back to.
   String? get swapTitle {
     final p = previousSetup, now = _playedSetup;
-    if (p == null) return null;
-    if (now == null || p.build != now.build) return '${buildOf(p.build).title}, on the same key';
-    final gone = now.engines.where((e) => !p.engines.contains(e)).map((e) => engineOf(e).title);
-    final back = p.engines.where((e) => !now.engines.contains(e)).map((e) => engineOf(e).title);
-    return [if (back.isNotEmpty) 'with ${back.join(', ')}', if (gone.isNotEmpty) 'without ${gone.join(', ')}'].join(', ');
+    if (p == null || (now != null && p.build == now.build)) return null;
+    return '${buildOf(p.build).title}, on the same key';
   }
 
-  // the engines Virtual adds to a build (docs/flows.md 10) -----------------------------------------
+  // the engine slots of the board that plays (modules.dart; research/board_engine_modules.md) -----
 
-  /// The engine folder in the app data: a folder per engine (null in tests with a memory store).
+  /// The engine library in the app data: the packages to put on a board (null in tests with a
+  /// memory store).
   late final String? engineDir;
 
-  /// What the firmware loaded in this run (Stce; null: not Virtual, or the build did not say).
-  EngineReport? engineReport;
+  /// The packages in the library, by name.
+  List<EnginePackage> engineLibrary() => findEngines(engineDir);
 
-  /// This run's staged library files, and the component each is.
-  Map<String, String> _staged = const {};
+  /// The slots of the board that plays, as its firmware listed them (Stco); null: nothing plays,
+  /// or its firmware has no engine slots.
+  List<ModuleSlot>? moduleSlots;
 
-  /// What a build file reported when it last ran (kept): its engine ABI, -1 when it did not
-  /// answer Stce (it cannot add engines), null when it has not run with engines installed.
-  int? _abiOf(String reportKey) {
-    final m = store.raw('engineAbi');
-    final v = m is Map ? m[reportKey] : null;
-    return v is int ? v : null;
-  }
+  /// An install under way (the firmware's progress), else null.
+  final moduleUpload = ValueNotifier<ModuleUpload?>(null);
 
-  void _setAbi(String reportKey, int abi) {
-    store.set('engineAbi', <String, Object?>{...?(store.raw('engineAbi') as Map?)?.cast<String, Object?>(), reportKey: abi});
-  }
+  /// What the last install or erase came to, in words, and whether it went wrong.
+  ({String text, bool error})? moduleNote;
 
-  /// Engines were ticked but this run has none: the build had not said yet what it loads.
-  bool _unstaged = false;
+  bool _erasing = false;
 
-  /// The firmware's refusals: per component, the build and the file's stamp it was true for.
-  final _refused = <String, ({String build, int stamp, RefusedEngine r})>{};
+  /// An install or an erase is under way.
+  bool get modulesBusy => moduleUpload.value != null || _erasing;
 
-  // the engines are remembered per build; the Dart mock is one build of its own
-  String _buildKey(String path) => virtual.mockOnly ? '\u0000mock' : File(path).absolute.path;
+  /// The board that plays in words, for the engine slots.
+  String get slotTarget => isVirtual ? 'Virtual' : 'the Striso';
 
-  // what a build reported is true for that file (a rebuilt one may say otherwise)
-  String _reportKey(String path) {
-    if (virtual.mockOnly) return _buildKey(path);
-    try {
-      final st = File(path).statSync();
-      return '${_buildKey(path)}@${st.modified.millisecondsSinceEpoch ^ st.size}';
-    } catch (_) {
-      return _buildKey(path);
-    }
-  }
-
-  /// The engines ticked for a build (the ones still there).
-  List<String> enginesFor(String build) {
-    final m = store.raw('engines');
-    final l = m is Map ? m[_buildKey(build)] : null;
-    return l is List ? [for (final x in l) if (x is String && File(x).existsSync()) x] : const [];
-  }
-
-  void _setEngines(String build, List<String> engines) {
-    final m = <String, Object?>{...?(store.raw('engines') as Map?)?.cast<String, Object?>()};
-    if (engines.isEmpty) {
-      m.remove(_buildKey(build));
-    } else {
-      m[_buildKey(build)] = engines;
-    }
-    store.set('engines', m);
-  }
-
-  String? get _currentBuild => virtual.libPath ?? (virtual.mockOnly ? '' : null);
-
-  // before a board is made: the engines ticked for its build, copied into a fresh folder
-  void _stageEngines() {
-    final dir = engineDir, build = _currentBuild;
-    // the ticked ones it can take (not refused, not another engine ABI), once the build has
-    // reported (Stce) that it loads engines: a build that cannot report gets none
-    final ticked = [for (final c in engineList()) if (c.ticked) c.engine];
-    final known = build != null && (_abiOf(_reportKey(build)) ?? -1) >= 0;
-    _unstaged = ticked.isNotEmpty && !known;
-    try {
-      final st = dir == null ? null : stageEngines(known ? ticked : const [], dir);
-      _staged = st?.files ?? const {};
-      virtual.engineDir = st?.dir;
-      virtual.engineFiles = _staged.keys.toList();
-    } catch (e) {
-      log('engines: could not stage them: $e', LogKind.err);
-      _staged = const {};
-      virtual.engineDir = null;
-      virtual.engineFiles = const [];
-    }
-  }
-
-  LoadedEngine? _loadedOf(String component) => engineReport?.loaded.where((l) => _staged[l.file] == component).firstOrNull;
-
-  // the firmware's Stce, once per run (only when there are engines to add)
-  Future<void> _readEngines(StrisoClient c) async {
-    engineReport = null;
-    final build = _currentBuild;
-    if (build == null || findEngines(engineDir).isEmpty) return;
-    final r = await c.getEngines();
+  Future<void> _readSlots(StrisoClient c) async {
+    final s = await c.listModuleSlots();
     if (!identical(c, client)) return;
-    final key = _reportKey(build);
-    if (r == null) {
-      _setAbi(key, -1);
-      log('engines: this build does not report engines (Stce): none can be added to it', LogKind.err);
-      return;
-    }
-    _setAbi(key, r.abi);
-    engineReport = r;
-    final out = <String>[];
-    for (final x in r.refused) {
-      final comp = _staged[x.file];
-      if (comp == null) continue;
-      _refused[comp] = (build: _buildKey(build), stamp: engineOf(comp).stamp, r: x);
-      log('engines: ${engineOf(comp).title} refused: ${engineRefusal(x)}', LogKind.err);
-      if (x.reason != 'full') out.add(comp);
-    }
-    if (out.isNotEmpty) _setEngines(build, [for (final e in enginesFor(build)) if (!out.contains(e)) e]);
+    moduleSlots = s;
   }
 
-  /// The engines in the engine folder, as the chooser shows them for the build Virtual plays (or
-  /// would play).
-  List<EngineChoice> engineList() {
-    final build = _currentBuild;
-    final key = build == null ? null : _buildKey(build);
-    final rk = build == null ? null : _reportKey(build);
-    final ticked = build == null ? const <String>{} : enginesFor(build).toSet();
-    final reported = rk == null ? null : _abiOf(rk);
-    final abi = reported != null && reported >= 0 ? reported : null;
-    final thisRun = isVirtual && _playedSetup != null && key != null && _buildKey(_playedSetup!.build) == key;
-    return [
-      for (final e in findEngines(engineDir))
-        () {
-          final refusal = _refused[e.path];
-          final valid = refusal != null && refusal.build == key && refusal.stamp == e.stamp;
-          final m = e.manifest?.abi;
-          final String? reason = build == null
-              ? 'pick a build first'
-              : reported == -1
-              ? 'this build cannot add engines'
-              : abi != null && m != null && m != abi
-              ? 'built for engine ABI $m; this build loads $abi'
-              : valid && refusal.r.reason != 'full'
-              ? engineRefusal(refusal.r)
-              : null;
-          return EngineChoice(
-            e,
-            ticked: ticked.contains(e.path) && reason == null,
-            loaded: thisRun ? _loadedOf(e.path) : null,
-            reason: reason,
-            note: valid && refusal.r.reason == 'full' ? engineRefusal(refusal.r) : null,
-            detail: valid && refusal.r.detail.isNotEmpty ? refusal.r.detail : null,
-          );
-        }(),
-    ];
+  void _moduleSay(String text, {bool error = false}) {
+    moduleNote = (text: text, error: error);
+    if (error) {
+      log('engines: $text', LogKind.err);
+    } else {
+      log('engines: $text');
+    }
   }
 
-  /// Ticks or unticks an engine: Virtual starts again on the same build with the new set; a
-  /// ticked one plays its first voice once (it has no voice key).
-  Future<bool> toggleEngine(String component) async {
-    final build = _currentBuild;
-    if (build == null || saving) return false;
-    final now = enginesFor(build);
-    final on = !now.contains(component);
-    final next = on ? [...now, component] : [for (final e in now) if (e != component) e];
-    if (virtual.mockOnly) {
-      // the Dart mock: no library to choose, the mock plays the set
-      return _playMock(next, firstOf: on ? component : null);
+  /// Copies an engine (a package, or a zip of them) into the library, then puts it on the board
+  /// that plays, if one does and has slots. False with a toast when it cannot be copied.
+  Future<bool> installAndAddEngine(String source) async {
+    final dir = engineDir;
+    if (dir == null) {
+      toast('There is no engine folder in this run', 'warn');
+      return false;
     }
-    return _play(build, engines: next, firstOf: on ? component : null);
-  }
-
-  Future<bool> _playMock(List<String> engines, {String? firstOf, String? voice}) async {
-    final was = isVirtual ? VirtualSetup('', enginesFor(''), voice: voiceName.isNotEmpty ? voiceName : null) : null;
-    if (state.mode != null) await session.disconnect(why: IdleWhy.modeSwitch);
-    _setEngines('', engines);
-    var ok = await session.connect(Mode.virtual);
-    if (ok && _unstaged && engineReport != null) {
-      await session.disconnect(why: IdleWhy.modeSwitch);
-      ok = await session.connect(Mode.virtual);
+    final List<String> paths;
+    try {
+      paths = installEngine(source, dir);
+    } catch (e) {
+      toast('Not installed: $e', 'err');
+      log('engine install: $e', LogKind.err);
+      return false;
     }
-    if (!ok) return false;
-    final now = VirtualSetup('', enginesFor(''));
-    _playedSetup = now;
-    if (was != null && !was.same(now)) previousSetup = was;
-    final added = firstOf == null ? null : _loadedOf(firstOf);
-    final back = voice == null ? null : voices.where((v) => v.name == voice).firstOrNull;
-    if (added != null) {
-      await selectVoice(added.first);
-    } else if (back != null) {
-      await selectVoice(back.index);
-    }
+    log('engine library: ${paths.join(', ')}');
     notifyListeners();
+    if (client == null || moduleSlots == null) return true;
+    var ok = true;
+    for (final p in paths) {
+      ok = await putEngine(p, restart: identical(p, paths.last)) && ok;
+    }
+    return ok;
+  }
+
+  /// Puts a package into a slot of the board that plays (Stci): its firmware checks it and picks
+  /// the slot. Virtual then starts again on the same build ([restart]), so its firmware loads
+  /// it, on its first voice; the Striso lists it from its next start.
+  Future<bool> putEngine(String package, {bool restart = true}) async {
+    final c = client;
+    if (c == null || modulesBusy || saving) return false;
+    final name = EnginePackage(package).name, target = slotTarget;
+    final List<int> bytes;
+    try {
+      bytes = File(package).readAsBytesSync();
+    } catch (e) {
+      _moduleSay('$name could not be read: $e', error: true);
+      notifyListeners();
+      return false;
+    }
+    moduleNote = null;
+    moduleUpload.value = (name: name, bytes: 0, total: bytes.length);
+    notifyListeners();
+    log('engines: $name (${bytes.length} bytes) to $target');
+    final ModuleInstall r;
+    try {
+      r = await c.installModule(bytes, onProgress: (n, t) => moduleUpload.value = (name: name, bytes: n, total: t));
+    } finally {
+      moduleUpload.value = null;
+    }
+    if (identical(c, client)) await _readSlots(c);
+    if (!r.ok) {
+      _moduleSay('$name is not on $target: ${r.error}', error: true);
+      notifyListeners();
+      return false;
+    }
+    final d = r.done!;
+    if (r.error != null) log('engines: ${r.error}', LogKind.err);
+    if (isVirtual && restart && identical(c, client)) {
+      _moduleSay('${d.id} ${d.version} is in slot ${d.slot}; Virtual started again with it');
+      return _restartVirtual(firstOf: d.id);
+    }
+    _moduleSay(
+      isVirtual
+          ? '${d.id} ${d.version} is in slot ${d.slot}'
+          : '${d.id} ${d.version} is in slot ${d.slot}: it plays once the Striso starts again (unplug it and plug it back in)',
+    );
+    notifyListeners();
+    return true;
+  }
+
+  /// Erases a slot of the board that plays (Stcz). Virtual starts again without its engine; the
+  /// Striso drops it at its next start.
+  Future<bool> eraseSlot(int slot) async {
+    final c = client;
+    if (c == null || modulesBusy || saving) return false;
+    final what = moduleSlots?.where((s) => s.slot == slot).firstOrNull?.id ?? 'its engine';
+    moduleNote = null;
+    _erasing = true;
+    notifyListeners();
+    final String? why;
+    try {
+      why = await c.eraseModuleSlot(slot);
+    } finally {
+      _erasing = false;
+    }
+    if (identical(c, client)) await _readSlots(c);
+    if (why != null) {
+      _moduleSay('Slot $slot is not erased: $why', error: true);
+      notifyListeners();
+      return false;
+    }
+    if (isVirtual && identical(c, client)) {
+      _moduleSay('Slot $slot erased ($what); Virtual started again without it');
+      return _restartVirtual();
+    }
+    _moduleSay('Slot $slot erased: $what is gone once the Striso starts again');
+    notifyListeners();
+    return true;
+  }
+
+  /// Virtual again on the build it plays (the Dart mock: a fresh one on the same slots), so its
+  /// firmware loads the slots as they are now; then [firstOf]'s first voice, else the voice it
+  /// was on.
+  Future<bool> _restartVirtual({String? firstOf}) async {
+    final voice = voiceName.isNotEmpty ? voiceName : null;
+    final b = virtual.libPath;
+    if (!virtual.mockOnly && b != null) return _play(b, voice: voice, firstOf: firstOf);
+    await session.disconnect(why: IdleWhy.modeSwitch);
+    if (!await session.connect(Mode.virtual)) return false;
+    await _goTo(voice: voice, firstOf: firstOf);
     return true;
   }
 
@@ -1253,35 +1185,6 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     }
     log('virtual firmware installed: $lib');
     return useBuild(lib);
-  }
-
-  /// Installs an engine (an engine zip, or a library) into the engine folder, then adds it to the
-  /// build Virtual plays. False with a toast when it cannot be.
-  Future<bool> installAndAddEngine(String source) async {
-    final dir = engineDir;
-    if (dir == null) {
-      toast('There is no engine folder in this run', 'warn');
-      return false;
-    }
-    final String lib;
-    try {
-      lib = await installEngine(source, dir);
-    } catch (e) {
-      toast('Not installed: $e', 'err');
-      log('engine install: $e', LogKind.err);
-      return false;
-    }
-    log('engine installed: $lib');
-    _refused.remove(lib);
-    if (_currentBuild == null) {
-      notifyListeners();
-      return true;
-    }
-    if (enginesFor(_currentBuild!).contains(lib)) {
-      // replaced: the next run loads the new file
-      return virtual.mockOnly ? _playMock(enginesFor('')) : _play(_currentBuild!, engines: enginesFor(_currentBuild!));
-    }
-    return toggleEngine(lib);
   }
 
   // SessionHost -----------------------------------------------------------------------------------
@@ -1349,7 +1252,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     _applyState(await c.getState());
     await refreshVoices();
     if (!current()) return null;
-    if (b.mode == Mode.virtual) await _readEngines(c);
+    await _readSlots(c);
     if (!current()) return null;
     if (usbBoard) _trace('voice list (${voices.length})');
     unawaited(c.startStream().catchError((_) {}));
@@ -1407,7 +1310,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     _stateCount = null;
     boardPresets = null;
     lastOpen = null;
-    engineReport = null;
+    moduleSlots = null;
     _resetUi();
   }
 
@@ -2276,9 +2179,8 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
 
   /// The engine buttons, as the board lists its voices.
   List<EngineButton> engines() {
-    // the engines in the board's voice order (Stcv), each in its voice key's led colour (StcX), a
-    // loaded engine in the colour the firmware gives it (Stce); another engine without a voice
-    // key gets a colour of its own
+    // the engines in the board's voice order (Stcv), each in its voice key's led colour (StcX);
+    // another engine without a voice key (one from a slot) gets a colour of its own
     final out = <EngineButton>[];
     final seen = <String>{};
     final leds = {for (final (_, engine, led) in settingsLayout.voiceKeys) engine: led};
@@ -2286,8 +2188,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     for (final v in voices) {
       if (!seen.add(v.engine)) continue;
       final led = leds[v.engine];
-      final loaded = engineReport?.ofVoice(v.index);
-      final colour = loaded != null ? loaded.color : (led != null ? ledColor(led) : HSLColorInt.of(engineInfo(v.engine, k++).hue));
+      final colour = led != null ? ledColor(led) : HSLColorInt.of(engineInfo(v.engine, k++).hue);
       out.add(EngineButton(v.engine, colour, voices.where((x) => x.engine == v.engine).length));
     }
     return out;
