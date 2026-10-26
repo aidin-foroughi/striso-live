@@ -78,8 +78,8 @@ class AudioPrefs {
   /// Windows: the input in exclusive mode first (lower latency, the device's own 24 bit).
   final bool exclusive;
 
-  /// Windows: the output in exclusive mode when it is wired (not Bluetooth), falling back to shared
-  /// when another program holds it. Off: always shared.
+  /// Windows, an opt-in: the output in exclusive mode when it is wired (not Bluetooth), falling
+  /// back to shared when another program holds it. Off (the default): always shared.
   final bool exclusiveOutput;
 
   /// The one-time note on exclusive output (it takes the output from other programs; Striso Live
@@ -100,7 +100,7 @@ class AudioPrefs {
     this.period = auto,
     this.gainDb = -6,
     this.exclusive = true,
-    this.exclusiveOutput = true,
+    this.exclusiveOutput = false,
     this.exclusiveOutputNoted = false,
     this.autoMemory = const {},
     this.boardBuffer = auto,
@@ -114,15 +114,20 @@ class AudioPrefs {
 
   /// The settings' version: 2 made Auto and exclusive output the defaults; 3 turned exclusive input
   /// back on once (it had been switched off, leaving the input shared: 7 ms bursts and a ring sized
-  /// for them, about 6 ms more latency).
-  static const version = 3;
+  /// for them, about 6 ms more latency); 4 made the output shared (exclusive output, the default
+  /// until then, bypassed the Windows volume and overdrove a user's speakers), exclusive an opt-in.
+  static const version = 4;
 
-  /// The note for the log when [fromJson] repaired [j] (exclusive input back on), else null.
+  /// The note for the log when [fromJson] repaired [j] (exclusive input back on, the output
+  /// shared), else null.
   static String? repairNote(Object? j) {
     if (j is! Map) return null;
     final v = (j['v'] as num?)?.toInt() ?? 1;
-    if (v >= 3 || j['exclusive'] != false) return null;
-    return 'audio settings: exclusive input was off; turned back on once (the shared input added about 6 ms)';
+    final notes = [
+      if (v < 3 && j['exclusive'] == false) 'exclusive input was off; turned back on once (the shared input added about 6 ms)',
+      if (v < 4 && j['exclusiveOutput'] != false) 'the output is shared now (exclusive output was the default; it is an opt-in from now on)',
+    ];
+    return notes.isEmpty ? null : 'audio settings: ${notes.join('; ')}';
   }
 
   bool get isAuto => period == auto;
@@ -188,8 +193,9 @@ class AudioPrefs {
       gainDb: g.isFinite ? g.clamp(minDb, maxDb) : -6,
       // before 3: on, whatever was stored (see repairNote); from 3 the choice stands
       exclusive: v < 3 ? true : j['exclusive'] != false,
-      // before 2 the output was shared unless asked: now exclusive on wired outputs unless turned off
-      exclusiveOutput: v < 2 ? true : j['exclusiveOutput'] != false,
+      // before 4 exclusive was the default, so what was stored is no choice: shared (repairNote);
+      // from 4 exclusive is what the user turned on
+      exclusiveOutput: v >= 4 && j['exclusiveOutput'] == true,
       exclusiveOutputNoted: j['exclusiveOutputNoted'] == true,
       autoMemory: mem,
       boardBuffer: switch ((j['boardBuffer'] as num?)?.toInt()) {

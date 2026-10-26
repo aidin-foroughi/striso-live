@@ -360,7 +360,7 @@ class _AudioSectionState extends State<AudioSection> {
                 tip:
                     'On: a wired output plays only the Striso, for the lowest latency (shared, most outputs allow no less than 10 ms). '
                     'Other programs cannot play to it meanwhile; it falls back to shared when another program holds it. '
-                    'Bluetooth outputs always play shared.',
+                    'Bluetooth outputs always play shared. Off (the default): shared, at the Windows volume as every program.',
               ),
             _row('Gain', _Gain(a)),
             if (!virtual) _row('Level', _LevelBars(widget.ctl)),

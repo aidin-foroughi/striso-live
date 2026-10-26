@@ -80,16 +80,16 @@ void main() {
   });
 
   group('AudioPrefs', () {
-    test('defaults: off, the Striso, the default output, Auto, -6 dB, exclusive input, exclusive output (wired)', () {
+    test('defaults: off, the Striso, the default output, Auto, -6 dB, exclusive input, a shared output', () {
       const p = AudioPrefs();
-      expect([p.through, p.input, p.output, p.period, p.gainDb, p.exclusive, p.exclusiveOutput], [false, null, null, AudioPrefs.auto, -6, true, true]);
+      expect([p.through, p.input, p.output, p.period, p.gainDb, p.exclusive, p.exclusiveOutput], [false, null, null, AudioPrefs.auto, -6, true, false]);
       expect(p.isAuto, isTrue);
     });
-    test('settings from before Auto: Auto and exclusive output; from now on what was chosen', () {
-      final old = AudioPrefs.fromJson({'through': true, 'period': 64, 'exclusiveOutput': false});
-      expect([old.period, old.exclusiveOutput, old.through], [AudioPrefs.auto, true, true]);
-      final v2 = AudioPrefs.fromJson({'v': 2, 'period': 64, 'exclusiveOutput': false});
-      expect([v2.period, v2.exclusiveOutput], [64, false]);
+    test('settings from before Auto: Auto; from then on the size chosen', () {
+      final old = AudioPrefs.fromJson({'through': true, 'period': 64});
+      expect([old.period, old.through], [AudioPrefs.auto, true]);
+      final v2 = AudioPrefs.fromJson({'v': 2, 'period': 64});
+      expect(v2.period, 64);
       final mem = AudioPrefs.fromJson({
         'v': 2,
         'auto': {
@@ -106,12 +106,28 @@ void main() {
       expect(AudioPrefs.fromJson(old).exclusive, isTrue);
       expect(AudioPrefs.repairNote(old), contains('exclusive input was off'));
       final saved = AudioPrefs.fromJson(old).toJson();
-      expect(saved['v'], 3);
+      expect(saved['v'], AudioPrefs.version);
       expect(AudioPrefs.repairNote(saved), isNull);
       expect(AudioPrefs.fromJson({'v': 3, 'exclusive': false}).exclusive, isFalse);
-      expect(AudioPrefs.repairNote({'v': 3, 'exclusive': false}), isNull);
-      expect(AudioPrefs.repairNote({'v': 2, 'exclusive': true}), isNull);
+      expect(AudioPrefs.repairNote({'v': 3, 'exclusive': false, 'exclusiveOutput': false}), isNull);
+      expect(AudioPrefs.repairNote({'v': 2, 'exclusive': true, 'exclusiveOutput': false}), isNull);
       expect(AudioPrefs.repairNote(null), isNull);
+    });
+    test('settings before 4: the output shared, once, with a note (exclusive was the default); from 4 an opt-in that stands', () {
+      for (final old in [
+        {'v': 3, 'exclusiveOutput': true},
+        {'v': 2},
+        {'through': true},
+      ]) {
+        expect(AudioPrefs.fromJson(old).exclusiveOutput, isFalse, reason: '$old');
+        expect(AudioPrefs.repairNote(old), contains('the output is shared now'), reason: '$old');
+      }
+      final saved = AudioPrefs.fromJson({'v': 3, 'exclusiveOutput': true}).toJson();
+      expect([saved['v'], saved['exclusiveOutput']], [4, false]);
+      expect(AudioPrefs.repairNote(saved), isNull);
+      expect(AudioPrefs.fromJson({'v': 4, 'exclusiveOutput': true}).exclusiveOutput, isTrue, reason: 'turned on by the user');
+      expect(AudioPrefs.fromJson({'v': 4}).exclusiveOutput, isFalse);
+      expect(AudioPrefs.repairNote({'v': 4, 'exclusiveOutput': true}), isNull);
     });
     test('JSON round trip', () {
       const p = AudioPrefs(
@@ -166,13 +182,14 @@ void main() {
       r = Rig();
       r.pc.setThrough(true);
       r.run(300);
-      expect(r.fake.last, AudioConfig(run: true, input: striso.name, output: '', period: AutoBuffer.safe, monitor: true, exclusive: true, exclusiveOutput: true));
+      expect(r.fake.last, AudioConfig(run: true, input: striso.name, output: '', period: AutoBuffer.safe, monitor: true, exclusive: true));
+      expect(r.fake.last.exclusiveOutput, isFalse, reason: 'shared by default: the Windows volume applies');
       expect(r.pc.state, ThroughState.running);
       expect(r.pc.playing, isTrue);
       expect(r.pc.message, contains('Playing through the computer'));
       expect(r.pc.message, contains('48 kHz'));
       expect(r.pc.message, contains('24-bit'));
-      expect(r.pc.liveLine, 'exclusive output');
+      expect(r.pc.liveLine, isNot(contains('exclusive output')));
       expect(r.pc.dropoutLine, 'no dropouts in the last minute');
       expect(r.pc.tone, Tone.ok);
       expect(r.saved.last.through, isTrue);
@@ -183,11 +200,11 @@ void main() {
     });
 
     test('what was granted, not what was asked: both sides, a refused exclusive mode said so', () {
-      r = Rig(prefs: const AudioPrefs(through: true, period: 128));
+      r = Rig(prefs: const AudioPrefs(through: true, period: 128, exclusiveOutput: true));
       r.run(300);
       expect(r.pc.grantedLine, 'Input: exclusive, 24-bit, 128 frames (2.7 ms) · Output: exclusive, 128 frames (2.7 ms)');
       r.dispose();
-      r = Rig(prefs: const AudioPrefs(through: true, period: 128, exclusive: false), setup: (f) => f.exclusiveBusy = true);
+      r = Rig(prefs: const AudioPrefs(through: true, period: 128, exclusive: false, exclusiveOutput: true), setup: (f) => f.exclusiveBusy = true);
       r.run(300);
       expect(r.pc.grantedLine, 'Input: shared, float, 480 frames (10.0 ms) · Output: shared (exclusive not granted), 128 frames (2.7 ms)');
       r.pc.setThrough(false);
@@ -320,8 +337,8 @@ void main() {
       expect(r.pc.message, contains('float'), reason: 'shared mode gives the mix format');
     });
 
-    test('exclusive output: a warning once, when it first plays (the default) or is turned on', () {
-      r = Rig(prefs: const AudioPrefs(through: true));
+    test('exclusive output, an opt-in: a warning once, when it is turned on or first plays', () {
+      r = Rig(prefs: const AudioPrefs(through: true, exclusiveOutput: true));
       r.run(300);
       expect(r.pc.st.playbackExclusive, isTrue);
       expect(r.warns, [ThroughPc.exclusiveOutputNote]);
@@ -336,8 +353,9 @@ void main() {
       r.run(300);
       expect(r.warns, isEmpty, reason: 'remembered across runs');
       r.dispose();
-      r = Rig(prefs: const AudioPrefs(through: true, exclusiveOutput: false));
+      r = Rig(prefs: const AudioPrefs(through: true));
       r.run(300);
+      expect(r.pc.st.playbackExclusive, isFalse, reason: 'shared by default');
       expect(r.warns, isEmpty, reason: 'shared: nothing to warn about');
       r.pc.setExclusiveOutput(true);
       expect(r.warns, [ThroughPc.exclusiveOutputNote], reason: 'turned on');
@@ -369,7 +387,7 @@ void main() {
       r = Rig();
       r.pc.startRecording();
       r.run(200);
-      expect(r.fake.last, AudioConfig(run: true, input: striso.name, period: AutoBuffer.safe, monitor: false, exclusive: true, exclusiveOutput: true));
+      expect(r.fake.last, AudioConfig(run: true, input: striso.name, period: AutoBuffer.safe, monitor: false, exclusive: true));
       expect(r.pc.recording, isTrue);
       final path = r.pc.recordingPath!;
       expect(path, endsWith('${Platform.pathSeparator}Striso Live Recordings${Platform.pathSeparator}Striso 2026-10-23 14.02.11.wav'));
