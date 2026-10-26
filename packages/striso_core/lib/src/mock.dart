@@ -504,6 +504,7 @@ class MockBoard implements PlayableBoard {
 
   /// MIDI mode as the settings keys set it: 'mpe', 'poly' or 'midimono'; the loaded settings preset.
   String midiMode = 'mpe';
+  int midiKey = 0; // the settings key of [midiMode] (StcY midikey=)
   int settingsPreset = 1;
   final remembered = <String, int>{};
   int _loadBlocks = 0, _loadPeak = 0;
@@ -1296,7 +1297,7 @@ class MockBoard implements PlayableBoard {
   String _stateLine() {
     String f3(double v) => v.toStringAsFixed(3);
     final body =
-        'voice=$voice midi=$midiMode ch=$dialChannel voices=$dialVoices bend=$dialBend tuning=$tuning '
+        'voice=$voice midi=$midiMode midikey=$midiKey ch=$dialChannel voices=$dialVoices bend=$dialBend tuning=$tuning '
         'fine=${(noteOffset * 100 + dialFine).toStringAsFixed(2)} transpose=0.000 pres=${f3(touch[0])} velo=${f3(touch[1])} '
         'tilt=${f3(touch[2])} bendsens=${f3(touch[3])} thres=${f3(touch[4])} vol=$dialVolume sustain=${f3(dialSustain)} rate=$dialRate '
         'alt=${(controlsDown[3]) != 0 ? 1 : 0} porta=0 flip=0 led=00AA00 updown=0000 mono=$mono';
@@ -1320,6 +1321,7 @@ class MockBoard implements PlayableBoard {
     }
     if (f.group == SettingsGroup.midi) {
       midiMode = const {0: 'mpe', 2: 'poly', 4: 'midimono'}[id]!;
+      midiKey = id;
       return true;
     }
     if (f.group == SettingsGroup.tuning) {

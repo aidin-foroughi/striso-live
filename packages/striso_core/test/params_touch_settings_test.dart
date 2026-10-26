@@ -272,12 +272,13 @@ void main() {
 
     test('StcY and Stcy lines', () {
       final b = parseBoardState(
-        'Y 17 voice=1 midi=mpe ch=2 voices=10 bend=48 tuning=2 fine=-31.77 transpose=1.161 pres=1.000 velo=1.000 tilt=1.000 '
+        'Y 17 voice=1 midi=midimono midikey=4 ch=2 voices=10 bend=48 tuning=2 fine=-31.77 transpose=1.161 pres=1.000 velo=1.000 tilt=1.000 '
         'bendsens=0.500 thres=0.000 vol=90 sustain=0.188 rate=1 alt=1 porta=0 flip=0 led=00AA00 updown=0120',
       )!;
       expect(b.counter, 17);
       expect(b.voice, 1);
-      expect(b.midi, 'mpe');
+      expect(b.midi, 'midimono');
+      expect(b.midiKey, 4);
       expect(b.tuning, 2);
       expect(b.fineCents, closeTo(-31.77, 1e-9));
       expect(b.transpose, closeTo(1.161, 1e-9));

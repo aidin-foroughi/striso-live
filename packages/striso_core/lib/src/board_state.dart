@@ -104,6 +104,9 @@ class BoardState {
 
   /// 'mpe', 'poly' or 'midimono'.
   String? get midi => fields['midi'];
+
+  /// The settings key of the MIDI mode in use (StcY midikey=): the StcX key that switches to it.
+  int? get midiKey => _int('midikey');
   int? get channel => _int('ch');
   int? get voices => _int('voices');
   int? get bend => _int('bend');

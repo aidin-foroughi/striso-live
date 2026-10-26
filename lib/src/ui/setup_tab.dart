@@ -667,7 +667,7 @@ class MidiOutSection extends StatelessWidget {
         if (e.value.group == SettingsGroup.midi && e.value.switchable) e,
     ];
     final mode = st?.midi;
-    final current = modes.where((e) => _isMode(e.value.short, mode)).map((e) => e.key).firstOrNull ?? -1;
+    final current = st?.midiKey ?? -1; // the key the board reports for its mode (StcY midikey=)
     String? channels;
     if (st != null) {
       final ch = st.channel, n = st.voices, bend = st.bend;
@@ -717,12 +717,6 @@ class MidiOutSection extends StatelessWidget {
 
 /// A settings dial as a slider in the board's range and steps (StcT's list): its value is the
 /// board's (StcY); a drag sends the value at its end (StcT) and shows what the board took.
-/// Whether StcY's `midi=` word names the MIDI-mode key labelled [label]: its label in lower case
-/// (mpe, poly), or with "midi" before it (Mono: midimono; key 9 is the internal synth's Mono).
-bool _isMode(String label, String? mode) {
-  final l = label.toLowerCase();
-  return mode == l || mode == 'midi$l';
-}
 
 class _DialRow extends StatefulWidget {
   final AppController ctl;
