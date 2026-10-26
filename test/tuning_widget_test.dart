@@ -157,7 +157,7 @@ void main() {
     expect(find.textContaining('Loaded settings preset 2'), findsOneWidget);
     // MIDI mode and panic answer ok; the refused keys are not switchable at all
     expect(await pumpUntil(tester, ctl.pressSettingsKey(4)), isTrue);
-    expect(board.midiMode, 'mono');
+    expect(board.midiMode, 'midimono');
     expect(await pumpUntil(tester, ctl.pressSettingsKey(63)), isTrue);
     expect(await pumpUntil(tester, ctl.pressSettingsKey(67)), isFalse);
     expect(await pumpUntil(tester, ctl.pressSettingsKey(17)), isFalse);

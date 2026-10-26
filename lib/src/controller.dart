@@ -2317,17 +2317,18 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   /// When the indicator led was last made to pulse by an app action (ms, app clock).
   double ledPulseT = -1e9;
 
-  /// Mono legato as the board reports it (StcY `legato=0|1`); null when this firmware has none.
-  bool? get legato => switch (boardState?.fields['legato']) {
+  /// Mono as the board reports it (StcY `mono=0|1`): one internal voice, each note slurring or
+  /// re-attacking as played; null when this firmware has none.
+  bool? get mono => switch (boardState?.fields['mono']) {
     '1' => true,
     '0' => false,
     _ => null,
   };
 
-  /// The legato settings key (StcX row 9): the board switches it and the state is read back.
-  static const legatoKey = 9;
-  bool get legatoSwitchable => canSend && settingsLayout[legatoKey]?.switchable == true;
-  Future<bool> toggleLegato() => pressSettingsKey(legatoKey);
+  /// The mono settings key (StcX row 9): the board switches it and the state is read back.
+  static const monoKey = 9;
+  bool get monoSwitchable => canSend && settingsLayout[monoKey]?.switchable == true;
+  Future<bool> toggleMono() => pressSettingsKey(monoKey);
 
   /// A click on a key on the board (not in demo play).
   bool boardSelect(int id, {bool overlays = true}) {

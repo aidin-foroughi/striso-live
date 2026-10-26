@@ -102,7 +102,7 @@ class BoardState {
 
   int? get voice => _int('voice');
 
-  /// 'mpe', 'poly' or 'mono'.
+  /// 'mpe', 'poly' or 'midimono'.
   String? get midi => fields['midi'];
   int? get channel => _int('ch');
   int? get voices => _int('voices');

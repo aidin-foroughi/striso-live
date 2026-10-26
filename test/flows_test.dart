@@ -110,15 +110,16 @@ void main() {
     // the header names the build and reopens the chooser
     expect(tester.widget<Btn>(find.byKey(const Key('mode-virtual'))).label, 'Virtual · Dart mock ▾');
     expect(find.byKey(const Key('build-swap')), findsNothing, reason: 'no build played before this one');
-    // mono legato: the board's field, switched on the board (key 9), read back
-    expect(ctl.legato, isFalse);
-    expect(find.byKey(const Key('legato-toggle')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('legato-toggle')));
-    for (var i = 0; i < 40 && ctl.legato != true; i++) {
+    // mono: the board's field, switched on the board (key 9), read back; its label is the key's
+    expect(ctl.mono, isFalse);
+    expect(find.byKey(const Key('mono-toggle')), findsOneWidget);
+    expect(tester.widget<Toggle>(find.byKey(const Key('mono-toggle'))).label, 'Mono');
+    await tester.tap(find.byKey(const Key('mono-toggle')));
+    for (var i = 0; i < 40 && ctl.mono != true; i++) {
       await runFor(tester, 50);
     }
-    expect(ctl.legato, isTrue);
-    expect(tester.widget<Toggle>(find.byKey(const Key('legato-toggle'))).value, isTrue);
+    expect(ctl.mono, isTrue);
+    expect(tester.widget<Toggle>(find.byKey(const Key('mono-toggle'))).value, isTrue);
     // Setup: Save names the instrument; the firmware row says what plays
     await tester.tap(find.byKey(const Key('tab-setup')));
     await settle(tester, 300);
