@@ -21,6 +21,14 @@ void main() {
     Btn seg(String m) => tester.widget<Btn>(find.byKey(Key('midi-mode-$m')));
     expect(seg('mpe').pressed, isTrue, reason: 'StcY midi=mpe');
     expect(seg('poly').pressed, isFalse);
+    // a firmware without StcT: the values as text, the dials set on the instrument
+    for (var i = 0; i < 40 && ctl.dials == null; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await settle(tester, 50);
+    }
+    ctl.dials = null;
+    ctl.notifyListeners();
+    await settle(tester, 100);
     expect(find.text('MPE · 10 voices from channel 2 · pitch bend 48 semitones'), findsOneWidget);
     expect(find.text('volume 90 · sustain 0.19 · a message every 1 ms'), findsOneWidget);
     // Poly: the board's settings key 2, pressed over USB; what the board then reports
@@ -33,7 +41,42 @@ void main() {
     expect(ctl.boardState?.midi, 'poly');
     await settle(tester, 200);
     expect(seg('poly').pressed, isTrue);
-    expect(find.text('Poly · channel 1'), findsOneWidget);
+    expect(find.text('Poly · channel 2'), findsOneWidget, reason: 'the channel stays (the firmware keeps it)');
+    await finish(tester, ctl);
+  });
+
+  testWidgets('the dials as sliders in the board\'s ranges: a drag sends the value, the board\'s answer shows', (tester) async {
+    final ctl = await boot(tester, AppController(options: const AppOptions(noUsb: true, mockDemo: true), store: Store.memory()));
+    await pumpUntil(tester, ctl.playVirtual());
+    await untilLive(tester, ctl);
+    for (var i = 0; i < 40 && ctl.dials == null; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await settle(tester, 50);
+    }
+    expect(ctl.dials!.map((d) => d.name), ['ch', 'voices', 'bend', 'vol', 'sustain', 'rate', 'fine'], reason: 'as the board lists them');
+    ctl.setTab(AppTab.setup);
+    await settle(tester, 400);
+    String value(String n) => tester.widget<Text>(find.byKey(Key('dial-$n-value'))).data!;
+    expect(value('vol'), '90');
+    expect(value('bend'), '48 st');
+    expect(value('sustain'), '0.188');
+    // a value set: the board's answer, and StcY's afterwards
+    expect(await pumpUntil(tester, ctl.setDial(ctl.dials!.firstWhere((d) => d.name == 'vol'), 130)), 127, reason: 'clamped by the board');
+    await settle(tester, 200);
+    expect(value('vol'), '127');
+    expect(await pumpUntil(tester, ctl.setDial(ctl.dials!.firstWhere((d) => d.name == 'bend'), 30)), 24);
+    await settle(tester, 200);
+    expect(value('bend'), '24 st');
+    // a drag on the slider: the value at its end goes to the board
+    await tester.ensureVisible(find.byKey(const Key('dial-rate')));
+    await settle(tester, 100);
+    await tester.drag(find.byKey(const Key('dial-rate')), const Offset(400, 0));
+    for (var i = 0; i < 40 && ctl.boardState?.rate != 15; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await settle(tester, 50);
+    }
+    expect(ctl.boardState?.rate, 15, reason: 'dragged to the end: the board\'s maximum');
+    expect(value('rate'), '15 ms');
     await finish(tester, ctl);
   });
 

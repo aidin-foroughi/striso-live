@@ -695,14 +695,79 @@ class MidiOutSection extends StatelessWidget {
             keys: {for (final e in modes) e.key: Key('midi-mode-${e.value.short.toLowerCase()}')},
             onChanged: (k) => k == current ? null : ctl.pressSettingsKey(k),
           ),
-          if (channels != null && channels.isNotEmpty) ...[
+          if (ctl.dials != null && ctl.dials!.isNotEmpty) ...[
+            const SizedBox(height: Space.s),
+            for (final d in ctl.dials!) _DialRow(ctl, d),
+          ] else if (channels != null && channels.isNotEmpty) ...[
             const SizedBox(height: Space.xs),
             Text('${modes.where((e) => e.key == current).map((e) => e.value.short).firstOrNull ?? mode} · $channels', key: const Key('midi-out-channels'), style: ui(TypeSize.body)),
           ],
-          if (rest != null && rest.isNotEmpty) Text(rest, key: const Key('midi-out-rest'), style: ui(TypeSize.body, color: Pal.text2)),
-          Text('The channels, bend range, volume and rate are dials: Settings + tilt on the instrument.', style: ui(TypeSize.small, color: Pal.text3)),
+          if (ctl.dials == null || ctl.dials!.isEmpty) ...[
+            if (rest != null && rest.isNotEmpty) Text(rest, key: const Key('midi-out-rest'), style: ui(TypeSize.body, color: Pal.text2)),
+            Text('The channels, bend range, volume and rate are dials: Settings + tilt on the instrument.', style: ui(TypeSize.small, color: Pal.text3)),
+          ],
         ],
       ],
+    );
+  }
+}
+
+/// A settings dial as a slider in the board's range and steps (StcT's list): its value is the
+/// board's (StcY); a drag sends the value at its end (StcT) and shows what the board took.
+class _DialRow extends StatefulWidget {
+  final AppController ctl;
+  final DialInfo d;
+  const _DialRow(this.ctl, this.d);
+  @override
+  State<_DialRow> createState() => _DialRowState();
+}
+
+/// How the dials read (the board names them by their StcY fields).
+const _dialLabels = {'ch': 'Channel', 'voices': 'MPE voices', 'bend': 'Bend range', 'vol': 'Volume', 'sustain': 'Sustain', 'rate': 'Rate', 'fine': 'Fine tune'};
+const _dialUnits = {'bend': ' st', 'rate': ' ms', 'fine': ' ¢'};
+
+class _DialRowState extends State<_DialRow> {
+  double? _drag;
+
+  @override
+  Widget build(BuildContext context) {
+    final d = widget.d, ctl = widget.ctl;
+    final values = d.values;
+    final board = ctl.dialValue(d);
+    // a slider's position: the value itself, or its index among the dial's values
+    double pos(double v) => values == null ? v.clamp(d.min, d.max) : values.indexWhere((x) => x >= v - 1e-6).clamp(0, values.length - 1).toDouble();
+    double valueAt(double p) => values == null ? p : values[p.round().clamp(0, values.length - 1)];
+    final shown = _drag ?? board;
+    final decimals = d.step > 0 && d.step < 1 ? 3 : (d.step % 1 != 0 ? 2 : 0);
+    final text = shown == null ? '–' : '${shown.toStringAsFixed(decimals)}${_dialUnits[d.name] ?? ''}';
+    return SizedBox(
+      height: Sizes.row + 4,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 84,
+            child: Text(_dialLabels[d.name] ?? d.name, style: ui(TypeSize.body, color: Pal.text2)),
+          ),
+          Expanded(
+            child: Slider(
+              key: Key('dial-${d.name}'),
+              value: shown == null ? (values == null ? d.min : 0) : pos(shown),
+              min: values == null ? d.min : 0,
+              max: values == null ? d.max : (values.length - 1).toDouble(),
+              divisions: d.divisions,
+              onChanged: board == null || !ctl.canSend ? null : (p) => setState(() => _drag = valueAt(p)),
+              onChangeEnd: (p) async {
+                await ctl.setDial(d, valueAt(p));
+                if (mounted) setState(() => _drag = null);
+              },
+            ),
+          ),
+          SizedBox(
+            width: 64,
+            child: Text(text, key: Key('dial-${d.name}-value'), textAlign: TextAlign.right, style: ui(TypeSize.body, color: _drag != null ? Pal.text3 : Pal.text1)),
+          ),
+        ],
+      ),
     );
   }
 }

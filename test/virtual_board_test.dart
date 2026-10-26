@@ -733,4 +733,34 @@ void main() {
     expect(appLog.lines.where((l) => l.text.startsWith('MIDI in ·')).length, n, reason: 'off: nothing more');
     await finish(tester, ctl);
   });
+
+  // the settings dials from the app on the real firmware (StcT, mod-dials): the board's list, a
+  // value clamped and answered, StcY after; skipped by a build without StcT
+  testWidgets('the dials on the real firmware: the board\'s list, values set, clamped and read back', skip: skip != null, (tester) async {
+    final ctl = AppController(options: AppOptions(noUsb: true, virtualLib: lib), store: Store.memory());
+    await run(tester, ctl.playVirtual());
+    await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+    await waitFor(tester, () => ctl.dials != null, ms: 2000).catchError((_) {});
+    if (ctl.dials == null) {
+      markTestSkipped('this build does not answer StcT');
+      await finish(tester, ctl);
+      return;
+    }
+    DialInfo d(String n) => ctl.dials!.firstWhere((x) => x.name == n);
+    expect(ctl.dials!.map((x) => x.name), ['ch', 'voices', 'bend', 'vol', 'sustain', 'rate', 'fine']);
+    expect(d('bend').values, [12.0, 24.0, 48.0, 96.0]);
+    expect(await run(tester, ctl.setDial(d('vol'), 100)), 100);
+    expect(ctl.boardState!.volume, 100);
+    expect(await run(tester, ctl.setDial(d('vol'), 300)), 127);
+    expect(await run(tester, ctl.setDial(d('bend'), 30)), 24);
+    expect(ctl.boardState!.bend, 24);
+    expect(await run(tester, ctl.setDial(d('sustain'), 0.5)), 0.5);
+    expect(ctl.boardState!.sustain, 0.5);
+    expect(await run(tester, ctl.setDial(d('fine'), 10)), 9.38);
+    expect(ctl.boardState!.fineCents, 9.38);
+    expect(await run(tester, ctl.setDial(d('rate'), 0)), 1);
+    expect(await run(tester, ctl.setDial(d('voices'), 4)), 4);
+    expect(ctl.boardState!.voices, 4);
+    await finish(tester, ctl);
+  });
 }

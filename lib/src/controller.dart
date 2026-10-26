@@ -1376,6 +1376,8 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
           if (same()) await refreshTuning();
           // the board's presets after the lists (a firmware without them answers nothing)
           if (same()) await refreshBoardPresets();
+          // the dials the board lets the console set (a firmware without StcT answers nothing)
+          if (same()) await refreshDials();
         })
         .whenComplete(() {
           if (same()) {
@@ -1409,6 +1411,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     boardState = null;
     _stateCount = null;
     midiMonitor = false;
+    dials = null;
     boardPresets = null;
     lastOpen = null;
     engineReport = null;
@@ -2233,6 +2236,45 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     if (id == 63) toast('All notes off');
     notifyListeners();
     return true;
+  }
+
+  // the settings dials from the app (StcT, doc/dials_console.md) -----------------------------------
+
+  /// The dials the board lets the console set, with their ranges, as it lists them (StcT 255);
+  /// null: not read, or a firmware without StcT.
+  List<DialInfo>? dials;
+
+  Future<void> refreshDials() async {
+    final c = client;
+    if (c == null) return;
+    final l = await c.listDials();
+    if (!identical(c, client)) return;
+    dials = l;
+    notifyListeners();
+  }
+
+  /// A dial's value as the board reports it (StcY, the dial's name is its field).
+  double? dialValue(DialInfo d) => double.tryParse(boardState?.fields[d.name] ?? '');
+
+  /// Turns a dial (StcT): the board clamps it to its range and answers with the value it took;
+  /// StcY is read again. Null when it refused or did not answer.
+  Future<double?> setDial(DialInfo d, double value) async {
+    final c = client;
+    if (c == null || !canSend) {
+      toast(connecting ? 'Connecting…' : 'Connect first: the dials are the board\'s', 'warn');
+      return null;
+    }
+    final v = await c.setDial(d.id, value);
+    if (!identical(c, client)) return null;
+    if (v == null) {
+      toast('The board did not take ${d.name}', 'warn');
+      log('StcT ${d.id}: refused or no reply', LogKind.err);
+    } else {
+      log('StcT ${d.name} $v');
+    }
+    _applyState(await c.getState());
+    notifyListeners();
+    return v;
   }
 
   // the MIDI the board gets (StcM / Stcm), shown in the console as it reports it ----------------

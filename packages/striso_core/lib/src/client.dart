@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'board_state.dart';
+import 'dials.dart';
 import 'engines.dart';
 import 'presets.dart';
 import 'protocol.dart';
@@ -425,6 +426,28 @@ class StrisoClient {
       if (o == null || o.ok || o.why != 'busy' || tries >= 5) return o;
       await Future<void>.delayed(const Duration(milliseconds: 5));
     }
+  }
+
+  /// The settings dials the board lets the console set, with their ranges (StcT 255); null without
+  /// a reply (a firmware without StcT).
+  Future<List<DialInfo>?> listDials() async {
+    final r = await request(dialListCommand(), (l, s) {
+      if (!isDialLine(l)) return Take.no;
+      return l.trim() == 'T end' ? Take.done : Take.more;
+    }, timeout: const Duration(milliseconds: 600));
+    return parseDialList(r.lines);
+  }
+
+  /// Sets a dial (StcT): the value the board took, or null when it refused or did not answer.
+  Future<double?> setDial(int dial, double value) async {
+    final r = await request(dialSetCommand(dial, value), (l, s) {
+      final p = parseDialReply(l);
+      if (p == null) return Take.no;
+      s['r'] = p;
+      return Take.done;
+    }, timeout: const Duration(milliseconds: 600));
+    final p = r.state['r'] as ({String? name, double? value, int? refused})?;
+    return p?.value;
   }
 
   /// The state's change counter (Stcy): it goes up whenever anything the board reports changed.
