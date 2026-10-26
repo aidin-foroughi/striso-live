@@ -473,7 +473,7 @@ class _Latency extends StatelessWidget {
               '· input ${_ms(b.input)} ms: half its ${_ms(st.capNominalUs / 1000)} ms wake-up interval'
                   '${Platform.isWindows ? (st.captureExclusive ? ' + about 1 ms the USB driver adds (measured)' : '') : (st.captureStreamLatency > 0 ? ' + ${_ms(st.captureStreamLatency / inRate * 1000)} ms the system reports' : '')}',
               '· ring ${_ms(b.ring)} ms: the passthrough (it aims at ${_ms(st.targetMs)} ms; margin ${_ms(st.marginMs)} ms)',
-              '· output ${_ms(b.output)} ms: ${st.playbackBuffer} frames per wake-up${st.playbackExclusive ? ' (exclusive)' : ' (shared)'}'
+              '· output ${_ms(b.output)} ms: ${st.playbackBuffer} frames per wake-up${st.playbackExclusive ? ' (exclusive, volume ${(st.playbackVolume * 100).round()} %)' : ' (shared)'}'
                   '${st.playbackClock ? ', measured by the output’s own clock' : (st.playbackStreamLatency > 0 ? ' + ${_ms(st.playbackStreamLatency / outRate * 1000)} ms the system reports' : '')}',
               '· USB ${_ms(b.usb)} ms: the board’s ring before each 1 ms packet, ${b.usbMeasured ? 'as it reports it' : 'its target (estimated)'}',
               'Device periods: input ${per(st.captureDevMin, st.captureDevDefault, inRate)}; output ${per(st.playbackDevMin, st.playbackDevDefault, outRate)}.',

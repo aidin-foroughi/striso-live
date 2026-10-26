@@ -440,6 +440,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
       boardOnUsb: () => (client != null && mode == Mode.striso) || session.lastPresent == true,
       onPrefs: (p) => store.set('audio', p.toJson()),
       log: (s) => log(s),
+      warn: (s) => toast(s, 'warn'),
       route: AudioRoute.off,
     );
     if (repaired != null) {

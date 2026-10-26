@@ -12,6 +12,7 @@ class Rig {
   bool board = true;
   final saved = <AudioPrefs>[];
   final logs = <String>[];
+  final warns = <String>[];
   late final Directory dir;
 
   Rig({AudioPrefs prefs = const AudioPrefs(), void Function(FakeAudioBackend)? setup, bool windows = true, AutoTiming timing = const AutoTiming()}) {
@@ -23,6 +24,7 @@ class Rig {
       boardOnUsb: () => board,
       onPrefs: saved.add,
       log: logs.add,
+      warn: warns.add,
       clock: () => now,
       recordingsDir: () => '${dir.path}${Platform.pathSeparator}Striso Live Recordings',
       windows: windows,
@@ -120,6 +122,7 @@ void main() {
         gainDb: -12.5,
         exclusive: false,
         exclusiveOutput: true,
+        exclusiveOutputNoted: true,
       );
       expect(AudioPrefs.fromJson(p.toJson()), p);
       expect(AudioPrefs.fromJson(const AudioPrefs().toJson()), const AudioPrefs());
@@ -193,7 +196,7 @@ void main() {
     });
 
     test('remembered on: starts by itself', () {
-      r = Rig(prefs: const AudioPrefs(through: true));
+      r = Rig(prefs: const AudioPrefs(through: true, exclusiveOutputNoted: true));
       r.run(300);
       expect(r.pc.state, ThroughState.running);
       expect(r.saved, isEmpty);
@@ -315,6 +318,29 @@ void main() {
       expect(r.fake.last.exclusiveOutput, isTrue);
       expect(r.pc.st.playbackExclusive, isTrue);
       expect(r.pc.message, contains('float'), reason: 'shared mode gives the mix format');
+    });
+
+    test('exclusive output: a warning once, when it first plays (the default) or is turned on', () {
+      r = Rig(prefs: const AudioPrefs(through: true));
+      r.run(300);
+      expect(r.pc.st.playbackExclusive, isTrue);
+      expect(r.warns, [ThroughPc.exclusiveOutputNote]);
+      expect(r.saved.last.exclusiveOutputNoted, isTrue);
+      r.pc.setExclusiveOutput(false);
+      r.pc.setExclusiveOutput(true);
+      r.run(300);
+      expect(r.warns, hasLength(1), reason: 'once');
+      final noted = r.saved.last;
+      r.dispose();
+      r = Rig(prefs: noted);
+      r.run(300);
+      expect(r.warns, isEmpty, reason: 'remembered across runs');
+      r.dispose();
+      r = Rig(prefs: const AudioPrefs(through: true, exclusiveOutput: false));
+      r.run(300);
+      expect(r.warns, isEmpty, reason: 'shared: nothing to warn about');
+      r.pc.setExclusiveOutput(true);
+      expect(r.warns, [ThroughPc.exclusiveOutputNote], reason: 'turned on');
     });
 
     test('macOS: asks for permission, opens once allowed', () {

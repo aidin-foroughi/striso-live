@@ -123,6 +123,10 @@ static struct {
     volatile uint32_t cap_tid, play_tid, rt_cap, rt_play;
     volatile uint32_t jit_us, jit_every, jit_out, jit_n_cap, jit_n_play;
     volatile uint32_t tin_hz_bits, tin_amp_bits; /* sa_test_input: a sine instead of the null capture's silence */
+    volatile uint32_t vol_bits;                  /* the output's volume the callback applies (an exclusive output's), float */
+    volatile uint32_t vol_test_bits;             /* sa_test_output_volume, float; < 0 off */
+    float vol_prev;                              /* playback thread: the volume at the last block's end */
+    void* evol;                                  /* control thread: the exclusive output's endpoint volume */
     double tin_phase;                            /* capture thread */
     float* tin_buf;
     sa_evq ev_cap, ev_play; /* the callbacks' own events (real-time setup) */
@@ -545,6 +549,25 @@ static void playback_cb(ma_device* d, void* out, const void* in, ma_uint32 n) {
         sa_addu(&G.src_busy, 0xFFFFFFFFu); /* -1 */
         memset((float*)out + (size_t)got * d->playback.channels, 0, (size_t)(n - (ma_uint32)got) * d->playback.channels * sizeof(float));
     }
+    {
+        /* an exclusive output's system volume (the Windows mixer applies it to a shared one only),
+           ramped over the block when it moves */
+        const float vol = sa_ldf(&G.vol_bits), v0 = G.vol_prev;
+        if ((vol != 1.0f || v0 != 1.0f) && d->playback.channels == 2) {
+            float* o = (float*)out;
+            if (vol == v0) {
+                for (ma_uint32 i = 0; i < 2 * n; i++) o[i] *= vol;
+            } else {
+                const float step = (vol - v0) / (float)n;
+                for (ma_uint32 i = 0; i < n; i++) {
+                    const float g = v0 + step * (float)(i + 1);
+                    o[2 * i] *= g;
+                    o[2 * i + 1] *= g;
+                }
+            }
+        }
+        G.vol_prev = vol;
+    }
     if (sa_ld(&P.guard)) {
         /* digital silence, whatever the passthrough made (measurements on a real output) */
         float* o = (float*)out;
@@ -832,6 +855,11 @@ static void close_playback(int32_t state, int32_t err) {
         sa_wasapi_clock_close(P.wclock);
         P.wclock = NULL;
     }
+    if (G.evol) {
+        sa_endpoint_volume_close(G.evol);
+        G.evol = NULL;
+    }
+    sa_stf(&G.vol_bits, 1.0f);
     sa_st(&G.play_lost_evt, 0);
     sa_st(&G.play_tid, 0);
     sa_st(&G.rt_play, 0);
@@ -981,6 +1009,21 @@ static ma_result init_playback(const ma_device_id* id, ma_share_mode mode) {
     return ma_device_init(&G.ctx, &c, &G.play);
 }
 
+/* control thread: the volume the playback callback applies. An exclusive output's endpoint volume
+ * (what the Windows mixer would apply to a shared one; a read that fails keeps the last); on the
+ * null backend, sa_test_output_volume's for an output asked exclusive; else 1 */
+static void update_volume(void) {
+    float v = 1.0f;
+    if (G.play_open && G.evol && G.play.playback.shareMode == ma_share_mode_exclusive) {
+        const float r = sa_endpoint_volume_read(G.evol);
+        v = r >= 0 ? r : sa_ldf(&G.vol_bits);
+    } else if (G.play_open && G.backend == SA_BACKEND_NULL && (G.cur.exclusive & SA_EXCLUSIVE_OUTPUT)) {
+        const float t = sa_ldf(&G.vol_test_bits);
+        if (t >= 0) v = t;
+    }
+    if (v != sa_ldf(&G.vol_bits)) sa_stf(&G.vol_bits, v);
+}
+
 static void open_playback(void) {
     ma_device_id id;
     ma_device_info info;
@@ -1000,8 +1043,19 @@ static void open_playback(void) {
     ma_result r = MA_ERROR;
 #if defined(_WIN32)
     if ((G.cur.exclusive & SA_EXCLUSIVE_OUTPUT) && G.backend == SA_BACKEND_SYSTEM) {
-        r = init_playback(pid, ma_share_mode_exclusive); /* the device's own format and rate */
-        if (r != MA_SUCCESS) G.play_excl_result = r; /* MA_BUSY: another program holds it */
+        /* exclusive bypasses the Windows mixer and its volume: the callback applies the volume, so
+           an output whose volume cannot be read plays shared */
+        G.evol = sa_endpoint_volume_open(pid ? pid->wasapi : NULL);
+        if (!G.evol) {
+            G.play_excl_result = SA_EXCL_NO_VOLUME;
+        } else {
+            r = init_playback(pid, ma_share_mode_exclusive); /* the device's own format and rate */
+            if (r != MA_SUCCESS) G.play_excl_result = r; /* MA_BUSY: another program holds it */
+        }
+        if (r != MA_SUCCESS && G.evol) {
+            sa_endpoint_volume_close(G.evol);
+            G.evol = NULL;
+        }
     }
 #endif
     if (r != MA_SUCCESS) r = init_playback(pid, ma_share_mode_shared);
@@ -1044,6 +1098,8 @@ static void open_playback(void) {
         sa_stp(&G.pass, p);
     }
     sa_st(&G.play_lost_evt, 0);
+    update_volume();
+    G.vol_prev = sa_ldf(&G.vol_bits); /* no callback runs yet: the first block starts at the volume */
     r = ma_device_start(&G.play);
     if (r != MA_SUCCESS) {
         close_playback(SA_DEV_FAILED, SA_ERR_OPEN_PLAYBACK);
@@ -1274,6 +1330,7 @@ static void publish(void) {
     s.busy_playback_us = sa_ld(&P.busy_play);
     s.playback_clock = G.play_open ? (int32_t)sa_ld(&P.clock_ok) : 0;
     s.silence_guard = (int32_t)sa_ld(&P.guard);
+    s.playback_volume = sa_ldf(&G.vol_bits);
     ma_mutex_lock(&G.lock);
     s.event_seq = G.ev_seq;
     G.st = s;
@@ -1327,6 +1384,7 @@ static void control_main(void* arg) {
             else rec_stop(SA_REC_IDLE, SA_OK);
         }
         rec_service();
+        update_volume();
         drain_events();
         publish();
         sa_sleep_ms(G.cap_open ? 10 : 25);
@@ -1352,6 +1410,8 @@ SA_API int32_t sa_init(int32_t backend) {
     G.backend = backend == SA_BACKEND_NULL ? SA_BACKEND_NULL : SA_BACKEND_SYSTEM;
     G.t0_us = sa_now_us64();
     sa_stf(&G.gain_bits, 0.5f);
+    sa_stf(&G.vol_bits, 1.0f);
+    sa_stf(&G.vol_test_bits, -1.0f);
     G.cur.period = 0;
     G.rec_bits = 0;
     if (ma_mutex_init(&G.lock) != MA_SUCCESS) return SA_ERR_NO_CONTEXT;
@@ -1465,6 +1525,7 @@ SA_API void sa_get_status(sa_status* out) {
     out->capture_callbacks = sa_ld(&G.cap_callbacks);
     out->playback_callbacks = sa_ld(&G.play_callbacks);
     out->gain = sa_ldf(&G.gain_bits);
+    out->playback_volume = sa_ldf(&G.vol_bits);
     uint64_t now = sa_now_us64() - G.t0_us;
     out->now_lo = (uint32_t)now;
     out->now_hi = (uint32_t)(now >> 32);
@@ -1487,6 +1548,8 @@ SA_API void sa_test_jitter(int32_t max_late_us, int32_t every_n, int32_t output)
     sa_st(&G.jit_every, every_n > 0 ? (uint32_t)every_n : 0u);
     sa_st(&G.jit_out, output ? 1u : 0u);
 }
+
+SA_API void sa_test_output_volume(float volume) { sa_stf(&G.vol_test_bits, volume); }
 
 SA_API void sa_test_input(float hz, float amplitude) {
     if (hz > 0 && !G.tin_buf) G.tin_buf = (float*)calloc(2 * SA_SCRATCH, sizeof(float)); /* (kept for the process) */

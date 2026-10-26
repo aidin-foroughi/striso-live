@@ -245,7 +245,9 @@ final class SaStatus extends Struct {
   external int playback_clock;
   @Int32()
   external int silence_guard;
-  @Array(2)
+  @Float()
+  external double playback_volume;
+  @Array(1)
   external Array<Uint32> reserved3;
 }
 
@@ -357,6 +359,7 @@ class StrisoAudioLib {
   late final outputBusy = lib.lookupFunction<Int32 Function(Pointer<Utf8>), int Function(Pointer<Utf8>)>('sa_output_busy');
   late final getEvents = lib.lookupFunction<Int32 Function(Uint32, Pointer<SaEvent>, Int32), int Function(int, Pointer<SaEvent>, int)>('sa_get_events');
   late final testJitter = lib.lookupFunction<Void Function(Int32, Int32, Int32), void Function(int, int, int)>('sa_test_jitter');
+  late final testOutputVolume = lib.lookupFunction<Void Function(Float), void Function(double)>('sa_test_output_volume');
   late final init = lib.lookupFunction<Int32 Function(Int32), int Function(int)>('sa_init');
   late final shutdown = lib.lookupFunction<Void Function(), void Function()>('sa_shutdown');
   late final enumerate = lib.lookupFunction<Void Function(), void Function()>('sa_enumerate');
@@ -604,6 +607,7 @@ class NativeAudioBackend implements AudioBackend {
       busyCaptureUs: s.busy_capture_us,
       busyPlaybackUs: s.busy_playback_us,
       playbackClock: s.playback_clock != 0,
+      playbackVolume: s.playback_volume,
     );
   }
 
@@ -691,6 +695,10 @@ class NativeAudioBackend implements AudioBackend {
 
   /// Tests on the null backend: late callbacks (see sa_test_jitter).
   void testJitter(int maxLateUs, int everyN, {bool output = false}) => _l.testJitter(maxLateUs, everyN, output ? 1 : 0);
+
+  /// Tests on the null backend: an output asked exclusive plays as an exclusive one whose system
+  /// volume is [volume] (see sa_test_output_volume); negative: off.
+  void testOutputVolume(double volume) => _l.testOutputVolume(volume);
 
   @override
   String? documentsDir() {

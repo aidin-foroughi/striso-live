@@ -209,6 +209,10 @@ class AudioStatus {
   /// The output reports where it plays (Windows IAudioClock; Core Audio presentation times).
   final bool playbackClock;
 
+  /// The output volume the library applies: an exclusive output's system volume (Windows applies
+  /// it to a shared output only), 0 muted; 1 otherwise.
+  final double playbackVolume;
+
   const AudioStatus({
     this.initialised = false,
     this.configGen = 0,
@@ -295,6 +299,7 @@ class AudioStatus {
     this.busyCaptureUs = 0,
     this.busyPlaybackUs = 0,
     this.playbackClock = false,
+    this.playbackVolume = 1,
   });
 
   static const idle = AudioStatus();

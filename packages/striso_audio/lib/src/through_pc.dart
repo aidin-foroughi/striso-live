@@ -82,6 +82,10 @@ class AudioPrefs {
   /// when another program holds it. Off: always shared.
   final bool exclusiveOutput;
 
+  /// The one-time note on exclusive output (it takes the output from other programs; Striso Live
+  /// applies the system volume itself) was shown.
+  final bool exclusiveOutputNoted;
+
   /// What Auto learned, per output (AutoMemory as JSON, by [ThroughPc.outputKey]), and for the
   /// board's own buffer ([BoardBuffer.memoryKey]).
   final Map<String, AutoMemory> autoMemory;
@@ -97,6 +101,7 @@ class AudioPrefs {
     this.gainDb = -6,
     this.exclusive = true,
     this.exclusiveOutput = true,
+    this.exclusiveOutputNoted = false,
     this.autoMemory = const {},
     this.boardBuffer = auto,
   });
@@ -132,6 +137,7 @@ class AudioPrefs {
     double? gainDb,
     bool? exclusive,
     bool? exclusiveOutput,
+    bool? exclusiveOutputNoted,
     Map<String, AutoMemory>? autoMemory,
     int? boardBuffer,
   }) => AudioPrefs(
@@ -142,6 +148,7 @@ class AudioPrefs {
     gainDb: gainDb ?? this.gainDb,
     exclusive: exclusive ?? this.exclusive,
     exclusiveOutput: exclusiveOutput ?? this.exclusiveOutput,
+    exclusiveOutputNoted: exclusiveOutputNoted ?? this.exclusiveOutputNoted,
     autoMemory: autoMemory ?? this.autoMemory,
     boardBuffer: boardBuffer ?? this.boardBuffer,
   );
@@ -155,6 +162,7 @@ class AudioPrefs {
     'gainDb': gainDb,
     'exclusive': exclusive,
     'exclusiveOutput': exclusiveOutput,
+    if (exclusiveOutputNoted) 'exclusiveOutputNoted': true,
     if (autoMemory.isNotEmpty) 'auto': {for (final e in autoMemory.entries) e.key: e.value.toJson()},
     'boardBuffer': boardBuffer,
   };
@@ -182,6 +190,7 @@ class AudioPrefs {
       exclusive: v < 3 ? true : j['exclusive'] != false,
       // before 2 the output was shared unless asked: now exclusive on wired outputs unless turned off
       exclusiveOutput: v < 2 ? true : j['exclusiveOutput'] != false,
+      exclusiveOutputNoted: j['exclusiveOutputNoted'] == true,
       autoMemory: mem,
       boardBuffer: switch ((j['boardBuffer'] as num?)?.toInt()) {
         final int b when b >= 49 && b <= 256 => b,
@@ -200,13 +209,14 @@ class AudioPrefs {
       other.gainDb == gainDb &&
       other.exclusive == exclusive &&
       other.exclusiveOutput == exclusiveOutput &&
+      other.exclusiveOutputNoted == exclusiveOutputNoted &&
       other.boardBuffer == boardBuffer &&
       _sameMem(other.autoMemory, autoMemory);
 
   static bool _sameMem(Map<String, AutoMemory> a, Map<String, AutoMemory> b) => a.length == b.length && a.entries.every((e) => b[e.key] == e.value);
 
   @override
-  int get hashCode => Object.hash(through, input, output, period, gainDb, exclusive, exclusiveOutput, autoMemory.length);
+  int get hashCode => Object.hash(through, input, output, period, gainDb, exclusive, exclusiveOutput, exclusiveOutputNoted, autoMemory.length);
 }
 
 /// The board's own counters (console StcU), as the app parsed them; null fields: not reported.
@@ -290,6 +300,9 @@ class ThroughPc {
   final bool Function() boardOnUsb;
   final void Function(AudioPrefs)? onPrefs;
   final void Function(String)? log;
+
+  /// A warning for the user (a toast), as opposed to [log].
+  final void Function(String)? warn;
   final DateTime Function() _now;
 
   /// The folder recordings go to (created when needed).
@@ -353,6 +366,7 @@ class ThroughPc {
     bool Function()? boardOnUsb,
     this.onPrefs,
     this.log,
+    this.warn,
     this.recordingsDir,
     DateTime Function()? clock,
     this.tickEvery = const Duration(milliseconds: 50),
@@ -511,7 +525,22 @@ class ThroughPc {
   /// Frames per period, or [AudioPrefs.auto].
   void setPeriod(int frames) => _setPrefs(_prefs.copyWith(period: frames));
   void setExclusive(bool on) => _setPrefs(_prefs.copyWith(exclusive: on));
-  void setExclusiveOutput(bool on) => _setPrefs(_prefs.copyWith(exclusiveOutput: on));
+  void setExclusiveOutput(bool on) {
+    _setPrefs(_prefs.copyWith(exclusiveOutput: on));
+    if (on) _noteExclusiveOutput();
+  }
+
+  /// The one-time warning, when exclusive output is turned on or first plays (it is the default).
+  static const exclusiveOutputNote =
+      'Exclusive output: Striso Live has the output to itself (other programs cannot play to it) and applies the '
+      'Windows volume itself. Check the level before you play loud.';
+
+  void _noteExclusiveOutput() {
+    if (_prefs.exclusiveOutputNoted) return;
+    _setPrefs(_prefs.copyWith(exclusiveOutputNoted: true));
+    _log('audio: the exclusive output note shown once');
+    warn?.call(exclusiveOutputNote);
+  }
   void setGainDb(double db) => _setPrefs(_prefs.copyWith(gainDb: db.clamp(AudioPrefs.minDb, AudioPrefs.maxDb)));
 
   /// The device lists stay fresh while a picker shows them (from the next tick: this may be called
@@ -584,6 +613,7 @@ class ThroughPc {
     }
     if (!_ensureInit()) return;
     st = b.status();
+    if (st.playbackExclusive && st.playback == DevState.running) _noteExclusiveOutput();
     final devicesChanged = _devicesTick(t, want);
     _eventsTick(t);
 
@@ -1035,6 +1065,16 @@ class ThroughPc {
   /// MA_BUSY: another program holds the device.
   static const _maBusy = -17;
 
+  /// SA_EXCL_NO_VOLUME: the output's system volume could not be read (exclusive would bypass it).
+  static const _exclNoVolume = -1000;
+
+  /// Why an output asked exclusive plays shared.
+  String _sharedWhy() => switch (st.playbackExclResult) {
+    _maBusy => 'Shared output: another program holds it exclusively.',
+    _exclNoVolume => 'Shared output: its Windows volume could not be read, so it would play at full level exclusively.',
+    _ => 'Shared output: it would not open exclusively.',
+  };
+
   void _describe(bool applied) {
     String m;
     Tone tn;
@@ -1045,11 +1085,7 @@ class ThroughPc {
         case ThroughState.running:
           m = 'Playing the virtual Striso · ${st.playbackExclusive ? 'exclusive' : 'shared'} output';
           tn = Tone.ok;
-          if (_sent.exclusiveOutput && !st.playbackExclusive) {
-            hint = st.playbackExclResult == _maBusy
-                ? 'Shared output: another program holds it exclusively.'
-                : 'Shared output: it would not open exclusively.';
-          }
+          if (_sent.exclusiveOutput && !st.playbackExclusive) hint = _sharedWhy();
         case ThroughState.failed:
           m = st.playback == DevState.lost ? 'The output went away: trying again.' : 'The output would not open: trying again.';
           out = m;
@@ -1109,11 +1145,7 @@ class ThroughPc {
             out = st.playback == DevState.lost ? 'The output went away: trying again.' : 'The output would not open: trying again.';
             tn = Tone.problem;
           }
-          if (st.playback == DevState.running && _sent.exclusiveOutput && !st.playbackExclusive) {
-            hint = st.playbackExclResult == _maBusy
-                ? 'Shared output: another program holds it exclusively.'
-                : 'Shared output: it would not open exclusively.';
-          }
+          if (st.playback == DevState.running && _sent.exclusiveOutput && !st.playbackExclusive) hint = _sharedWhy();
         } else {
           m = 'Listening to the input (Through PC is off) · $fmt';
           tn = Tone.ok;
