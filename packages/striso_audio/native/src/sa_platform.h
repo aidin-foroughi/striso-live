@@ -68,6 +68,16 @@ int sa_wasapi_clock_read(void* clock, double rate, int64_t* pos_frames, int64_t*
 void sa_wasapi_clock_close(void* clock);
 int sa_output_sessions_active(const char* endpoint_id_utf8);
 
+/* Windows: the output endpoint's volume, for an exclusive stream (the Windows mixer, and so the
+ * system volume, does not touch one). open takes the endpoint's id (wide, miniaudio's
+ * ma_device_id.wasapi; NULL or "": the default output) and gives NULL when it cannot be read
+ * (and NULL elsewhere). read: the linear gain the app must apply for the stream to sound as a
+ * shared one at the same volume: 1 for what the device applies itself (a hardware volume or
+ * mute), 0 muted; -1 when it cannot be read. Open, read and close on one thread. */
+void* sa_endpoint_volume_open(const void* wasapi_id);
+float sa_endpoint_volume_read(void* h);
+void sa_endpoint_volume_close(void* h);
+
 /* macOS: AVAuthorizationStatus for audio (0..3), -1 elsewhere. */
 int sa_mic_status(void);
 /* macOS: shows the system prompt; the answer lands in sa_mic_status. */

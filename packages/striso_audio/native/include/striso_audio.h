@@ -124,6 +124,9 @@ typedef struct sa_event {
 } sa_event;
 
 /* Status, read with sa_get_status. Every field 4 bytes wide (no padding). */
+/* playback_excl_result: the output's system volume could not be read, so it plays shared */
+#define SA_EXCL_NO_VOLUME (-1000)
+
 typedef struct sa_status {
     int32_t api_version;      /* SA_API_VERSION */
     int32_t initialised;      /* sa_init succeeded */
@@ -183,7 +186,8 @@ typedef struct sa_status {
     int32_t playback_dev_min;
     int32_t playback_dev_default;
     int32_t playback_stream_latency;
-    int32_t playback_excl_result;   /* MA_BUSY (-17): another program holds the output */
+    int32_t playback_excl_result;   /* MA_BUSY (-17): another program holds the output; SA_EXCL_NO_VOLUME: its
+                                       system volume could not be read (exclusive would bypass it) */
     int32_t playback_transport;     /* SA_TRANSPORT_* of the open output */
     float in_ms, out_ms;      /* latency breakdown: input (buffer + reported), output (buffer + reported); ring_ms above */
     float margin_ms;          /* the ring target's extra margin after underruns */
@@ -206,7 +210,9 @@ typedef struct sa_status {
     uint32_t busy_capture_us, busy_playback_us; /* while probing: time spent in this library's callbacks (wraps) */
     int32_t playback_clock;       /* 1: the output reports where it plays (Windows IAudioClock; Core Audio presentation times) */
     int32_t silence_guard;
-    uint32_t reserved3[2];
+    float playback_volume;        /* the output volume this library applies: an exclusive output's system volume
+                                     (Windows applies it to a shared output only), 0 muted; 1 otherwise */
+    uint32_t reserved3[1];
 } sa_status;
 
 /* API 3: measurements. Timing marks of the device callbacks, for a host-side latency and glitch
@@ -296,6 +302,16 @@ SA_API void sa_request_mic(void);
  * comes up to max_late_us late (the callback sleeps). 0 turns it off. Ignored on the system backend. */
 SA_API void sa_test_jitter(int32_t max_late_us, int32_t every_n, int32_t output);
 
+/* Tests on the null backend only: the input delivers a sine of hz at amplitude (both channels)
+ * instead of the null capture device's silence, so the passthrough carries a known signal. hz 0:
+ * silence again. Ignored on the system backend. */
+SA_API void sa_test_input(float hz, float amplitude);
+
+/* Tests on the null backend only: an output asked exclusive behaves as an exclusive output whose
+ * system volume is volume (linear, 0..1; the library applies it, as it does a real one's). < 0
+ * (the default): off, the output plays at 1. */
+SA_API void sa_test_output_volume(float volume);
+
 /* Self-tests of the passthrough math, the resampler, the drift servo, the WAV writer and a
  * session on the null backend. Writes a report (UTF-8 lines) into report and its scratch files
  * into dir. Returns the number of failures. Must not run while the app uses the library. */
@@ -308,9 +324,12 @@ SA_API int32_t sa_selftest(const char* dir, char* report, int32_t report_size);
 SA_API int64_t sa_clock_us(void);
 SA_API int32_t sa_sizeof_mark(void);
 
-/* 1: the device callbacks record timing marks and copy what they carry into two taps (stereo,
- * float): the input as it arrives (which 0) and the output before the gain (which 1: the
- * passthrough's resampled signal, so a marker can be followed to the output even at gain 0).
+/* 1: the device callbacks record timing marks and copy what they carry into three taps (stereo,
+ * float): the input as it arrives (which 0), the output before the gain (which 1: the
+ * passthrough's resampled signal, so a marker can be followed to the output even at gain 0) and
+ * the output as the device gets it (which 2: every gain applied, the passthrough's or the
+ * source's, before the conversion to the device's sample format; the install gate,
+ * tool/audio_gate.py, compares builds by it).
  * About 2.7 s of each is kept; whatever is not read in time is dropped (probe_lost) and a tap that
  * overflowed stops until its device opens again. 0: off. */
 SA_API void sa_probe(int32_t on);

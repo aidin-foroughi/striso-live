@@ -415,11 +415,12 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
       boardOnUsb: () => (client != null && mode == Mode.striso) || session.lastPresent == true,
       onPrefs: (p) => store.set('audio', p.toJson()),
       log: (s) => log(s),
+      warn: (s) => toast(s, 'warn'),
       route: AudioRoute.off,
     );
     if (repaired != null) {
       log(repaired);
-      store.set('audio', audio.prefs.toJson()); // once: saved as version 3
+      store.set('audio', audio.prefs.toJson()); // once: saved as the current version
     }
     final mb = midiBackend ?? (audioBackend is NativeAudioBackend ? NativeMidiBackend.of(audioBackend.library) : null);
     if (mb != null) {

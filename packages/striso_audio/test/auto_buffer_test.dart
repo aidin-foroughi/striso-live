@@ -153,7 +153,7 @@ void main() {
 
     test('settles on the smallest clean size for the output and remembers it by device id', () {
       r = Rig(
-        prefs: const AudioPrefs(through: true),
+        prefs: const AudioPrefs(through: true, exclusiveOutput: true),
         setup: (f) {
           f.outputs = [const AudioDevice('Headphones (TBT200 Dock)', id: '{0.0.0.00000000}.{dock}', transport: AudioTransport.usb, isDefault: true)];
           f.stableFrom = {'': 128}; // the default output drops out below 128
@@ -161,7 +161,7 @@ void main() {
       );
       r.play(1);
       expect(r.fake.last.period, 256);
-      expect(r.fake.last.exclusiveOutput, isTrue, reason: 'a wired output: exclusive');
+      expect(r.fake.last.exclusiveOutput, isTrue, reason: 'turned on, a wired output: exclusive');
       r.play(24);
       expect(r.fake.last.period, 128);
       r.play(20.5);
@@ -251,7 +251,7 @@ void main() {
     });
 
     test('exclusive output held by another program: shared, with a quiet note', () {
-      r = Rig(prefs: const AudioPrefs(through: true), setup: (f) => f.exclusiveBusy = true);
+      r = Rig(prefs: const AudioPrefs(through: true, exclusiveOutput: true), setup: (f) => f.exclusiveBusy = true);
       r.play(1);
       expect(r.fake.last.exclusiveOutput, isTrue);
       expect(r.pc.st.playbackExclusive, isFalse);

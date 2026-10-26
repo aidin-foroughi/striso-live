@@ -4,6 +4,7 @@
 #include "striso_audio.h"
 
 #include <stdlib.h>
+#include <math.h>
 #include <string.h>
 
 /* ======================================================================== Windows */
@@ -39,6 +40,7 @@ void sa_sleep_ms(int ms) { Sleep((DWORD)(ms < 0 ? 0 : ms)); }
 #include <audioclient.h>
 #include <audiopolicy.h>
 #include <mmdeviceapi.h>
+#include <endpointvolume.h>
 
 /* the interface ids, here so no uuid library is needed */
 static const GUID sa_IID_IAudioClock = {0xCD63314F, 0x3FBA, 0x4A1B, {0x81, 0x2C, 0xEF, 0x96, 0x35, 0x87, 0x28, 0xE7}};
@@ -46,6 +48,7 @@ static const GUID sa_IID_IAudioSessionManager2 = {0x77AA99A0, 0x1BD6, 0x484F, {0
 static const GUID sa_IID_IAudioSessionControl2 = {0xBFB7FF88, 0x7239, 0x4FC9, {0x8F, 0xA2, 0x07, 0xC9, 0x50, 0xBE, 0x9C, 0x6D}};
 static const GUID sa_CLSID_MMDeviceEnumerator = {0xBCDE0395, 0xE52F, 0x467C, {0x8E, 0x3D, 0xC4, 0x57, 0x92, 0x91, 0x69, 0x2E}};
 static const GUID sa_IID_IMMDeviceEnumerator = {0xA95664D2, 0x9614, 0x4F35, {0xA7, 0x46, 0xDE, 0x8D, 0xB6, 0x36, 0x17, 0xE6}};
+static const GUID sa_IID_IAudioEndpointVolume = {0x5CDF2C82, 0x841E, 0x4546, {0x97, 0x22, 0x0C, 0xF7, 0x40, 0x78, 0x22, 0x9A}};
 
 /* WASAPI's QPC positions are QPC converted to 100 ns: the same clock as sa_now_us64 */
 uint64_t sa_device_time_us(uint64_t t) { return t / 10u; }
@@ -97,6 +100,68 @@ void sa_wasapi_clock_close(void* clock) {
     if (!w) return;
     IAudioClock_Release(w->clock);
     free(w);
+}
+
+typedef struct {
+    IAudioEndpointVolume* v;
+    DWORD hw;   /* ENDPOINT_HARDWARE_SUPPORT_*: what the device applies itself */
+    HRESULT ci; /* this helper's CoInitializeEx, undone on close */
+} sa_evol;
+
+void* sa_endpoint_volume_open(const void* wasapi_id) {
+    const wchar_t* id = (const wchar_t*)wasapi_id;
+    HRESULT ci = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    IMMDeviceEnumerator* en = NULL;
+    IMMDevice* dev = NULL;
+    IAudioEndpointVolume* v = NULL;
+    sa_evol* e = NULL;
+    if (FAILED(CoCreateInstance(&sa_CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL, &sa_IID_IMMDeviceEnumerator, (void**)&en))) goto done;
+    /* miniaudio's default output is the console role's */
+    if (FAILED(id && id[0] ? IMMDeviceEnumerator_GetDevice(en, id, &dev) : IMMDeviceEnumerator_GetDefaultAudioEndpoint(en, eRender, eConsole, &dev)))
+        goto done;
+    if (FAILED(IMMDevice_Activate(dev, &sa_IID_IAudioEndpointVolume, CLSCTX_ALL, NULL, (void**)&v)) || !v) goto done;
+    e = (sa_evol*)malloc(sizeof(sa_evol));
+    if (!e) goto done;
+    e->v = v;
+    e->hw = 0;
+    if (FAILED(IAudioEndpointVolume_QueryHardwareSupport(v, &e->hw))) e->hw = 0;
+    e->ci = ci;
+    v = NULL;
+done:
+    if (v) IAudioEndpointVolume_Release(v);
+    if (dev) IMMDevice_Release(dev);
+    if (en) IMMDeviceEnumerator_Release(en);
+    if (!e && SUCCEEDED(ci)) CoUninitialize();
+    return e;
+}
+
+float sa_endpoint_volume_read(void* h) {
+    sa_evol* e = (sa_evol*)h;
+    if (!e) return -1.0f;
+    float g = 1.0f;
+    if (!(e->hw & ENDPOINT_HARDWARE_SUPPORT_VOLUME)) {
+        /* the mixer attenuates a shared stream by the master level in dB (the slider's scalar is
+           its taper onto that range); at the slider's 0 it is silent */
+        float db = 0, scalar = 0;
+        if (FAILED(IAudioEndpointVolume_GetMasterVolumeLevel(e->v, &db)) ||
+            FAILED(IAudioEndpointVolume_GetMasterVolumeLevelScalar(e->v, &scalar)))
+            return -1.0f;
+        g = scalar <= 0 ? 0.0f : (db >= 0 ? 1.0f : powf(10.0f, db / 20.0f));
+    }
+    if (!(e->hw & ENDPOINT_HARDWARE_SUPPORT_MUTE)) {
+        BOOL mute = FALSE;
+        if (FAILED(IAudioEndpointVolume_GetMute(e->v, &mute))) return -1.0f;
+        if (mute) g = 0.0f;
+    }
+    return g;
+}
+
+void sa_endpoint_volume_close(void* h) {
+    sa_evol* e = (sa_evol*)h;
+    if (!e) return;
+    IAudioEndpointVolume_Release(e->v);
+    if (SUCCEEDED(e->ci)) CoUninitialize();
+    free(e);
 }
 
 static wchar_t* widen(const char* s);
@@ -425,6 +490,15 @@ int sa_wasapi_clock_read(void* clock, double rate, int64_t* pos_frames, int64_t*
     return 0;
 }
 void sa_wasapi_clock_close(void* clock) { (void)clock; }
+void* sa_endpoint_volume_open(const void* wasapi_id) {
+    (void)wasapi_id;
+    return NULL;
+}
+float sa_endpoint_volume_read(void* h) {
+    (void)h;
+    return -1.0f;
+}
+void sa_endpoint_volume_close(void* h) { (void)h; }
 int sa_output_sessions_active(const char* endpoint_id) {
     (void)endpoint_id;
     return -1;

@@ -97,6 +97,35 @@ void main() {
     dir.deleteSync(recursive: true);
   }, skip: skip);
 
+  test('exclusive output: the library applies the system volume (shared: Windows does)', () async {
+    final b = NativeAudioBackend.tryLoad(explicit: lib, backend: backendNull)!;
+    expect(b.init(), isTrue);
+    Future<AudioStatus> until(bool Function(AudioStatus) ok) async {
+      for (var i = 0; i < 400; i++) {
+        final s = b.status();
+        if (ok(s)) return s;
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      return b.status();
+    }
+
+    b.testOutputVolume(0.3);
+    var gen = b.configure(const AudioConfig(run: true, exclusiveOutput: true, outputOnly: true));
+    var s = await until((s) => s.configGen >= gen && s.playback == DevState.running && s.playbackVolume < 1);
+    expect(s.playbackVolume, closeTo(0.3, 1e-6));
+    b.testOutputVolume(0);
+    s = await until((s) => s.playbackVolume == 0);
+    expect(s.playbackVolume, 0, reason: 'muted, or the slider at 0');
+    gen = b.configure(const AudioConfig(run: true, outputOnly: true));
+    s = await until((s) => s.configGen >= gen && s.playback == DevState.running && s.playbackVolume == 1);
+    expect(s.playbackVolume, 1, reason: 'shared: the Windows mixer applies the volume');
+    gen = b.configure(AudioConfig.off);
+    s = await until((s) => s.configGen >= gen);
+    expect(s.playbackVolume, 1);
+    b.testOutputVolume(-1);
+    b.shutdown();
+  }, skip: skip);
+
   // Auto on the real library and its threads (the null backend wakes about every 10 ms, so its
   // periods differ little; what matters here: it tightens without a dropout on a clean system,
   // and backs off when the output's wake-ups come late beyond what the buffer bridges)

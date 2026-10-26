@@ -87,7 +87,15 @@ void main() {
     final b = AppController(options: const AppOptions(noUsb: true), store: Store(path), audioBackend: fake2);
     expect(
       b.audio.prefs,
-      const AudioPrefs(through: true, gainDb: -12, output: 'Headphones (USB)', period: 64, exclusive: false, exclusiveOutput: true),
+      const AudioPrefs(
+        through: true,
+        gainDb: -12,
+        output: 'Headphones (USB)',
+        period: 64,
+        exclusive: false,
+        exclusiveOutput: true,
+        exclusiveOutputNoted: true,
+      ),
     );
     for (var i = 0; i < 4; i++) {
       b.audio.tick();
