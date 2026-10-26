@@ -1,3 +1,9 @@
 # the tests share the native libraries of one process (a library unloaded in one would be gone
 # for the others): one test file at a time
 concurrency: 1
+
+# slow tests (minutes) are skipped by default; the install gate runs them:
+#   dart test -t slow --run-skipped
+tags:
+  slow:
+    skip: "slow (minutes): dart test -t slow --run-skipped"

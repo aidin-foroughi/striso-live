@@ -63,7 +63,10 @@ void main() {
       b.dispose();
     });
 
-    test('a write past what the console buffers goes through: in pieces, waiting while it drains', () async {
+    // slow (about 74 s: the board reads its console at about 64 KB/s): `dart test -t slow
+    // --run-skipped`; the
+    // install gate runs it. The refuse-and-resume logic itself: console_write_test.dart.
+    test('a write past what the console buffers goes through: in pieces, waiting while it drains', tags: ['slow'], () async {
       // 4.5 MB of zero bytes (no command): past the 4 MB the board buffers, so a piece is refused
       // (sv_console_write's 0) until the board has read some; the transport waits and goes on
       final big = Uint8List(4608 * 1024);

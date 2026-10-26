@@ -11,6 +11,29 @@ import 'package:striso_core/striso_core.dart';
 
 import 'board.dart';
 
+/// Writes [length] bytes with [writeFrom] (VirtualBoard.consoleWrite from an offset: how far it
+/// got, -1 when the board is gone). A piece the board's console can't hold now is written again
+/// after [retry], as the board drains; [stall] without progress is an error. False: the board is
+/// gone.
+Future<bool> writeAll(
+  int Function(int from) writeFrom,
+  int length, {
+  Duration stall = const Duration(seconds: 10),
+  Duration retry = const Duration(milliseconds: 2),
+}) async {
+  var off = 0;
+  final waited = Stopwatch()..start();
+  while (true) {
+    final n = writeFrom(off);
+    if (n < 0) return false;
+    if (n >= length) return true;
+    if (n > off) waited.reset();
+    off = n;
+    if (waited.elapsed > stall) throw StateError('the virtual board\'s console took nothing for ${stall.inSeconds} s');
+    await Future<void>.delayed(retry);
+  }
+}
+
 class VirtualBoardTransport implements Transport {
   final VirtualBoard board;
   final Duration poll;
@@ -62,25 +85,13 @@ class VirtualBoardTransport implements Transport {
     if (!_lost.isCompleted) _lost.complete(UsbError.unplugged);
   }
 
-  /// How long a write waits for the board's console to take more (it reads in real time).
-  static const writeStall = Duration(seconds: 10);
-
   @override
   Future<void> write(Uint8List bytes) async {
     if (!_open) throw StateError('not connected');
-    var off = 0;
-    final waited = Stopwatch()..start();
-    while (true) {
-      final n = board.consoleWrite(bytes, off);
-      if (n < 0) {
-        _gone();
-        throw UsbError.unplugged;
-      }
-      if (n >= bytes.length) return;
-      if (n > off) waited.reset();
-      off = n;
-      if (waited.elapsed > writeStall) throw StateError('the virtual board\'s console took nothing for ${writeStall.inSeconds} s');
-      await Future<void>.delayed(const Duration(milliseconds: 2)); // its buffer is full: it drains as the board reads
+    final ok = await writeAll((from) => board.consoleWrite(bytes, from), bytes.length);
+    if (!ok) {
+      _gone();
+      throw UsbError.unplugged;
     }
   }
 
