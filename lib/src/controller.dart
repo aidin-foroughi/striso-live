@@ -1317,7 +1317,10 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
       if (_traceClock == null || _traceClock!.elapsedMilliseconds > 60000) _trace('connect', start: true);
       c.trace = (l) => _trace(l);
     }
-    c.onStream = (src, id, v, n) => live.apply(src, id, v, n, clockMs());
+    c.onStream = (src, id, v, n) {
+      if (src == Src.midi && midiMonitor) logKind(midiMonitorLine(id, v, n), LogKind.out);
+      live.apply(src, id, v, n, clockMs());
+    };
     c.qErrors.listen((e) {
       final list = params[e.target]?.params ?? const <Param>[];
       final p = list.where((q) => q.index == e.index).firstOrNull;
@@ -1379,6 +1382,8 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
           if (same()) await refreshTuning();
           // the board's presets after the lists (a firmware without them answers nothing)
           if (same()) await refreshBoardPresets();
+          // the dials the board lets the console set (a firmware without StcT answers nothing)
+          if (same()) await refreshDials();
         })
         .whenComplete(() {
           if (same()) {
@@ -1412,6 +1417,8 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     heroes = null;
     boardState = null;
     _stateCount = null;
+    midiMonitor = false;
+    dials = null;
     boardPresets = null;
     lastOpen = null;
     engineReport = null;
@@ -2327,6 +2334,80 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     if (id == 63) toast('All notes off');
     notifyListeners();
     return true;
+  }
+
+  // the settings dials from the app (StcT, doc/dials_console.md) -----------------------------------
+
+  /// The dials the board lets the console set, with their ranges, as it lists them (StcT 255);
+  /// null: not read, or a firmware without StcT.
+  List<DialInfo>? dials;
+
+  Future<void> refreshDials() async {
+    final c = client;
+    if (c == null) return;
+    final l = await c.listDials();
+    if (!identical(c, client)) return;
+    dials = l;
+    notifyListeners();
+  }
+
+  /// A dial's value as the board reports it (StcY, the dial's name is its field).
+  double? dialValue(DialInfo d) => double.tryParse(boardState?.fields[d.name] ?? '');
+
+  /// Turns a dial (StcT): the board clamps it to its range and answers with the value it took;
+  /// StcY is read again. Null when it refused or did not answer.
+  Future<double?> setDial(DialInfo d, double value) async {
+    final c = client;
+    if (c == null || !canSend) {
+      toast(connecting ? 'Connecting…' : 'Connect first: the dials are the board\'s', 'warn');
+      return null;
+    }
+    final v = await c.setDial(d.id, value);
+    if (!identical(c, client)) return null;
+    if (v == null) {
+      toast('The board did not take ${d.name}', 'warn');
+      log('StcT ${d.id}: refused or no reply', LogKind.err);
+    } else {
+      log('StcT ${d.name} $v');
+    }
+    _applyState(await c.getState());
+    notifyListeners();
+    return v;
+  }
+
+  // the MIDI the board gets (StcM / Stcm), shown in the console as it reports it ----------------
+
+  /// The board's MIDI monitor is on: every MIDI message the firmware gets is logged.
+  bool midiMonitor = false;
+
+  /// The monitor on (StcM: the stream and the monitor) or off (Stcm).
+  Future<void> setMidiMonitor(bool on) async {
+    final c = client;
+    if (c == null || !canSend) {
+      toast(connecting ? 'Connecting…' : 'Connect first: the monitor is the board\'s', 'warn');
+      return;
+    }
+    await c.send(commandChar(on ? 'M' : 'm'));
+    midiMonitor = on;
+    log(on ? 'MIDI monitor on (StcM): the MIDI the board gets' : 'MIDI monitor off (Stcm)');
+    notifyListeners();
+  }
+
+  /// A monitor message in words: the board sends the channel and the status nibble with the two
+  /// data bytes (running status expanded, real time dropped).
+  static String midiMonitorLine(int channel, List<int> v, int n) {
+    final s = n > 0 ? v[0] : 0, a = n > 1 ? v[1] : 0, b = n > 2 ? v[2] : 0;
+    final what = switch (s) {
+      0x8 => 'note off $a velocity $b',
+      0x9 => 'note on $a velocity $b',
+      0xA => 'key pressure $a $b',
+      0xB => 'control $a = $b',
+      0xC => 'program $a',
+      0xD => 'channel pressure $a',
+      0xE => 'pitch bend ${(a | b << 7) - 8192}',
+      _ => 'status ${s.toRadixString(16)} $a $b',
+    };
+    return 'MIDI in · ch $channel · $what';
   }
 
   /// When the indicator led was last made to pulse by an app action (ms, app clock).

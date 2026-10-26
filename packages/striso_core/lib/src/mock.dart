@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'dials.dart';
 import 'layout.dart';
 import 'playable.dart';
 import 'presets.dart';
@@ -499,6 +500,13 @@ class MockBoard implements PlayableBoard {
   /// StcW or the preset commands.
   final bool stockFirmware;
 
+  /// Whether it answers StcT (the settings dials from the console; firmware mod-dials).
+  bool answersDials = true;
+
+  /// The dials' values as StcY shows them.
+  int dialVolume = 90, dialRate = 1, dialBend = 48, dialChannel = 2, dialVoices = 10;
+  double dialSustain = 0.188, dialFine = 0;
+
   /// The preset store (doc/presets_console.md): off answers "store off" to the user's presets;
   /// the user's presets by id, as stored (the text byte for byte), the next id, and how many may
   /// be kept.
@@ -577,6 +585,8 @@ class MockBoard implements PlayableBoard {
           if (n == 0 || (n >= 49 && n <= 256)) _print('usb audio target $usbAudioTarget frames (${usbAudioTarget * 1000000 ~/ 48000} us)\r\n');
         } else if (_rxCmd == 'W') {
           _select(p[0] | p[1] << 8);
+        } else if (_rxCmd == 'T') {
+          _dial(p[0], ByteData.sublistView(Uint8List.fromList(p.sublist(1, 5))).getFloat32(0, Endian.little));
         } else if (_rxCmd == PresetCodes.text) {
           _presetText(p[0] | p[1] << 8);
         } else if (_rxCmd == PresetCodes.delete) {
@@ -689,6 +699,10 @@ class MockBoard implements PlayableBoard {
           _print('$l\r\n');
         }
       }
+    } else if (!stockFirmware && answersDials && ch == 'T') {
+      _rxNeed = 5;
+      _rxCmd = 'T';
+      _rxPayload.clear();
     } else if (!stockFirmware && ch == PresetCodes.list) {
       _presetList();
     } else if (!stockFirmware && (ch == PresetCodes.text || ch == PresetCodes.delete || ch == PresetCodes.open)) {
@@ -836,6 +850,50 @@ class MockBoard implements PlayableBoard {
     }
     final (e, p) = voiceKeys[key]!;
     _print('A ok $key ${e ?? '-'} ${p ?? '-'}\r\n');
+  }
+
+  // StcT as the firmware has it: the list, or a dial clamped to its range and steps
+  void _dial(int d, double v) {
+    if (d == dialListId) {
+      for (final l in const [
+        'T dial 0 ch 1 16 1',
+        'T dial 1 voices 1 15 1',
+        'T dial 2 bend values 12 24 48 96',
+        'T dial 3 vol 0 127 1',
+        'T dial 4 sustain 0.000 1.000 0.001',
+        'T dial 5 rate 1 15 1',
+        'T dial 6 fine -100.00 100.00 3.125',
+        'T end',
+      ]) {
+        _print('$l\r\n');
+      }
+      return;
+    }
+    if (v.isNaN || d > 6) return _print('T err $d\r\n');
+    int i(num lo, num hi) => v.round().clamp(lo, hi).toInt();
+    switch (d) {
+      case 0:
+        dialChannel = i(1, 16);
+        _print('T ch $dialChannel\r\n');
+      case 1:
+        dialVoices = v.round().clamp(1, 16 - (dialChannel - 1) < 15 ? 16 - (dialChannel - 1) : 15).toInt();
+        _print('T voices $dialVoices\r\n');
+      case 2:
+        dialBend = [12, 24, 48, 96].reduce((a, b) => (v - b).abs() < (v - a).abs() ? b : a);
+        _print('T bend $dialBend\r\n');
+      case 3:
+        dialVolume = i(0, 127);
+        _print('T vol $dialVolume\r\n');
+      case 4:
+        dialSustain = (v * 1000).round().clamp(0, 1000) / 1000;
+        _print('T sustain ${dialSustain.toStringAsFixed(3)}\r\n');
+      case 5:
+        dialRate = i(1, 15);
+        _print('T rate $dialRate\r\n');
+      case 6:
+        dialFine = (v * 0.32).round().clamp(-32, 32) / 0.32;
+        _print('T fine ${dialFine.toStringAsFixed(2)}\r\n');
+    }
   }
 
   // the factory presets: the voice entries, by engine number (its order in the voice list) and
@@ -1133,9 +1191,9 @@ class MockBoard implements PlayableBoard {
   String _stateLine() {
     String f3(double v) => v.toStringAsFixed(3);
     final body =
-        'voice=$voice midi=$midiMode ch=${midiMode == 'mpe' ? 2 : 1} voices=10 bend=48 tuning=$tuning '
-        'fine=${(noteOffset * 100).toStringAsFixed(2)} transpose=0.000 pres=${f3(touch[0])} velo=${f3(touch[1])} '
-        'tilt=${f3(touch[2])} bendsens=${f3(touch[3])} thres=${f3(touch[4])} vol=90 sustain=0.188 rate=1 '
+        'voice=$voice midi=$midiMode ch=$dialChannel voices=$dialVoices bend=$dialBend tuning=$tuning '
+        'fine=${(noteOffset * 100 + dialFine).toStringAsFixed(2)} transpose=0.000 pres=${f3(touch[0])} velo=${f3(touch[1])} '
+        'tilt=${f3(touch[2])} bendsens=${f3(touch[3])} thres=${f3(touch[4])} vol=$dialVolume sustain=${f3(dialSustain)} rate=$dialRate '
         'alt=${(controlsDown[3]) != 0 ? 1 : 0} porta=0 flip=0 led=00AA00 updown=0000 legato=$legato';
     final snap = '$body ${values.join(',')} ${keyFactors.join(',')} $voiceKeys';
     if (snap != _stateSeen) {

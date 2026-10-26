@@ -82,6 +82,8 @@ class SetupTab extends StatelessWidget {
                 const SizedBox(height: Space.xxl),
                 AudioSection(ctl),
                 const SizedBox(height: Space.xl),
+                MidiOutSection(ctl),
+                const SizedBox(height: Space.xl),
                 if (c.maxWidth >= 1100) ...[MotionRow(ctl), const SizedBox(height: Space.l), FirmwareRow(ctl)],
                 const SizedBox(height: Space.m),
                 Align(
@@ -646,6 +648,128 @@ class MotionRow extends StatelessWidget {
       SizedBox(height: 72, child: MotionView(ctl)),
     ],
   );
+}
+
+/// MIDI out as the board has it (StcY): its mode, the channels and the bend range, the volume,
+/// sustain and message rate; the mode switched with its settings keys (StcX's MIDI switches,
+/// pressed over USB and read back). The dials are set on the instrument.
+class MidiOutSection extends StatelessWidget {
+  final AppController ctl;
+  const MidiOutSection(this.ctl, {super.key});
+  @override
+  Widget build(BuildContext context) {
+    final st = ctl.boardState;
+    final modes = [
+      for (final e in ctl.settingsLayout.keys.entries)
+        if (e.value.group == SettingsGroup.midi && e.value.switchable) e,
+    ];
+    final mode = st?.midi;
+    final current = modes.where((e) => e.value.short.toLowerCase() == mode).map((e) => e.key).firstOrNull ?? -1;
+    String? channels;
+    if (st != null) {
+      final ch = st.channel, n = st.voices, bend = st.bend;
+      channels = [
+        if (mode == 'mpe' && n != null && ch != null) '$n voices from channel $ch' else if (ch != null) 'channel $ch',
+        if (mode == 'mpe' && bend != null) 'pitch bend $bend semitones',
+      ].join(' · ');
+    }
+    final rest = st == null
+        ? null
+        : [
+            if (st.volume != null) 'volume ${st.volume}',
+            if (st.sustain != null) 'sustain ${st.sustain!.toStringAsFixed(2)}',
+            if (st.rate != null) 'a message every ${st.rate} ms',
+          ].join(' · ');
+    return Column(
+      key: const Key('midi-out'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Micro('MIDI out'),
+        const SizedBox(height: Space.xs),
+        if (st == null || modes.isEmpty)
+          Text(ctl.connected ? 'This firmware does not report its MIDI settings.' : 'Connect to see the board\'s MIDI settings.', style: ui(TypeSize.body, color: Pal.text2))
+        else ...[
+          Seg<int>(
+            items: [for (final e in modes) (e.key, e.value.short, e.value.title)],
+            value: current,
+            keys: {for (final e in modes) e.key: Key('midi-mode-${e.value.short.toLowerCase()}')},
+            onChanged: (k) => k == current ? null : ctl.pressSettingsKey(k),
+          ),
+          if (ctl.dials != null && ctl.dials!.isNotEmpty) ...[
+            const SizedBox(height: Space.s),
+            for (final d in ctl.dials!) _DialRow(ctl, d),
+          ] else if (channels != null && channels.isNotEmpty) ...[
+            const SizedBox(height: Space.xs),
+            Text('${modes.where((e) => e.key == current).map((e) => e.value.short).firstOrNull ?? mode} · $channels', key: const Key('midi-out-channels'), style: ui(TypeSize.body)),
+          ],
+          if (ctl.dials == null || ctl.dials!.isEmpty) ...[
+            if (rest != null && rest.isNotEmpty) Text(rest, key: const Key('midi-out-rest'), style: ui(TypeSize.body, color: Pal.text2)),
+            Text('The channels, bend range, volume and rate are dials: Settings + tilt on the instrument.', style: ui(TypeSize.small, color: Pal.text3)),
+          ],
+        ],
+      ],
+    );
+  }
+}
+
+/// A settings dial as a slider in the board's range and steps (StcT's list): its value is the
+/// board's (StcY); a drag sends the value at its end (StcT) and shows what the board took.
+class _DialRow extends StatefulWidget {
+  final AppController ctl;
+  final DialInfo d;
+  const _DialRow(this.ctl, this.d);
+  @override
+  State<_DialRow> createState() => _DialRowState();
+}
+
+/// How the dials read (the board names them by their StcY fields).
+const _dialLabels = {'ch': 'Channel', 'voices': 'MPE voices', 'bend': 'Bend range', 'vol': 'Volume', 'sustain': 'Sustain', 'rate': 'Rate', 'fine': 'Fine tune'};
+const _dialUnits = {'bend': ' st', 'rate': ' ms', 'fine': ' ¢'};
+
+class _DialRowState extends State<_DialRow> {
+  double? _drag;
+
+  @override
+  Widget build(BuildContext context) {
+    final d = widget.d, ctl = widget.ctl;
+    final values = d.values;
+    final board = ctl.dialValue(d);
+    // a slider's position: the value itself, or its index among the dial's values
+    double pos(double v) => values == null ? v.clamp(d.min, d.max) : values.indexWhere((x) => x >= v - 1e-6).clamp(0, values.length - 1).toDouble();
+    double valueAt(double p) => values == null ? p : values[p.round().clamp(0, values.length - 1)];
+    final shown = _drag ?? board;
+    final decimals = d.step > 0 && d.step < 1 ? 3 : (d.step % 1 != 0 ? 2 : 0);
+    final text = shown == null ? '–' : '${shown.toStringAsFixed(decimals)}${_dialUnits[d.name] ?? ''}';
+    return SizedBox(
+      height: Sizes.row + 4,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 84,
+            child: Text(_dialLabels[d.name] ?? d.name, style: ui(TypeSize.body, color: Pal.text2)),
+          ),
+          Expanded(
+            child: Slider(
+              key: Key('dial-${d.name}'),
+              value: shown == null ? (values == null ? d.min : 0) : pos(shown),
+              min: values == null ? d.min : 0,
+              max: values == null ? d.max : (values.length - 1).toDouble(),
+              divisions: d.divisions,
+              onChanged: board == null || !ctl.canSend ? null : (p) => setState(() => _drag = valueAt(p)),
+              onChangeEnd: (p) async {
+                await ctl.setDial(d, valueAt(p));
+                if (mounted) setState(() => _drag = null);
+              },
+            ),
+          ),
+          SizedBox(
+            width: 64,
+            child: Text(text, key: Key('dial-${d.name}-value'), textAlign: TextAlign.right, style: ui(TypeSize.body, color: _drag != null ? Pal.text3 : Pal.text1)),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// The firmware that plays: the Striso's version, or Virtual's build (its title and the version
