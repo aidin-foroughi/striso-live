@@ -250,10 +250,12 @@ typedef struct {
     double jitter_us;      /* small jitter on everything */
     double seconds, settle;
     int exclusive_out;     /* the device runs dry when a wake-up is a period late */
+    uint32_t preroll;      /* frames the output takes at once when it opens (a shared WASAPI output fills
+                              its whole buffer before it starts), before its periods */
 } rt_cfg;
 
 typedef struct {
-    uint32_t ring_empty, ring_empty_after, glitches, glitches_after, in_late, out_late, overruns, resyncs, retargets;
+    uint32_t ring_empty, ring_empty_after, glitches, glitches_after, in_late, out_late, overruns, resyncs, retargets, clamps;
     uint32_t cause_input, cause_output;
     double latency_ms, ring_ms, target_ms, margin_ms;
     double max_d2;
@@ -289,6 +291,14 @@ static void simulate_rt(const rt_cfg* c, rt_res* r) {
     int have_delivery = 0;
     double t_delivery = 0, t_last_in = 0, t_last_out = 0;
     int delivery_frames = 0;
+    if (c->preroll) {
+        /* the device's own buffer filled at once, in callbacks of a period, before it plays */
+        float* pre = (float*)malloc(sizeof(float) * 2 * c->pp);
+        for (uint32_t done = 0; done < c->preroll; done += c->pp)
+            sa_pass_pull(&p, pre, c->preroll - done < c->pp ? c->preroll - done : c->pp, (uint32_t)(t_out_nom * 1e6), 1.0f);
+        free(pre);
+        t_out_nom += c->pp / fs;
+    }
     while (t_out_nom < c->seconds) {
         /* the next output wake-up (late or not) */
         double t_out = t_out_nom + urand(&seed) * c->jitter_us * 1e-6;
@@ -385,6 +395,7 @@ static void simulate_rt(const rt_cfg* c, rt_res* r) {
     r->overruns = sa_ld(&p.overruns);
     r->resyncs = sa_ld(&p.resyncs);
     r->retargets = sa_ld(&p.retargets);
+    r->clamps = sa_ld(&p.clamps);
     r->latency_ms = lat_n ? lat_sum / lat_n : 0;
     r->ring_ms = lat_n ? ring_sum / lat_n : 0;
     r->target_ms = lat_n ? tgt_sum / lat_n : 0;
@@ -411,6 +422,28 @@ static void test_bursts(void) {
         snprintf(what, sizeof(what), "bursts, %s: %u ring-empty (%u after %.0f s), %u overruns, %u resyncs; latency %.2f ms (ring %.2f, target %.2f, margin %.2f), max step %.4f",
                  cases[i].name, r.ring_empty, r.ring_empty_after, cases[i].settle, r.overruns, r.resyncs, r.latency_ms, r.ring_ms, r.target_ms, r.margin_ms, r.max_d2);
         check(r.ring_empty == 0 && r.overruns == 0 && r.resyncs == 0 && r.max_d2 < 0.01, what);
+    }
+}
+
+/* The start of a shared output (2026-10-26 on the user's machine, every launch: the servo at its
+ * limit for about 8 s, then a dropout): WASAPI's shared mode fills the device's whole buffer (three
+ * periods) in one burst before it plays. That burst must not size the ring: it only fills the
+ * device, and the ring's target planned for it falls after the start, leaving the servo to drain
+ * the difference at its limit (and overshoot). The exclusive input of the Striso (3 ms, 144 frames). */
+static void test_preroll(void) {
+    rt_cfg cases[] = {
+        /* name, ppm, batch, in_split, pp, out_split, in_late_p, out_late_p, late min, max, jitter, s, settle, excl, preroll */
+        {"shared output, 480-frame periods, its 1440-frame buffer filled at the start", 40, 3, 1, 480, 1, 0, 0, 0, 0, 150, 30, 0, 0, 1440},
+        {"shared output, 480-frame periods, no pre-roll", 40, 3, 1, 480, 1, 0, 0, 0, 0, 150, 30, 0, 0, 0},
+        {"exclusive output, 144-frame periods, one period filled at the start", -30, 3, 1, 144, 1, 0, 0, 0, 0, 150, 30, 0, 1, 144},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        rt_res r;
+        simulate_rt(&cases[i], &r);
+        char what[400];
+        snprintf(what, sizeof(what), "start, %s: %u servo-limit reports, %u ring-empty, %u resyncs, %u retargets; target %.2f ms, latency %.2f ms",
+                 cases[i].name, r.clamps, r.ring_empty, r.resyncs, r.retargets, r.target_ms, r.latency_ms);
+        check(r.clamps == 0 && r.ring_empty == 0 && r.resyncs == 0, what);
     }
 }
 
@@ -897,6 +930,7 @@ SA_API int32_t sa_selftest(const char* dir, char* report, int32_t report_size) {
     test_drift();
     test_glitches();
     test_bursts();
+    test_preroll();
     test_late();
     test_sweep();
     test_device_min();

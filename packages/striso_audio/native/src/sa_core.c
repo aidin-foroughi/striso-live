@@ -136,6 +136,15 @@ uint32_t sa_timing_cb(sa_timing* t, uint32_t frames, uint32_t now) {
     /* the burst before is complete; this callback starts the next */
     uint32_t gap = now - t->start_us;
     if (gap == 0) gap = 1;
+    if (t->preroll) {
+        /* an output's first burst fills its device's buffer before it plays (a shared WASAPI output:
+           three periods at once): not a take of its playing, nor an interval */
+        t->preroll = 0;
+        t->start_us = t->end_us = now;
+        t->frames = frames;
+        sa_st(&t->st_burst_max, frames);
+        return 0;
+    }
     float fb = (float)t->frames;
     t->burst_s = t->bursts ? t->burst_s + 0.05 * (fb - t->burst_s) : fb;
     sa_wmax_put(&t->burst_w, fb, now);
@@ -231,6 +240,7 @@ int sa_pass_init(sa_pass* p, double fs_in, double fs_out, uint32_t in_hint) {
     rs_reset(p);
     p->last_block = in_hint;
     p->in_hint = in_hint > 0 ? in_hint : 128;
+    p->tout.preroll = 1;
     p->gain_s = -1; /* first pull takes the gain as it is */
     p->min_slack = 1e9;
     /* start with room for the servo to find the clocks' drift; stable playing gives it back */
@@ -593,7 +603,7 @@ void sa_pass_pull(sa_pass* p, float* out, uint32_t frames, uint32_t now_us, floa
        bursts are often larger than its usual ones */
     if (!p->running || (uint32_t)(now_us - p->stream_us) < 2000000u) {
         double mx = sa_wmax_get(&p->tout.burst_w);
-        if (p->tout.frames > mx) mx = p->tout.frames;
+        if (!p->tout.preroll && p->tout.frames > mx) mx = p->tout.frames; /* (not the pre-roll under way) */
         if (mx > ob) ob = mx;
     }
     if (p->out_hint > ob) ob = p->out_hint;

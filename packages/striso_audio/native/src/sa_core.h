@@ -111,6 +111,8 @@ typedef struct sa_timing {
     double burst_s;         /* typical burst size (frames, smoothed) */
     uint32_t max_gap_us;    /* largest interval since the start */
     uint32_t last_gap_us;
+    int preroll;            /* the first burst is the device filling its own buffer before it plays (an
+                               output's): it counts for nothing (sa_pass_init sets it for the output) */
     sa_wmax gap_w, burst_w; /* the largest interval and burst over the last half minute */
     /* published */
     volatile uint32_t st_nominal_us, st_max_gap_us, st_recent_gap_us, st_burst, st_burst_max;

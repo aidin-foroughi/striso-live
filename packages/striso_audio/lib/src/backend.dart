@@ -359,7 +359,7 @@ class AudioEvent {
           ? 'dropout: output late, ${_ms(a)} ms between wake-ups (typical ${_ms(b)} ms): more than the device buffer bridges'
           : 'output late: ${_ms(a)} ms between wake-ups (typical ${_ms(b)} ms), within the device buffer',
     Ev.resync => 'dropout: the ring was too full after a stall, $a frames cut',
-    Ev.servoLimit => 'drift servo at its limit (${a > 0 ? '+' : ''}$a ppm)',
+    Ev.servoLimit => 'drift servo at its limit (${a > 0 ? '+' : ''}$a ppm; the ring ${b.abs()} frames ${b >= 0 ? 'over' : 'under'} its target)',
     Ev.target => 'ring target ${c != 0 ? 'tighter' : 'looser'}: $b -> $a frames',
     Ev.stream => 'playing: ring target $a frames',
     Ev.open => '${a != 0 ? 'input' : 'output'} open: $b frames per wake-up${c != 0 ? ', exclusive' : ', shared'}',
