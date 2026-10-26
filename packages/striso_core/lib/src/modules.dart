@@ -4,10 +4,12 @@
 // after the built-in engines from the next start. The app sends the package's bytes and shows what
 // the firmware says; it reads nothing of a package itself.
 //
-//   Stci 's' <length u32 LE>           m begin ok <tag> <free>, or m err <reason>
-//   then the package's bytes           m <bytes> <crc32> every 4 KB, then
+//   Stci 's' <length u32 LE> <bytes>   m begin ok <tag> <free> (or m err <reason>), then
+//                                      m <bytes> <crc32> every 4 KB, then
 //                                      m ok <slot> <id> <version> <abi>, or m err <reason>
-//                                      (a stall of 2 s: m err timeout)
+//                                      (bytes that stop for the console's 100 ms gap: m err
+//                                      timeout); a refused upload's bytes are taken and dropped,
+//                                      none read as a command
 //   Stco                               slot <k> empty | partial
 //                                      slot <k> <id> <version> <abi> <bytes> ok | disabled: <reason>
 //                                      slot end
@@ -21,11 +23,14 @@ class ModuleCodes {
 
 Uint8List _cmd(String code, List<int> payload) => Uint8List.fromList([0x53, 0x74, 0x63, code.codeUnitAt(0), ...payload]);
 
-/// Stci into a slot for a package of [length] bytes; the bytes go once the firmware has said
-/// `m begin ok` (a refused begin leaves the console reading commands, so they are never sent
-/// then).
-Uint8List moduleInstallCommand(int length) =>
-    _cmd(ModuleCodes.install, [0x73, length & 0xff, (length >> 8) & 0xff, (length >> 16) & 0xff, (length >> 24) & 0xff]);
+/// Stci into a slot, the package's bytes after it, in one go (the console's upload stream).
+Uint8List moduleInstallCommand(List<int> package) {
+  final n = package.length;
+  return Uint8List.fromList([
+    ..._cmd(ModuleCodes.install, [0x73, n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >> 24) & 0xff]),
+    ...package,
+  ]);
+}
 
 Uint8List moduleSlotsCommand() => _cmd(ModuleCodes.slots, const []);
 

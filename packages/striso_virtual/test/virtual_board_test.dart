@@ -459,7 +459,7 @@ void main() {
           dir.deleteSync(recursive: true);
         } catch (_) {}
       }
-    }, timeout: const Timeout(Duration(minutes: 6))); // Virtual's console takes a package at about 1 KB/s
+    }, timeout: const Timeout(Duration(minutes: 2)));
   });
 }
 

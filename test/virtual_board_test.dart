@@ -501,7 +501,7 @@ void main() {
       }
       expect(ctl.moduleSlots!.map((s) => s.state).toSet(), {SlotState.empty});
       final own = ctl.voices.length;
-      expect(await run(tester, ctl.installAndAddEngine(pcPkg!), seconds: 300, step: 5), isTrue, reason: ctl.moduleNote?.text);
+      expect(await run(tester, ctl.installAndAddEngine(pcPkg!), seconds: 120, step: 5), isTrue, reason: ctl.moduleNote?.text);
       await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
       final slot = ctl.moduleSlots!.where((s) => s.holdsEngine).single;
       expect(slot.state, SlotState.ok);
@@ -510,7 +510,7 @@ void main() {
       expect(ctl.voiceName == slot.id || ctl.voiceName.startsWith('${slot.id}:'), isTrue, reason: 'its first voice (${ctl.voiceName})');
       expect(File('${dir.path}${sep}virtual${sep}module_store.bin').existsSync(), isTrue, reason: 'kept in the data folder');
       if (armPkg != null) {
-        expect(await run(tester, ctl.installAndAddEngine(armPkg), seconds: 300, step: 5), isFalse);
+        expect(await run(tester, ctl.installAndAddEngine(armPkg), seconds: 120, step: 5), isFalse);
         expect(ctl.moduleNote!.error, isTrue);
         expect(ctl.moduleNote!.text, startsWith('sine is not on Virtual: '));
       }
@@ -525,7 +525,7 @@ void main() {
         } catch (_) {}
       });
     },
-    timeout: const Timeout(Duration(minutes: 12)), // Virtual's console takes a package at about 1 KB/s
+    timeout: const Timeout(Duration(minutes: 3)),
   );
 
   // the board's sound presets on the real firmware (mod-presets, doc/presets_console.md): what

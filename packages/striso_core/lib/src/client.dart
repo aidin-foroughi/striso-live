@@ -360,28 +360,19 @@ class StrisoClient {
   /// Puts an engine package into a slot (Stci): its bytes as they are, the firmware's progress
   /// ([onProgress]: bytes it has, of the package's) checked against what was sent (zlib crc32 at
   /// each line), then its slot or its reason. It waits as long as the progress lines keep coming
-  /// ([stall] between two at most; the firmware gives up after 2 s without bytes): Virtual's
-  /// console takes a package at about 1 KB/s.
+  /// ([stall] between two at most; the board takes about 64 KB/s, the slot's erase first).
   Future<ModuleInstall> installModule(List<int> package, {void Function(int bytes, int total)? onProgress, Duration stall = const Duration(seconds: 20)}) async {
     final total = package.length;
-    final b = await request(moduleInstallCommand(total), (l, s) {
-      final m = parseModuleLine(l);
-      if (m is ModuleBegin || m is ModuleError) {
-        s['r'] = m;
-        return Take.done;
-      }
-      return Take.no;
-    }, timeout: const Duration(seconds: 2));
-    final begin = b.state['r'];
-    if (begin is ModuleError) return ModuleInstall(error: begin.reason.isEmpty ? 'refused' : begin.reason);
-    if (begin is! ModuleBegin) return const ModuleInstall(error: 'no answer: this firmware has no engine slots');
     String? mismatch;
     final r = await request(
-      Uint8List.fromList(package),
+      moduleInstallCommand(package),
       (l, s) {
         final m = parseModuleLine(l);
         if (m == null) return Take.no;
         switch (m) {
+          case ModuleBegin():
+            s['begin'] = m;
+            return Take.more;
           case ModuleProgress():
             if (m.bytes > total || crc32(package, end: m.bytes) != m.crc) mismatch ??= 'the bytes arrived changed (at ${m.bytes} of $total)';
             onProgress?.call(m.bytes, total);
@@ -389,7 +380,7 @@ class StrisoClient {
           case ModuleDone() || ModuleError():
             s['end'] = m;
             return Take.done;
-          case ModuleBegin() || ModuleErased():
+          case ModuleErased():
             return Take.no;
         }
       },
@@ -397,12 +388,14 @@ class StrisoClient {
       timeout: Duration(milliseconds: 30000 + total * 4),
       idle: stall,
     );
+    final begin = r.state['begin'] as ModuleBegin?;
     final end = r.state['end'];
     if (end is ModuleDone) {
       onProgress?.call(total, total);
-      return ModuleInstall(done: end, tag: begin.tag, error: mismatch);
+      return ModuleInstall(done: end, tag: begin?.tag, error: mismatch);
     }
-    if (end is ModuleError) return ModuleInstall(error: end.reason.isEmpty ? 'refused' : end.reason, tag: begin.tag);
+    if (end is ModuleError) return ModuleInstall(error: end.reason.isEmpty ? 'refused' : end.reason, tag: begin?.tag);
+    if (begin == null) return const ModuleInstall(error: 'no answer: this firmware has no engine slots');
     return ModuleInstall(error: mismatch ?? 'the board stopped answering', tag: begin.tag);
   }
 

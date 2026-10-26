@@ -255,8 +255,8 @@ void main() {
       expect((await c.listModuleSlots())!.first.state, SlotState.empty);
       await c.disconnect();
 
-      // a firmware without a store refuses before any byte is sent; one without slots at all
-      // (the stock firmware) does not answer
+      // a firmware without a store refuses, and takes the bytes without reading any as a
+      // command; one without slots at all (the stock firmware) does not answer
       final n = StrisoClient(MockTransport(board: MockBoard()));
       await n.connect();
       expect((await n.installModule(pkg)).error, 'no module store');
@@ -290,7 +290,7 @@ void main() {
       expect(parseModuleLine('slot end'), isNull);
       expect(crc32('123456789'.codeUnits), 0xCBF43926, reason: "zlib's check value");
       expect(crc32('456789'.codeUnits, crc: crc32('123'.codeUnits)), 0xCBF43926, reason: 'resumable');
-      expect(moduleInstallCommand(70000), [0x53, 0x74, 0x63, 0x69, 0x73, 0x70, 0x11, 0x01, 0x00]);
+      expect(moduleInstallCommand(List.filled(70000, 7)).sublist(0, 10), [0x53, 0x74, 0x63, 0x69, 0x73, 0x70, 0x11, 0x01, 0x00, 7]);
       expect(moduleEraseCommand(3), [0x53, 0x74, 0x63, 0x7a, 0x33]);
     });
 

@@ -599,26 +599,32 @@ class MockBoard implements PlayableBoard {
             _print('m erased $k\r\n');
           }
         } else if (_rxCmd == ModuleCodes.install && _moduleLength == null) {
-          // the 5-byte payload: then the package (after a refusal the console reads commands again,
-          // as the firmware's)
+          // the 5-byte payload: then the package, taken whole even when refused (none of it read
+          // as a command), as the firmware's
           final dest = p[0], n = p[1] | p[2] << 8 | p[3] << 16 | p[4] << 24;
           _rxPayload.clear();
+          String? refused;
           if (dest != 0x73) {
-            _print('m err dest ${String.fromCharCode(dest)}: only \'s\' (a slot)\r\n');
+            refused = 'dest ${String.fromCharCode(dest)}: only \'s\' (a slot)';
           } else if (modules == null) {
-            _print('m err no module store\r\n');
+            refused = 'no module store';
           } else if (n == 0) {
-            _print('m err empty\r\n');
+            refused = 'empty';
+          }
+          if (refused != null) {
+            _print('m err $refused\r\n');
           } else {
             final m = modules!;
             final free = MockModuleStore.count - m.slots.length;
             _print('m begin ok mock $free\r\n');
-            _moduleLength = n;
-            _rxNeed = n;
           }
+          _moduleRefused = refused != null;
+          _moduleLength = n;
+          _rxNeed = n;
+          if (n == 0) _moduleLength = null;
         } else if (_rxCmd == ModuleCodes.install) {
           _moduleLength = null;
-          _moduleInstall(List<int>.of(p));
+          if (!_moduleRefused) _moduleInstall(List<int>.of(p));
         } else if (_rxCmd == PresetCodes.upload && _upKind == null) {
           // the 5-byte payload: then the bytes (an upload)
           _upKind = p[0];
@@ -782,6 +788,7 @@ class MockBoard implements PlayableBoard {
   }
 
   int? _moduleLength;
+  bool _moduleRefused = false;
 
   void _moduleInstall(List<int> bytes) {
     final m = modules!;
