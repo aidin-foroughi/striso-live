@@ -537,7 +537,7 @@ class PlayToolbar extends StatelessWidget {
                 if (ctl.colour != KeyColour.off && wide) ...[const SizedBox(width: Space.s), ColourLegend(ctl)],
                 const SizedBox(width: Space.s),
                 TuningChip(ctl),
-                if (ctl.legato != null) ...[const SizedBox(width: Space.m), LegatoToggle(ctl)],
+                if (ctl.mono != null) ...[const SizedBox(width: Space.m), MonoToggle(ctl)],
                 if (t != 0) ...[
                   const SizedBox(width: Space.s),
                   Tooltip(
@@ -634,31 +634,30 @@ class ColourLegend extends StatelessWidget {
 /// The active tuning, named from the board's N reply ("31-TET", "custom: fifth 696.8 ¢"), and the
 /// fine tune as a reference pitch ("A = 432.0 Hz (−32 ¢)"). The menu holds the pitch reference
 /// and, in the demo, the simulated board's tunings.
-/// Mono legato, as the board reports it (StcY legato=): the toggle presses settings key 9 over
+/// Mono, as the board reports it (StcY mono=): the toggle presses settings key 9 over
 /// USB (StcK) and the state is read back; nothing is kept in the app. Shown only when the firmware
 /// reports the field.
-class LegatoToggle extends StatelessWidget {
+class MonoToggle extends StatelessWidget {
   final AppController ctl;
-  const LegatoToggle(this.ctl, {super.key});
+  const MonoToggle(this.ctl, {super.key});
 
   @override
   Widget build(BuildContext context) {
-    final f = ctl.settingsLayout[AppController.legatoKey];
-    final on = ctl.legato == true;
-    final can = ctl.legatoSwitchable;
+    final f = ctl.settingsLayout[AppController.monoKey];
+    final on = ctl.mono == true;
+    final can = ctl.monoSwitchable;
     return Tooltip(
-      message: '${f?.title ?? 'Mono legato'}: ${f?.detail ?? 'one internal voice, a key pressed while one is held slurs to it'}'
-          '${can ? '' : '\n${ctl.sendHint}'}',
+      message: '${f?.title ?? 'Mono'}${can ? '' : '\n${ctl.sendHint}'}',
       waitDuration: const Duration(milliseconds: 700),
       child: Opacity(
         opacity: can ? 1 : 0.5,
         child: Toggle(
-          key: const Key('legato-toggle'),
+          key: const Key('mono-toggle'),
           value: on,
-          label: 'Legato',
+          label: f?.short ?? 'Mono',
           onChanged: (_) {
             if (can) {
-              ctl.toggleLegato();
+              ctl.toggleMono();
             } else {
               ctl.toast(ctl.sendHint, 'warn');
             }

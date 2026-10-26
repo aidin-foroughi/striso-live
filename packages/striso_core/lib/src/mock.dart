@@ -412,10 +412,10 @@ const mockSettingsLayoutReply = [
   'X keys 42',
   'X 0 switch midi - - k MPE|MPE MIDI mode|number of MPE voices, 1 to 15',
   'X 2 switch midi - - k Poly|Normal MIDI mode (all notes on one channel)|MIDI channel, 1 to 16',
-  'X 4 switch midi - - k Mono|Mono (glissando) MIDI mode|MIDI channel, 1 to 16',
+  'X 4 switch midi - - k MIDI mono|Mono (glissando) MIDI mode|MIDI channel, 1 to 16',
   'X 6 dial sens - - - Bend|Pitch bend sensitivity (sideways tilt)|0 to 4, steps of 1/4',
   'X 8 dial sens - - - Tilt|Tilt (forward/back) sensitivity|0 to 3, steps of 1/8',
-  'X 9 switch layout - - k Legato|Mono legato: one internal voice, a key pressed while one is held slurs to it, its release returns to the held one (on/off)|on/off',
+  'X 9 switch layout - - k Mono|Mono: one internal voice; each note slurs or re-attacks as played|on/off',
   'X 11 action layout - - - Flip|Flip the layout 180 degrees (with the glissando button also held: debug mode on/off)|',
   'X 13 switch voice brass 402800 k brass|Voice: brass|step through its presets (the up/down leds show which)',
   'X 15 switch voice trumpet 003030 k tpt|Voice: trumpet|step through its presets (the up/down leds show which)',
@@ -458,8 +458,8 @@ const mockSettingsLayoutReply = [
 final SettingsLayout mockSettingsLayout = parseSettingsLayout(mockSettingsLayoutReply)!;
 
 class MockBoard implements PlayableBoard {
-  /// Mono legato, as the firmware reports it (StcY legato=) and switches it (StcK on key 9).
-  int legato = 0;
+  /// Mono, as the firmware reports it (StcY mono=) and switches it (StcK on key 9).
+  int mono = 0;
 
   final String firmware;
   final _entries = <_Entry>[];
@@ -502,7 +502,7 @@ class MockBoard implements PlayableBoard {
   String _rxCmd = 'Q';
   final _rxPayload = <int>[];
 
-  /// MIDI mode as the settings keys set it: 'mpe', 'poly' or 'mono'; the loaded settings preset.
+  /// MIDI mode as the settings keys set it: 'mpe', 'poly' or 'midimono'; the loaded settings preset.
   String midiMode = 'mpe';
   int settingsPreset = 1;
   final remembered = <String, int>{};
@@ -1299,7 +1299,7 @@ class MockBoard implements PlayableBoard {
         'voice=$voice midi=$midiMode ch=$dialChannel voices=$dialVoices bend=$dialBend tuning=$tuning '
         'fine=${(noteOffset * 100 + dialFine).toStringAsFixed(2)} transpose=0.000 pres=${f3(touch[0])} velo=${f3(touch[1])} '
         'tilt=${f3(touch[2])} bendsens=${f3(touch[3])} thres=${f3(touch[4])} vol=$dialVolume sustain=${f3(dialSustain)} rate=$dialRate '
-        'alt=${(controlsDown[3]) != 0 ? 1 : 0} porta=0 flip=0 led=00AA00 updown=0000 legato=$legato';
+        'alt=${(controlsDown[3]) != 0 ? 1 : 0} porta=0 flip=0 led=00AA00 updown=0000 mono=$mono';
     final snap = '$body ${values.join(',')} ${keyFactors.join(',')} $voiceKeys';
     if (snap != _stateSeen) {
       if (_stateSeen.isNotEmpty) _stateCount++;
@@ -1315,11 +1315,11 @@ class MockBoard implements PlayableBoard {
     final f = mockSettingsLayout[id];
     if (f == null || !f.switchable) return false;
     if (id == 9) {
-      legato = 1 - legato;
+      mono = 1 - mono;
       return true;
     }
     if (f.group == SettingsGroup.midi) {
-      midiMode = const {0: 'mpe', 2: 'poly', 4: 'mono'}[id]!;
+      midiMode = const {0: 'mpe', 2: 'poly', 4: 'midimono'}[id]!;
       return true;
     }
     if (f.group == SettingsGroup.tuning) {

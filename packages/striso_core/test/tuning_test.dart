@@ -264,7 +264,7 @@ void main() {
       expect(await c.pressSettingsKey(34), (ok: true, id: 34)); // back to 12-TET
       expect(board.tuning, 0);
       expect(await c.pressSettingsKey(4), (ok: true, id: 4));
-      expect(board.midiMode, 'mono');
+      expect(board.midiMode, 'midimono');
       expect(await c.pressSettingsKey(37), (ok: true, id: 37));
       expect(board.settingsPreset, 2);
       expect(await c.pressSettingsKey(24), (ok: true, id: 24)); // bowed

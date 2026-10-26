@@ -667,7 +667,8 @@ class MidiOutSection extends StatelessWidget {
         if (e.value.group == SettingsGroup.midi && e.value.switchable) e,
     ];
     final mode = st?.midi;
-    final current = modes.where((e) => e.value.short.toLowerCase() == mode).map((e) => e.key).firstOrNull ?? -1;
+    // StcY's midi= names a mode by its key's title, lower case, without spaces ("MIDI mono": midimono)
+    final current = modes.where((e) => _modeWord(e.value.short) == mode).map((e) => e.key).firstOrNull ?? -1;
     String? channels;
     if (st != null) {
       final ch = st.channel, n = st.voices, bend = st.bend;
@@ -695,7 +696,7 @@ class MidiOutSection extends StatelessWidget {
           Seg<int>(
             items: [for (final e in modes) (e.key, e.value.short, e.value.title)],
             value: current,
-            keys: {for (final e in modes) e.key: Key('midi-mode-${e.value.short.toLowerCase()}')},
+            keys: {for (final e in modes) e.key: Key('midi-mode-${_modeWord(e.value.short)}')},
             onChanged: (k) => k == current ? null : ctl.pressSettingsKey(k),
           ),
           if (ctl.dials != null && ctl.dials!.isNotEmpty) ...[
@@ -717,6 +718,9 @@ class MidiOutSection extends StatelessWidget {
 
 /// A settings dial as a slider in the board's range and steps (StcT's list): its value is the
 /// board's (StcY); a drag sends the value at its end (StcT) and shows what the board took.
+/// A MIDI mode's word in StcY (`midi=`): its settings key's title, lower case, without spaces.
+String _modeWord(String title) => title.toLowerCase().replaceAll(' ', '');
+
 class _DialRow extends StatefulWidget {
   final AppController ctl;
   final DialInfo d;

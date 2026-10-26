@@ -270,9 +270,11 @@ https://aka.ms/vs/17/release/vc_redist.x64.exe in the browser. `Clear quarantine
 ## 7b. The instrument's play controls
 
 The Play toolbar carries what the board reports about how it plays: the key and scale (the
-app's), the label mode, the tuning chip (StcN) and, when the firmware reports it, **Legato**:
-mono legato as StcY's `legato=0|1`. The toggle presses settings key 9 over USB (StcK) and the
-state is read back; the app keeps nothing. Without the field there is no toggle.
+app's), the label mode, the tuning chip (StcN) and, when the firmware reports it, **Mono**: one
+internal voice, each note slurring or re-attacking as played, as StcY's `mono=0|1`. The toggle is
+labelled with settings key 9's title (StcX), presses that key over USB (StcK), and the state is
+read back; the app keeps nothing. Without the field there is no toggle. (The MIDI mode of key 4
+is "MIDI mono", StcY `midi=midimono`.)
 
 ## 8. Firmware-side requests
 
