@@ -184,14 +184,15 @@ void main() {
     for (final f in ['T', 'S', 'D']) {
       expect(find.descendant(of: find.byKey(const Key('colour-legend')), matching: find.text(f)), findsOneWidget);
     }
+    // the demo stops playing (its notes let go of)
+    final b = ctl.demoBoard!..autoplay = false;
+    await runFor(tester, 300);
     ctl.setColour(KeyColour.chord);
     await settle(tester, 300);
     // nothing held: the degree legend
     expect(find.descendant(of: find.byKey(const Key('colour-legend')), matching: find.text('7')), findsOneWidget);
     expect(find.descendant(of: find.byKey(const Key('colour-legend')), matching: find.text('R')), findsNothing);
     // G7 held: root, third, fifth, seventh
-    final b = ctl.demoBoard!..autoplay = false;
-    await runFor(tester, 100);
     for (final id in [41, 45, 25, 22]) {
       b.press(id, pres: 0.5, strike: 0.3);
     }

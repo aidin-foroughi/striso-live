@@ -477,7 +477,21 @@ class MockBoard implements PlayableBoard {
   final keyOffset = Float64List(61);
   MockConfig? _config;
   bool streaming = false;
-  bool autoplay, motionEnabled;
+  bool motionEnabled;
+  bool _autoplay;
+
+  /// The demo's own playing. Switched off, the notes it holds are let go of (they would be held
+  /// for ever otherwise: only it releases them), so what is played by hand is all that sounds.
+  bool get autoplay => _autoplay;
+  set autoplay(bool on) {
+    if (_autoplay && !on) {
+      for (final e in keys.entries) {
+        if (!e.value.manual && e.value.pres > 0) release(e.key);
+      }
+    }
+    _autoplay = on;
+  }
+
   int idleFrames;
   Duration listDelay;
   final math.Random random;
@@ -530,14 +544,15 @@ class MockBoard implements PlayableBoard {
     this.modules,
     this.stockFirmware = false,
     this.presetStore = true,
-    this.autoplay = true,
+    bool autoplay = true,
     this.motionEnabled = true,
     this.idleFrames = 500,
     MockConfig? config,
     this.listDelay = Duration.zero,
     this.firmware = 'striso_control_strisoboard_v2.2.4-voices-mock',
     math.Random? random,
-  }) : random = random ?? math.Random() {
+  }) : random = random ?? math.Random(),
+       _autoplay = autoplay {
     for (var k = 0; k < _engines.length; k++) {
       final e = _engines[k];
       if (e.presets == null) {
