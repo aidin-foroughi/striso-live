@@ -411,7 +411,7 @@ void main() {
   // edits saved through its drive with saveTouch, and the key still holds it after the restart; a
   // board without the module shows the key missing.
   final candidates = [for (final id in ['reed', 'clarinet', 'flute', 'doublereed', 'sine']) ?_package(id)];
-  test('voice keys: an engine from a slot on a key, kept by Save to Striso, missing without it', skip: skip ?? (candidates.isEmpty ? 'no package of an engine the build lacks (reed.nsc, clarinet.nsc, ... in \$STRISO_PACKAGE_DIR)' : null), () async {
+  test('voice keys: an engine from a slot on a key, kept by Save to Striso, missing without it', skip: skip ?? (candidates.isEmpty ? 'no package of an engine the build lacks (reed.awvapkg, clarinet.awvapkg, ... in \$STRISO_PACKAGE_DIR)' : null), () async {
     final dir = Directory.systemTemp.createTempSync('sv-keys');
     final store = '${dir.path}${Platform.pathSeparator}modules.bin';
     var b = VirtualBoard(moduleStore: store)..startRealtime();
@@ -504,7 +504,7 @@ void main() {
 
 }
 
-/// An engine package with this PC's image by its engine's id (`<id>.nsc`): from
+/// An engine package with this PC's image by its engine's id (`<id>.awvapkg`): from
 /// $STRISO_PACKAGE_DIR, or the firmware build's test packages.
 String? _package(String id) {
   final fw = Platform.environment['STRISO_FW_DIR'];
@@ -514,7 +514,7 @@ String? _package(String id) {
     if (fw != null) for (final b in ['host-virtual', 'host']) '$fw/build/$b/virtual/tests/packages',
     if (libDir != null) '${File(libDir).parent.path}/tests/packages',
   ]) {
-    final f = File('$d/$id.nsc');
+    final f = File('$d/$id.awvapkg');
     if (f.existsSync()) return f.absolute.path;
   }
   return null;
@@ -532,7 +532,7 @@ String? _package(String id) {
   ];
   String? pc;
   for (final d in dirs) {
-    final f = File('$d/accordion.nsc');
+    final f = File('$d/accordion.awvapkg');
     if (f.existsSync()) {
       pc = f.absolute.path;
       break;
@@ -541,7 +541,7 @@ String? _package(String id) {
   if (pc == null) return null;
   String? arm;
   for (final d in [?Platform.environment['STRISO_ARM_PACKAGE_DIR'], if (fw != null) '$fw/build/firmware/modules']) {
-    final f = File('$d/sine.nsc');
+    final f = File('$d/sine.awvapkg');
     if (f.existsSync()) {
       arm = f.absolute.path;
       break;
