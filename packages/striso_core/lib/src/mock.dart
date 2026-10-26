@@ -412,7 +412,7 @@ const mockSettingsLayoutReply = [
   'X keys 42',
   'X 0 switch midi - - k MPE|MPE MIDI mode|number of MPE voices, 1 to 15',
   'X 2 switch midi - - k Poly|Normal MIDI mode (all notes on one channel)|MIDI channel, 1 to 16',
-  'X 4 switch midi - - k MIDI mono|Mono (glissando) MIDI mode|MIDI channel, 1 to 16',
+  'X 4 switch midi - - k Mono|MIDI mono: the Mono (glissando) MIDI mode|MIDI channel, 1 to 16',
   'X 6 dial sens - - - Bend|Pitch bend sensitivity (sideways tilt)|0 to 4, steps of 1/4',
   'X 8 dial sens - - - Tilt|Tilt (forward/back) sensitivity|0 to 3, steps of 1/8',
   'X 9 switch layout - - k Mono|Mono: one internal voice; each note slurs or re-attacks as played|on/off',

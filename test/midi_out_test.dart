@@ -19,8 +19,8 @@ void main() {
     await settle(tester, 400);
     expect(find.text('MIDI OUT'), findsOneWidget);
     Btn seg(String m) => tester.widget<Btn>(find.byKey(Key('midi-mode-$m')));
-    expect(seg('mpe').pressed, isTrue, reason: 'StcY midi=mpe');
-    expect(seg('poly').pressed, isFalse);
+    expect(seg('0').pressed, isTrue, reason: 'StcY midi=mpe');
+    expect(seg('2').pressed, isFalse);
     // a firmware without StcT: the values as text, the dials set on the instrument
     for (var i = 0; i < 40 && ctl.dials == null; i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
@@ -32,15 +32,15 @@ void main() {
     expect(find.text('MPE · 10 voices from channel 2 · pitch bend 48 semitones'), findsOneWidget);
     expect(find.text('volume 90 · sustain 0.19 · a message every 1 ms'), findsOneWidget);
     // Poly: the board's settings key 2, pressed over USB; what the board then reports
-    await tester.ensureVisible(find.byKey(const Key('midi-mode-poly')));
-    await tester.tap(find.byKey(const Key('midi-mode-poly')));
+    await tester.ensureVisible(find.byKey(const Key('midi-mode-2')));
+    await tester.tap(find.byKey(const Key('midi-mode-2')));
     for (var i = 0; i < 40 && ctl.boardState?.midi != 'poly'; i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
       await settle(tester, 50);
     }
     expect(ctl.boardState?.midi, 'poly');
     await settle(tester, 200);
-    expect(seg('poly').pressed, isTrue);
+    expect(seg('2').pressed, isTrue);
     expect(find.text('Poly · channel 2'), findsOneWidget, reason: 'the channel stays (the firmware keeps it)');
     await finish(tester, ctl);
   });
