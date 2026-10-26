@@ -101,9 +101,10 @@ class EngineChoice {
   final LoadedEngine? loaded;
 
   /// Why it cannot be ticked (null: it can); [note]: something the firmware said that does not
-  /// keep it out (some of its voices did not fit).
-  final String? reason, note;
-  const EngineChoice(this.engine, {required this.ticked, this.loaded, this.reason, this.note});
+  /// keep it out (some of its voices did not fit); [detail]: the firmware's detail of a refusal
+  /// (for a library the system would not load, the system's own message).
+  final String? reason, note, detail;
+  const EngineChoice(this.engine, {required this.ticked, this.loaded, this.reason, this.note, this.detail});
   bool get choosable => reason == null;
   String get title => engine.title;
   String get path => engine.path;
@@ -122,7 +123,7 @@ class VirtualSetup {
 String engineRefusal(RefusedEngine r) {
   final d = r.detail.split(' ');
   return switch (r.reason) {
-    'library' => r.detail.isEmpty ? 'does not load' : 'does not load: ${r.detail}',
+    'library' => 'the system would not load it',
     'entry' || 'component' => 'not an engine component',
     'abi' when d.length == 2 => 'built for engine ABI ${d[0]}; this build loads ${d[1]}',
     'voices' when d.length == 2 => 'plays ${d[0]} voices; the board needs ${d[1]}',
@@ -1188,6 +1189,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
             loaded: thisRun ? _loadedOf(e.path) : null,
             reason: reason,
             note: valid && refusal.r.reason == 'full' ? engineRefusal(refusal.r) : null,
+            detail: valid && refusal.r.detail.isNotEmpty ? refusal.r.detail : null,
           );
         }(),
     ];

@@ -149,7 +149,12 @@ PopupMenuItem<String> _engineItem(AppController ctl, EngineChoice e) {
             e.ticked ? Icons.check_box_outlined : Icons.check_box_outline_blank,
             key: Key('engine-${e.engine.name}-${e.ticked ? 'on' : 'off'}'),
             size: 16,
-            color: e.choosable ? (e.ticked ? Pal.text1 : Pal.text3) : Pal.text3.withValues(alpha: 0.5),
+            // a loaded engine in the colour the firmware gives it (Stce)
+            color: !e.choosable
+                ? Pal.text3.withValues(alpha: 0.5)
+                : l != null
+                ? Color(0xff000000 | l.color)
+                : (e.ticked ? Pal.text1 : Pal.text3),
           ),
         ),
         Expanded(
@@ -167,7 +172,7 @@ PopupMenuItem<String> _engineItem(AppController ctl, EngineChoice e) {
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 260),
           child: Tooltip(
-            message: right,
+            message: e.detail == null ? right : '$right\n${e.detail}',
             child: Text(
               right,
               maxLines: 1,

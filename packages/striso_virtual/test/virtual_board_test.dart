@@ -437,18 +437,19 @@ void main() {
 }
 
 /// An awva engine component library (`<name>.dll` / `.dylib` / `.so`) and what its manifest
-/// (`<name>.json`) says: its id and presets. The sax if one is built, else the first with two
-/// presets or more.
+/// (`<name>.json`) says: its id and presets. The firmware build's own components first (the same
+/// engine ABI as the build), then awva builds; in each, the sax if there is one, else the first
+/// with two presets or more.
 (String, String, List<String>)? _component() {
   final ext = Platform.isWindows ? 'dll' : (Platform.isMacOS ? 'dylib' : 'so');
   final fw = Platform.environment['STRISO_FW_DIR'];
   final libDir = Platform.environment['STRISO_VIRTUAL_LIB'];
   final roots = [
     ?Platform.environment['STRISO_ENGINE_DIR'],
-    for (final w in ['awva-sax', 'awva-clarinet', 'awva-flute', 'awva-brassfam']) '../../../worktrees/$w/build/sdk/components',
-    '../../../awva/build/sdk/components',
     if (fw != null) for (final b in ['host-virtual', 'host-virtual-universal']) '$fw/build/$b/components',
     if (libDir != null) '${File(libDir).parent.parent.path}/components',
+    for (final w in ['awva-sax', 'awva-clarinet', 'awva-flute', 'awva-brassfam']) '../../../worktrees/$w/build/sdk/components',
+    '../../../awva/build/sdk/components',
   ];
   (String, String, List<String>)? of(File f) {
     final m = File('${f.path.substring(0, f.path.length - ext.length - 1)}.json');
@@ -459,12 +460,10 @@ void main() {
   }
 
   for (final r in roots) {
-    final sax = File('$r/sax.$ext');
-    if (sax.existsSync()) return of(sax);
-  }
-  for (final r in roots) {
     final d = Directory(r);
     if (!d.existsSync()) continue;
+    final sax = File('$r/sax.$ext');
+    if (sax.existsSync() && of(sax) != null) return of(sax);
     for (final f in d.listSync().whereType<File>().where((f) => f.path.endsWith('.$ext'))) {
       final c = of(f);
       if (c != null) return c;

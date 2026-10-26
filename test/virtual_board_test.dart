@@ -470,10 +470,10 @@ void main() {
     final fw = Platform.environment['STRISO_FW_DIR'];
     final roots = [
       ?Platform.environment['STRISO_ENGINE_DIR'],
-      for (final w in ['awva-sax', 'awva-clarinet', 'awva-flute', 'awva-brassfam']) '../worktrees/$w/build/sdk/components',
-      '../awva/build/sdk/components',
       if (fw != null) for (final b in ['host-virtual', 'host-virtual-universal']) '$fw/build/$b/components',
       if (lib != null) '${File(lib).parent.parent.path}/components',
+      for (final w in ['awva-sax', 'awva-clarinet', 'awva-flute', 'awva-brassfam']) '../worktrees/$w/build/sdk/components',
+      '../awva/build/sdk/components',
     ];
     ({String path, String id, String name})? of(File f) {
       final m = File('${f.path.substring(0, f.path.length - ext.length - 1)}.json');
@@ -483,8 +483,10 @@ void main() {
     }
 
     for (final r in roots) {
-      final f = File('$r/sax.$ext');
-      if (f.existsSync()) return of(f);
+      for (final n in ['reed', 'sine', 'sax']) {
+        final f = File('$r/$n.$ext');
+        if (f.existsSync()) return of(f);
+      }
     }
     for (final r in roots) {
       final d = Directory(r);
@@ -528,13 +530,81 @@ void main() {
         expect(l.id, sax.id);
         expect(l.first, own);
         expect(ctl.voices.length, own + l.count);
-        expect(ctl.voiceName, startsWith('${sax.id}:'), reason: 'its first voice, once');
+        expect(ctl.voiceName == sax.id || ctl.voiceName.startsWith('${sax.id}:'), isTrue, reason: 'its first voice, once (${ctl.voiceName})');
         expect(ctl.engines().firstWhere((x) => x.engine == sax.id).color, l.color);
         expect(e.ticked, isTrue);
         expect(await run(tester, ctl.swapBuild()), isTrue);
         await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
         expect(ctl.voices.length, own, reason: '⇄: the build without it');
       }
+      await finish(tester, ctl);
+      await tester.runAsync(() async {
+        try {
+          dir.deleteSync(recursive: true);
+        } catch (_) {}
+      });
+    },
+  );
+
+  // Stce on the real firmware (mod-stce): a good engine, one built for another engine ABI and a
+  // junk file, each ticked; the chooser shows what the board reported, nothing worked out here.
+  // Needs a build that answers Stce and its test fixtures (tools/virtual.sh builds both).
+  String? fixture(String name) {
+    final ext = Platform.isWindows ? 'dll' : (Platform.isMacOS ? 'dylib' : 'so');
+    final fw = Platform.environment['STRISO_FW_DIR'];
+    for (final r in [
+      if (fw != null) for (final b in ['host-virtual', 'host-virtual-universal']) '$fw/build/$b/virtual/tests/fixtures',
+      if (lib != null) '${File(lib).parent.path}/tests/fixtures',
+    ]) {
+      final f = File('$r/nsc_fixture_$name.$ext');
+      if (f.existsSync()) return f.absolute.path;
+    }
+    return null;
+  }
+
+  final abi99 = fixture('abi99');
+  testWidgets(
+    'Stce on the real firmware: the good engine loaded in its colour, another ABI and a junk file greyed with the board\'s reasons',
+    skip: skip != null || sax == null || abi99 == null,
+    (tester) async {
+      final dir = await tester.runAsync(() async => Directory.systemTemp.createTempSync('sv_stce'));
+      final sep = Platform.pathSeparator;
+      final ext = Platform.isWindows ? 'dll' : (Platform.isMacOS ? 'dylib' : 'so');
+      final junk = File('${dir!.path}${sep}junk.$ext')..writeAsStringSync('not a library');
+      final ctl = AppController(options: AppOptions(noUsb: true, virtualLib: lib), store: Store('${dir.path}${sep}settings.json'));
+      await run(tester, ctl.playVirtual());
+      await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+      final own = ctl.voices.length;
+      expect(await run(tester, ctl.installAndAddEngine(sax!.path)), isTrue, reason: ctl.banner?.text);
+      await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+      if (ctl.engineReport == null) {
+        markTestSkipped('this build does not answer Stce');
+        await finish(tester, ctl);
+        return;
+      }
+      // the good one: loaded where Stcv lists it, in the board's colour
+      final good = ctl.engineReport!.loaded.single;
+      expect(good.id, sax.id);
+      expect(good.first, own);
+      expect(ctl.voices.length, own + good.count);
+      expect(ctl.engines().firstWhere((e) => e.engine == sax.id).color, good.color);
+      expect(ctl.engineList().single.loaded?.color, good.color);
+      // another engine ABI: refused by the board, greyed with its reason, unticked
+      expect(await run(tester, ctl.installAndAddEngine(abi99!)), isTrue);
+      await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+      final other = ctl.engineList().firstWhere((e) => e.path.contains('nsc_fixture_abi99'));
+      expect(other.reason, 'built for engine ABI 99; this build loads ${ctl.engineReport!.abi}');
+      expect(other.ticked, isFalse);
+      expect(ctl.engineList().firstWhere((e) => e.title == sax.name).ticked, isTrue, reason: 'the good one stays');
+      // a junk file: the system would not load it, its own message in the detail
+      expect(await run(tester, ctl.installAndAddEngine(junk.path)), isTrue);
+      await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+      final j = ctl.engineList().firstWhere((e) => e.path.endsWith('junk$sep' 'junk.$ext'));
+      expect(j.reason, 'the system would not load it');
+      expect(j.detail, isNotEmpty, reason: 'the system\'s own message');
+      expect(j.choosable, isFalse);
+      // the good one still plays
+      expect(ctl.engineReport!.loaded.map((l) => l.id), [sax.id]);
       await finish(tester, ctl);
       await tester.runAsync(() async {
         try {
