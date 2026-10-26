@@ -2,9 +2,14 @@
 
 ## 1.4.0 (unreleased)
 
-Needs the next board firmware: the build with presets, StcW and Stce, being integrated now. Voices
-are selected only with StcW, so with an older firmware voice changes don't go through. There is
-no fallback for it.
+Needs the board firmware next2 or newer (presets, StcW, the dials StcT, the voice keys, the
+engine slots). Voices are selected only with StcW, so with an older firmware voice changes don't
+go through. There is no fallback for it.
+
+- **Shared audio output by default.** Exclusive output was the default, and it played at full
+  level whatever the Windows volume said. The output is now shared; Exclusive output is an
+  opt-in, with a one-time warning, and it applies the Windows volume itself. Settings from before
+  turn shared once.
 
 - **Presets on the Striso.** Under the engine's presets, ON THE STRISO lists your own presets on
   the board.
@@ -13,17 +18,22 @@ no fallback for it.
   - **Install…** sends a preset file to the board as it is; you can also drop files on the window.
   - **Load** plays it. A preset made for another version of the engine loads with the board's
     report of what it clamped and skipped.
-- **The engine report in Virtual.** Engines added to a build show in the colour the firmware
-  gives them. A file it refused is greyed with the reason, and the system's own message is in
-  its tooltip.
-- **Voice select by StcW.** It reaches any entry of the voice list, for boards with more than 128
-  voices (engines added in Virtual).
+- **Engines in the board's slots.** An awva engine is one package (`.awvapkg`) for every board.
+  Setup lists the engine slots of the board that plays, Virtual's or the Striso's, as its
+  firmware reports them; **Put on …** sends a package from the engine library with the
+  firmware's progress, and **Erase** frees a slot. Virtual starts again with the engine on its
+  first voice; the Striso takes it at its next start. This replaces 1.3.0's engines ticked onto
+  a build: an engine reaches Virtual only through its slots.
+- **Voice select by StcW.** It reaches any entry of the voice list.
 - **Any engine on any voice key.** Setup, Settings keys: click a voice key to choose the engine
   on it and the preset it starts on, put its own engine back (↺), or leave it empty. Three free
   keys (10, 12, 14) take new engines. Right-click an engine button to **Put on key…**, with the
   free keys first; putting it in place of another engine offers Undo. A key whose engine isn't
   loaded shows that and stays dark. Changes are live; **Save to Striso** keeps them, in the
   board's own settings records. Needs the firmware with the voice keys (Stca, StcA).
+- **MIDI out in Setup.** The board's MIDI settings (channel, voices, bend range, volume,
+  sustain, rate, fine tuning) as sliders, in the ranges the board lists (StcT), set on the board.
+- **The MIDI monitor** in the console: what the board receives and sends.
 
 ## 1.3.0
 
