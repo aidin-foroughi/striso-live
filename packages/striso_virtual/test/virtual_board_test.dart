@@ -2,13 +2,13 @@
 // striso_virtual): connect, lists, voices, live parameters and their undo, touch and key
 // parameters, StcK tunings and StcN's quarter-tone labels, settings keys, saving to the board
 // through its bootloader's drive, A/B of parameter sets, a reset and the reconnect; and real audio:
-// a key sounds, a parameter changes the render, and an engine-level render equals its host golden.
+// a key sounds and a parameter changes the render (the engines' renders against their goldens are
+// the firmware's own virtual tests); engine packages in the board's slots; the voice keys.
 //
 // Needs the library: build it in the firmware checkout (cmake --preset host-virtual && cmake
 // --build --preset host-virtual), found through $STRISO_VIRTUAL_LIB, $STRISO_FW_DIR or
 // ../striso-control-firmware; the tests skip with the reason when it is not there.
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -46,28 +46,6 @@ double _rms(Float32List x) {
     s += v * v;
   }
   return x.isEmpty ? 0 : math.sqrt(s / x.length);
-}
-
-// tests/golden/renders.txt's hash: FNV-1a 64 over the float bits
-int _fnv(Float32List x) {
-  var h = BigInt.parse('1469598103934665603');
-  final prime = BigInt.parse('1099511628211'), mask = (BigInt.one << 64) - BigInt.one;
-  for (final b in x.buffer.asUint8List(x.offsetInBytes, x.lengthInBytes)) {
-    h = ((h ^ BigInt.from(b)) * prime) & mask;
-  }
-  return h.toUnsigned(64).toInt();
-}
-
-String? _golden(String name) {
-  final fw = Platform.environment['STRISO_FW_DIR'];
-  for (final root in [?fw, '../../../striso-control-firmware', '../../../worktrees/fw-virtual']) {
-    final f = File('$root/tests/golden/renders.txt');
-    if (!f.existsSync()) continue;
-    for (final l in f.readAsLinesSync()) {
-      if (l.startsWith('$name ')) return l.split(' ')[1];
-    }
-  }
-  return null;
 }
 
 void main() {
@@ -361,70 +339,63 @@ void main() {
       expect(louder, isNot(plain));
       expect(_rms(louder), greaterThan(1.5 * _rms(plain)));
     });
-
-    test('engine level: va:classic on the stale performance is its host golden, bit for bit', () {
-      final want = _golden('render.va.p0.stale');
-      if (want == null) {
-        markTestSkipped('tests/golden/renders.txt not found');
-        return;
-      }
-      final b = VirtualBoard();
-      addTearDown(b.dispose);
-      b.testHook(svTestMotionOff);
-      final st = b.state;
-      if (st.toBlock > 0) b.render(st.toBlock);
-      expect(b.selectVoice(1), isTrue);
-      // tools/harness/perf_stale.h: voice 0 pressed for a second, then released with its vpres stuck
-      const nblocks = 17.5 * 48000 ~/ 32;
-      final out = Float32List(nblocks * 32);
-      for (var blk = 0; blk < nblocks; blk++) {
-        final t = blk * 32 / 48000;
-        for (var v = 0; v < 10; v++) {
-          var pres = 0.0, vpres = 0.0;
-          if (v == 0) {
-            if (t < 1.0) {
-              pres = t < 0.02 ? t / 0.02 * 0.6 : 0.6;
-              vpres = t < 0.02 ? 0.5 : 0.0;
-            } else {
-              vpres = 0.25;
-            }
-          }
-          b.setEngineControls(v, [60, pres, vpres, 0, 0]);
-        }
-        b.setEngineControls(-1, [1, 0, 0, -1, 0, 0, 0, 3 / 16]);
-        out.setAll(blk * 32, b.renderEngine(32));
-      }
-      expect(_fnv(out).toRadixString(16).padLeft(16, '0'), want);
-    });
   });
 
-  // sv_options.engine_dir: the firmware loads the engine components in it and lists them after
-  // its own engines. The components are awva's (build/sdk/components in an awva checkout), found
-  // through $STRISO_ENGINE_DIR, ../worktrees/awva-* or the firmware's own build (its awva
-  // submodule's components): the sax if there is one, else any with presets.
-  final comp = _component();
-  group('engine components (engine_dir)', skip: skip ?? (comp == null ? 'no awva engine component built' : null), () {
-    test('a component in engine_dir is listed after the compiled-in engines, and plays', () async {
-      final dir = Directory.systemTemp.createTempSync('sv-engines');
+  // sv_options.module_store: engine packages put into the board's slots over the console (Stci),
+  // listed (Stco), loaded after the built-in engines from the next start, erased (Stcz). The
+  // packages: this PC's, from the firmware's build (virtual/tests/packages, through
+  // $STRISO_PACKAGE_DIR or $STRISO_FW_DIR), and a board-only one (build/firmware/modules) that
+  // Virtual refuses.
+  final pkgs = _packages();
+  group('engine modules (module_store)', skip: skip ?? (pkgs == null ? 'no engine packages built' : null), () {
+    test('a package into a slot, its voices from the next start, erased again', () async {
+      final dir = Directory.systemTemp.createTempSync('sv-modules');
+      final store = '${dir.path}${Platform.pathSeparator}modules.bin';
       try {
-        final (path, id, presets) = comp!;
-        File(path).copySync('${dir.path}${Platform.pathSeparator}${path.split(RegExp(r'[\\/]')).last}');
-        File('${dir.path}${Platform.pathSeparator}broken.${path.split('.').last}').writeAsStringSync('not a library');
-        final plain = VirtualBoard()..startRealtime();
-        final cp = await _connect(plain);
-        final own = await cp.listVoices();
-        await cp.disconnect();
-        plain.dispose();
-        final b = VirtualBoard(engineDir: dir.path)..startRealtime();
-        final c = await _connect(b);
+        final (pc, armOnly) = pkgs!;
+        var b = VirtualBoard(moduleStore: store)..startRealtime();
+        var c = await _connect(b);
+        final slots = await c.listModuleSlots();
+        if (slots == null) {
+          markTestSkipped('this build has no engine slots (Stco)');
+          return;
+        }
+        expect(slots.map((s) => s.state).toSet(), {SlotState.empty});
+        final own = await c.listVoices();
+        final seen = <int>[];
+        final bytes = File(pc).readAsBytesSync();
+        final r = await c.installModule(bytes, onProgress: (n, _) => seen.add(n));
+        expect(r.ok, isTrue, reason: r.error);
+        expect(r.error, isNull, reason: 'every progress crc as sent');
+        expect(seen.last, bytes.length);
+        final id = r.done!.id;
+        final listed = (await c.listModuleSlots())!.where((s) => s.holdsEngine).single;
+        expect([listed.slot, listed.id, listed.state], [r.done!.slot, id, SlotState.ok]);
+        expect((await c.listVoices()).length, own.length, reason: 'loaded at the next start');
+        if (armOnly != null) {
+          final a = await c.installModule(File(armOnly).readAsBytesSync());
+          expect(a.ok, isFalse, reason: 'a board-only package has no image for this PC');
+          expect(a.error, isNotEmpty);
+        }
+        await c.disconnect();
+        b.dispose();
+
+        b = VirtualBoard(moduleStore: store)..startRealtime();
+        c = await _connect(b);
         final voices = await c.listVoices();
-        expect(voices.take(own.length).map((v) => v.name), own.map((v) => v.name), reason: 'its own engines first, as they were');
+        expect(voices.take(own.length).map((v) => v.name), own.map((v) => v.name), reason: 'the built-in engines first');
         final added = voices.skip(own.length).toList();
-        expect(added.map((v) => v.engine).toSet(), {id}, reason: 'the component, and nothing of the broken file');
-        expect(added.map((v) => v.preset), presets);
-        final r = await c.selectVoice(added[1].index);
-        expect(r?.ok, isTrue);
-        expect((await c.listVoices()).where((v) => v.current).single.name, '$id:${presets[1]}');
+        expect(added, isNotEmpty);
+        expect(added.map((v) => v.engine).toSet(), {id});
+        expect((await c.selectVoice(added.first.index))?.ok, isTrue);
+        expect(await c.eraseModuleSlot(listed.slot), isNull);
+        expect((await c.listModuleSlots())!.where((s) => s.holdsEngine), isEmpty);
+        await c.disconnect();
+        b.dispose();
+
+        b = VirtualBoard(moduleStore: store)..startRealtime();
+        c = await _connect(b);
+        expect((await c.listVoices()).length, own.length, reason: 'erased: gone at the next start');
         await c.disconnect();
         b.dispose();
       } finally {
@@ -432,26 +403,52 @@ void main() {
           dir.deleteSync(recursive: true);
         } catch (_) {}
       }
-    });
+    }, timeout: const Timeout(Duration(minutes: 2)));
   });
 
-  // The voice keys (Stca, StcA): an engine that is only loaded (the reed: a component the build
-  // doesn't link in) put on a free key, played from it, the board's edits saved through its drive
-  // with saveTouch, and the key still holds it after the restart; a board without the engine shows
-  // the key missing.
-  final reedDir = _componentDir();
-  final reed = reedDir == null ? null : File('$reedDir/reed.${Platform.isWindows ? 'dll' : (Platform.isMacOS ? 'dylib' : 'so')}');
-  test('voice keys: a loaded engine on a key, kept by Save to Striso, missing without it', skip: skip ?? (reed == null || !reed.existsSync() ? 'no reed component in the firmware build' : null), () async {
+  // The voice keys (Stca, StcA): an engine from a slot (a package of an engine the build doesn't
+  // link in, the first of these the board takes) put on a free key, played from it, the board's
+  // edits saved through its drive with saveTouch, and the key still holds it after the restart; a
+  // board without the module shows the key missing.
+  final candidates = [for (final id in ['reed', 'clarinet', 'flute', 'doublereed', 'sine']) ?_package(id)];
+  test('voice keys: an engine from a slot on a key, kept by Save to Striso, missing without it', skip: skip ?? (candidates.isEmpty ? 'no package of an engine the build lacks (reed.nsc, clarinet.nsc, ... in \$STRISO_PACKAGE_DIR)' : null), () async {
     final dir = Directory.systemTemp.createTempSync('sv-keys');
+    final store = '${dir.path}${Platform.pathSeparator}modules.bin';
+    var b = VirtualBoard(moduleStore: store)..startRealtime();
     addTearDown(() {
+      b.dispose();
       try {
         dir.deleteSync(recursive: true);
       } catch (_) {}
     });
-    reed!.copySync('${dir.path}${Platform.pathSeparator}${reed.path.split(RegExp(r'[\\/]')).last}');
-    final b = VirtualBoard(engineDir: dir.path)..startRealtime();
-    addTearDown(b.dispose);
     var c = await _connect(b);
+    if (await c.listModuleSlots() == null) {
+      await c.disconnect();
+      markTestSkipped('this build has no engine slots (Stco)');
+      return;
+    }
+    final builtIn = {for (final v in await c.listVoices()) v.engine};
+    ModuleDone? put;
+    final refused = <String>[];
+    for (final p in candidates) {
+      final r = await c.installModule(File(p).readAsBytesSync());
+      if (r.ok && !builtIn.contains(r.done!.id)) {
+        put = r.done;
+        break;
+      }
+      refused.add('${p.split(RegExp(r'[\\/]')).last}: ${r.error ?? 'built in'}');
+      if (r.ok) expect(await c.eraseModuleSlot(r.done!.slot), isNull);
+    }
+    if (put == null) {
+      await c.disconnect();
+      markTestSkipped('the board takes none of the packages (${refused.join('; ')})');
+      return;
+    }
+    final id = put.id;
+    await c.disconnect();
+    b.dispose();
+    b = VirtualBoard(moduleStore: store)..startRealtime(); // a module loads at the next start
+    c = await _connect(b);
     final vk0 = await c.getVoiceKeys();
     if (vk0 == null) {
       await c.disconnect();
@@ -460,22 +457,22 @@ void main() {
     }
     expect(vk0[14]!.empty, isTrue);
     expect(vk0[26]!.engine, 'wind');
-    final entry = (await c.listVoices()).firstWhere((v) => v.engine == 'reed').index;
+    final entry = (await c.listVoices()).firstWhere((v) => v.engine == id).index;
     final a = await c.assignVoiceKey(14, entry);
     expect(a?.ok, isTrue);
-    expect(a!.engine, 'reed');
+    expect(a!.engine, id);
     await Future<void>.delayed(const Duration(milliseconds: 30));
     final vk = (await c.getVoiceKeys())!;
     expect(vk[14]!.state, 'ok');
-    expect(vk[14]!.colour, 0x203000, reason: 'the reed\'s own colour, from its descriptor');
-    expect(vk.edits.map((e) => '$e'), ['a set sGv14a reed']);
+    expect(vk[14]!.colour, isNot(0), reason: 'its own colour, from its descriptor');
+    expect(vk.edits.map((e) => '$e'), contains('a set sGv14a ${id.length > 8 ? id.substring(0, 8) : id}'));
     final layout = (await c.getSettingsLayout())!;
-    expect(layout[14]!.engine, 'reed');
-    expect(layout[14]!.short, 'reed');
+    expect(layout[14]!.engine, id);
+    expect(layout[14]!.short, isNotEmpty);
     // played from the key: Settings + key 14 selects it
     expect((await c.pressSettingsKey(14))?.ok, isTrue);
     await _until(() => b.state.voice == entry);
-    // Save to Striso: the board's edits, through the drive; the restart; the key holds the reed
+    // Save to Striso: the board's edits, through the drive; the restart; the key holds the engine
     final touch = (await c.getParams(Target.touch))!.params;
     final keys = (await c.getParams(Target.keys))!.params;
     final values = TouchValues([for (final p in touch) (p.name, p.value)], [for (final p in keys) (p.name, p.value)]);
@@ -489,96 +486,66 @@ void main() {
     await _until(() => b.attached);
     c = await _connect(b);
     final after = (await c.getVoiceKeys())!;
-    expect(after[14]!.engine, 'reed');
+    expect(after[14]!.engine, id);
     expect(after[14]!.state, 'ok');
     expect(after.saved, isTrue, reason: 'nothing left to write');
     await c.disconnect();
-    // the same settings, no reed loaded: the key is missing (no other engine on it)
+    // the same settings, without the module: the key is missing (no other engine on it)
     final b2 = VirtualBoard(flash: b.flash)..startRealtime();
     addTearDown(b2.dispose);
     final c2 = await _connect(b2);
     final bare = (await c2.getVoiceKeys())!;
     expect(bare[14]!.state, 'missing');
-    expect(bare[14]!.engine, 'reed');
+    expect(bare[14]!.engine, id);
     expect((await c2.getSettingsLayout())![14], isNull);
     expect((await c2.pressSettingsKey(14))?.ok, isFalse);
     await c2.disconnect();
   });
 
-  // StcW: any voice-list entry, also past the 128 that 0x80 + n reaches. The firmware build's own
-  // components (build/<preset>/components) loaded all at once make the list that long.
-  final many = _componentDir();
-  test('StcW selects any entry: the voice list past 128 with the build\'s components loaded', skip: skip ?? (many == null ? 'no firmware build with components' : null), () async {
-    final b = VirtualBoard(engineDir: many)..startRealtime();
-    final c = await _connect(b);
-    try {
-      final voices = await c.listVoices();
-      expect(voices.length, greaterThan(128), reason: 'the components push the list past 0x80 + n');
-      for (final n in [0, 127, 128, 130, voices.length - 1]) {
-        final r = await c.selectVoice(n);
-        expect(r?.ok, isTrue, reason: 'entry $n');
-        expect(r!.index, n);
-        expect(r.name, voices[n].name);
-        expect((await c.listVoices()).where((v) => v.current).single.index, n);
-      }
-      final r = await c.selectVoice(voices.length);
-      expect(r?.ok, isFalse, reason: 'past the list: "no voice n"');
-      expect(r!.index, voices.length);
-    } finally {
-      await c.disconnect();
-      b.dispose();
-    }
-  });
 }
 
-/// The firmware build's components folder (`$STRISO_FW_DIR/build/<preset>/components`), when it
-/// has at least one component.
-String? _componentDir() {
+/// An engine package with this PC's image by its engine's id (`<id>.nsc`): from
+/// $STRISO_PACKAGE_DIR, or the firmware build's test packages.
+String? _package(String id) {
   final fw = Platform.environment['STRISO_FW_DIR'];
   final libDir = Platform.environment['STRISO_VIRTUAL_LIB'];
-  final ext = Platform.isWindows ? 'dll' : (Platform.isMacOS ? 'dylib' : 'so');
   for (final d in [
-    if (fw != null) for (final b in ['host-virtual', 'host-virtual-universal']) '$fw/build/$b/components',
-    if (libDir != null) '${File(libDir).parent.parent.path}/components',
+    ?Platform.environment['STRISO_PACKAGE_DIR'],
+    if (fw != null) for (final b in ['host-virtual', 'host']) '$fw/build/$b/virtual/tests/packages',
+    if (libDir != null) '${File(libDir).parent.path}/tests/packages',
   ]) {
-    final dir = Directory(d);
-    if (dir.existsSync() && dir.listSync().any((f) => f.path.endsWith('.$ext'))) return dir.absolute.path;
+    final f = File('$d/$id.nsc');
+    if (f.existsSync()) return f.absolute.path;
   }
   return null;
 }
 
-/// An awva engine component library (`<name>.dll` / `.dylib` / `.so`) and what its manifest
-/// (`<name>.json`) says: its id and presets. The firmware build's own components first (the same
-/// engine ABI as the build), then awva builds; in each, the sax if there is one, else the first
-/// with two presets or more.
-(String, String, List<String>)? _component() {
-  final ext = Platform.isWindows ? 'dll' : (Platform.isMacOS ? 'dylib' : 'so');
+/// An engine package with this PC's image (the firmware build's test packages), and a board-only
+/// one if the firmware build made any.
+(String, String?)? _packages() {
   final fw = Platform.environment['STRISO_FW_DIR'];
   final libDir = Platform.environment['STRISO_VIRTUAL_LIB'];
-  final roots = [
-    ?Platform.environment['STRISO_ENGINE_DIR'],
-    if (fw != null) for (final b in ['host-virtual', 'host-virtual-universal']) '$fw/build/$b/components',
-    if (libDir != null) '${File(libDir).parent.parent.path}/components',
-    for (final w in ['awva-sax', 'awva-clarinet', 'awva-flute', 'awva-brassfam']) '../../../worktrees/$w/build/sdk/components',
-    '../../../awva/build/sdk/components',
+  final dirs = [
+    ?Platform.environment['STRISO_PACKAGE_DIR'],
+    if (fw != null) for (final b in ['host-virtual', 'host']) '$fw/build/$b/virtual/tests/packages',
+    if (libDir != null) '${File(libDir).parent.path}/tests/packages',
   ];
-  (String, String, List<String>)? of(File f) {
-    final m = File('${f.path.substring(0, f.path.length - ext.length - 1)}.json');
-    if (!m.existsSync()) return null;
-    final j = jsonDecode(m.readAsStringSync()) as Map<String, Object?>;
-    final presets = [for (final p in (j['presets'] as List? ?? const [])) '$p'];
-    return presets.length < 2 ? null : (f.absolute.path, j['id'] as String, presets);
-  }
-
-  for (final r in roots) {
-    final d = Directory(r);
-    if (!d.existsSync()) continue;
-    final sax = File('$r/sax.$ext');
-    if (sax.existsSync() && of(sax) != null) return of(sax);
-    for (final f in d.listSync().whereType<File>().where((f) => f.path.endsWith('.$ext'))) {
-      final c = of(f);
-      if (c != null) return c;
+  String? pc;
+  for (final d in dirs) {
+    final f = File('$d/accordion.nsc');
+    if (f.existsSync()) {
+      pc = f.absolute.path;
+      break;
     }
   }
-  return null;
+  if (pc == null) return null;
+  String? arm;
+  for (final d in [?Platform.environment['STRISO_ARM_PACKAGE_DIR'], if (fw != null) '$fw/build/firmware/modules']) {
+    final f = File('$d/sine.nsc');
+    if (f.existsSync()) {
+      arm = f.absolute.path;
+      break;
+    }
+  }
+  return (pc, arm);
 }

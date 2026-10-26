@@ -12,6 +12,7 @@ import 'dart:typed_data';
 import 'dials.dart';
 import 'layout.dart';
 import 'playable.dart';
+import 'modules.dart';
 import 'presets.dart';
 import 'protocol.dart';
 import 'board_state.dart';
@@ -236,24 +237,35 @@ const List<_Engine> _engines = [
 /// The engine ABI the mock loads (NSC_ABI), as the virtual board reports it in Stce.
 const mockEngineAbi = 1;
 
-/// An engine component as the mock "loads" it from its engine folder: what the firmware's Stce
-/// reports for it (docs/flows.md 10), recorded in that form. [refuse]: the reason and detail it
-/// is refused with, else it loads with [presets] in [color].
+/// An engine the mock can run from a slot (modules.dart): its presets (none: one entry) and its
+/// colour (its descriptor's led, as the voice keys show it).
 class MockComponent {
   final List<String> presets;
   final int color;
-  final (String, String)? refuse;
-  const MockComponent(this.presets, {this.color = 0x808080, this.refuse});
+  const MockComponent(this.presets, {this.color = 0x808080});
 }
 
-/// The components the mock knows, by the library's name without its extension (the awva builds':
-/// sax and clarinet load; flute is for another engine ABI). Any other file is refused as a
-/// library the OS would not load.
+/// The engines the mock runs from a slot, by id; a package of another id installs (the firmware
+/// takes any valid package) but gives no voices.
 const mockComponents = <String, MockComponent>{
   'sax': MockComponent(['soprano sax', 'alto sax', 'tenor sax', 'baritone sax'], color: 0xc08040),
   'clarinet': MockComponent(['clarinet', 'bass clarinet'], color: 0x40a0ff),
-  'flute': MockComponent([], refuse: ('abi', '2 1')),
+  'sine': MockComponent([]),
 };
+
+/// The mock's own stand-in for an engine package: `NSCP`, a newline, then {id, version, abi} as
+/// JSON (a real package is the firmware's to read; the mock refuses one).
+List<int> mockModulePackage(String id, {String version = '1.0', int abi = mockEngineAbi, int padTo = 0}) {
+  final b = [...'NSCP\n'.codeUnits, ...utf8.encode(jsonEncode({'id': id, 'version': version, 'abi': abi}))];
+  return [...b, for (var i = b.length; i < padTo; i++) 0x20];
+}
+
+/// The mock's slots (2..6, as the board's), kept across mock boards as the board's flash keeps
+/// them across restarts.
+class MockModuleStore {
+  final slots = <int, ({String id, String version, int abi, int bytes})>{};
+  static const first = 2, count = 5;
+}
 
 class _Entry {
   final String engine;
@@ -491,10 +503,9 @@ class MockBoard implements PlayableBoard {
   double _motionAcc = 0, _idleAcc = 0;
   Timer? _timer;
 
-  /// The engine folder's library files the mock loads (names; MockComponent), and whether it
-  /// answers Stce at all (false: a build that cannot load engines).
-  final List<String> engineFiles;
-  final bool answersEngines;
+  /// The engine-module slots (null: a firmware without them, which answers "m err no module
+  /// store" and lists none); the ones that read ok load at boot, after the built-in engines.
+  final MockModuleStore? modules;
 
   /// The firmware as released upstream (v2.2.4): it does not answer StcX, StcY, Stcy, StcH,
   /// StcW or the preset commands.
@@ -514,11 +525,9 @@ class MockBoard implements PlayableBoard {
   final userPresets = <int, String>{};
   int _nextPresetId = 1;
   int presetLimit = 128;
-  final _engineLines = <String>[];
 
   MockBoard({
-    this.engineFiles = const [],
-    this.answersEngines = true,
+    this.modules,
     this.stockFirmware = false,
     this.presetStore = true,
     this.autoplay = true,
@@ -539,7 +548,7 @@ class MockBoard implements PlayableBoard {
         }
       }
     }
-    _loadEngines();
+    _loadModules();
     voice = _entries.indexWhere((e) => e.engine == 'va'); // DEFAULT_ENGINE = va
     values = _presetValues(_entries[voice].eng.params, _entries[voice].seed);
     _config = config;
@@ -593,6 +602,44 @@ class MockBoard implements PlayableBoard {
           _presetDelete(p[0] | p[1] << 8);
         } else if (_rxCmd == PresetCodes.open) {
           _presetOpen(p[0] | p[1] << 8);
+        } else if (_rxCmd == ModuleCodes.erase) {
+          final k = p[0] - 0x30;
+          final m = modules;
+          if (m == null) {
+            _print('m err no module store\r\n');
+          } else if (k < MockModuleStore.first || k >= MockModuleStore.first + MockModuleStore.count) {
+            _print('m err no slot ${String.fromCharCode(p[0])} (slots ${MockModuleStore.first}..${MockModuleStore.first + MockModuleStore.count - 1})\r\n');
+          } else {
+            m.slots.remove(k);
+            _print('m erased $k\r\n');
+          }
+        } else if (_rxCmd == ModuleCodes.install && _moduleLength == null) {
+          // the 5-byte payload: then the package, taken whole even when refused (none of it read
+          // as a command), as the firmware's
+          final dest = p[0], n = p[1] | p[2] << 8 | p[3] << 16 | p[4] << 24;
+          _rxPayload.clear();
+          String? refused;
+          if (dest != 0x73) {
+            refused = 'dest ${String.fromCharCode(dest)}: only \'s\' (a slot)';
+          } else if (modules == null) {
+            refused = 'no module store';
+          } else if (n == 0) {
+            refused = 'empty';
+          }
+          if (refused != null) {
+            _print('m err $refused\r\n');
+          } else {
+            final m = modules!;
+            final free = MockModuleStore.count - m.slots.length;
+            _print('m begin ok mock $free\r\n');
+          }
+          _moduleRefused = refused != null;
+          _moduleLength = n;
+          _rxNeed = n;
+          if (n == 0) _moduleLength = null;
+        } else if (_rxCmd == ModuleCodes.install) {
+          _moduleLength = null;
+          if (!_moduleRefused) _moduleInstall(List<int>.of(p));
         } else if (_rxCmd == PresetCodes.upload && _upKind == null) {
           // the 5-byte payload: then the bytes (an upload)
           _upKind = p[0];
@@ -693,15 +740,19 @@ class MockBoard implements PlayableBoard {
     } else if (ch == 'H' && !stockFirmware) {
       final name = _entries[voice].name;
       _print('H $voice ${heroReply?.call(name) ?? mockHeroReplies[name] ?? '| rvmix dlmix'}\r\n');
-    } else if (ch == 'e') {
-      if (answersEngines) {
-        for (final l in _engineLines) {
-          _print('$l\r\n');
-        }
-      }
     } else if (!stockFirmware && answersDials && ch == 'T') {
       _rxNeed = 5;
       _rxCmd = 'T';
+      _rxPayload.clear();
+    } else if (!stockFirmware && ch == ModuleCodes.slots) {
+      _moduleSlots();
+    } else if (!stockFirmware && ch == ModuleCodes.install) {
+      _rxNeed = 5;
+      _rxCmd = ch;
+      _rxPayload.clear();
+    } else if (!stockFirmware && ch == ModuleCodes.erase) {
+      _rxNeed = 1;
+      _rxCmd = ch;
       _rxPayload.clear();
     } else if (!stockFirmware && ch == PresetCodes.list) {
       _presetList();
@@ -731,35 +782,75 @@ class MockBoard implements PlayableBoard {
     }
   }
 
-  // the engine folder, as the virtual board loads it: in file name order, after its own engines
-  void _loadEngines() {
-    final files = [...engineFiles]..sort();
-    _engineLines.add('e engines $mockEngineAbi ${files.length}');
-    for (final f in files) {
-      final dot = f.lastIndexOf('.');
-      final name = dot > 0 ? f.substring(0, dot) : f;
-      final c = mockComponents[name];
-      if (c == null) {
-        _engineLines.add('e err library $f|mock: $f is not a component the mock knows');
-        continue;
-      }
-      final r = c.refuse;
-      if (r != null) {
-        _engineLines.add('e err ${r.$1} $f|${r.$2}');
-        continue;
-      }
+  // the slots that read ok, as the firmware lists them at boot: after its own engines
+  void _loadModules() {
+    final m = modules;
+    if (m == null) return;
+    for (final k in [...m.slots.keys]..sort()) {
+      final e = m.slots[k]!;
+      final c = mockComponents[e.id];
+      if (c == null || e.abi != mockEngineAbi) continue;
       final first = _entries.length;
-      final eng = _Engine(name, c.presets.isEmpty ? null : c.presets, _reed, 9000);
+      final eng = _Engine(e.id, c.presets.isEmpty ? null : c.presets, _reed, 9000);
       if (c.presets.isEmpty) {
-        _entries.add(_Entry(name, null, eng, first * 7));
+        _entries.add(_Entry(e.id, null, eng, first * 7));
       } else {
         for (var j = 0; j < c.presets.length; j++) {
-          _entries.add(_Entry(name, c.presets[j], eng, first * 7 + j));
+          _entries.add(_Entry(e.id, c.presets[j], eng, first * 7 + j));
         }
       }
-      _engineLines.add('e ok $first ${_entries.length - first} ${c.color.toRadixString(16).padLeft(6, '0')} $name $f');
     }
-    _engineLines.add('e end');
+  }
+
+  void _moduleSlots() {
+    final m = modules;
+    if (m != null) {
+      for (var k = MockModuleStore.first; k < MockModuleStore.first + MockModuleStore.count; k++) {
+        final e = m.slots[k];
+        if (e == null) {
+          _print('slot $k empty\r\n');
+        } else {
+          final why = e.abi != mockEngineAbi ? 'disabled: abi ${e.abi}, firmware has $mockEngineAbi' : 'ok';
+          _print('slot $k ${e.id} ${e.version} ${e.abi} ${e.bytes} $why\r\n');
+        }
+      }
+    }
+    _print('slot end\r\n');
+  }
+
+  int? _moduleLength;
+  bool _moduleRefused = false;
+
+  void _moduleInstall(List<int> bytes) {
+    final m = modules!;
+    for (var o = 4096; o <= bytes.length; o += 4096) {
+      _print('m $o ${crc32(bytes, end: o).toRadixString(16).padLeft(8, '0')}\r\n');
+    }
+    Map<Object?, Object?>? j;
+    if (bytes.length > 5 && String.fromCharCodes(bytes.sublist(0, 5)) == 'NSCP\n') {
+      try {
+        final t = utf8.decode(bytes.sublist(5)).trim();
+        final o = jsonDecode(t);
+        if (o is Map) j = o;
+      } catch (_) {}
+    }
+    if (j == null || j['id'] is! String) {
+      _print('m err not a package the mock reads\r\n');
+      return;
+    }
+    // the first free slot (a reinstall of an id replaces it, as the firmware's installer does)
+    final had = m.slots.entries.where((e) => e.value.id == j!['id']).map((e) => e.key).firstOrNull;
+    var k = had ?? -1;
+    for (var s = MockModuleStore.first; k < 0 && s < MockModuleStore.first + MockModuleStore.count; s++) {
+      if (!m.slots.containsKey(s)) k = s;
+    }
+    if (k < 0) {
+      _print('m err no free slot\r\n');
+      return;
+    }
+    final e = (id: j['id'] as String, version: '${j['version'] ?? '-'}', abi: (j['abi'] as num?)?.toInt() ?? 0, bytes: bytes.length);
+    m.slots[k] = e;
+    _print('m ok $k ${e.id} ${e.version} ${e.abi}\r\n');
   }
 
   int? _upKind;
@@ -776,12 +867,11 @@ class MockBoard implements PlayableBoard {
   final voiceKeys = {for (final e in factoryVoiceKeys.entries) e.key: (e.value, null as String?)};
   final savedVoiceKeys = {for (final e in factoryVoiceKeys.entries) e.key: (e.value, null as String?)};
 
-  // an engine's colour: a loaded one's (Stce), else its voice key's led in the recorded layout
+  // an engine's colour: a slot's module's own (its descriptor's led), else its voice key's led in
+  // the recorded layout
   int? _engineColour(String engine) {
-    for (final l in _engineLines) {
-      final w = l.split(' ');
-      if (w.length >= 6 && w[1] == 'ok' && w[5] == engine) return int.parse(w[4], radix: 16);
-    }
+    final c = mockComponents[engine];
+    if (c != null && modules?.slots.values.any((s) => s.id == engine) == true) return c.color;
     for (final (_, e, led) in mockSettingsLayout.voiceKeys) {
       if (e == engine) return led[0] << 16 | led[1] << 8 | led[2];
     }

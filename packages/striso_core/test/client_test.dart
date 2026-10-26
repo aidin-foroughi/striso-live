@@ -220,49 +220,78 @@ void main() {
       await c.disconnect();
     });
 
-    test('Stce: the loaded engines and the refused ones, as the virtual board reports them', () async {
-      final t = MockTransport(board: MockBoard(engineFiles: ['sax.dll', 'flute.dll', 'notes.dll']));
-      final c = StrisoClient(t);
-      await c.connect();
+    test('engine slots: install with progress, listed, loads at the next start, erase', () async {
+      final store = MockModuleStore();
       final own = MockBoard().voiceCount;
-      final r = await c.getEngines();
-      expect(r, isNotNull);
-      expect(r!.abi, mockEngineAbi);
-      expect(r.files, 3);
-      expect(r.loaded.single.id, 'sax');
-      expect(r.loaded.single.first, own, reason: 'after the build\'s own entries');
-      expect(r.loaded.single.count, 4);
-      expect(r.loaded.single.color, 0xc08040);
-      expect(r.refusedFile('flute.dll')?.reason, 'abi');
-      expect(r.refusedFile('flute.dll')?.detail, '2 1');
-      expect(r.refusedFile('notes.dll')?.reason, 'library');
+      var c = StrisoClient(MockTransport(board: MockBoard(modules: store)));
+      await c.connect();
+      expect(await c.listModuleSlots(), [for (var k = 2; k <= 6; k++) ModuleSlot(k, SlotState.empty)]);
+      final pkg = mockModulePackage('sax', version: '0.3', padTo: 10000);
+      final seen = <int>[];
+      final r = await c.installModule(pkg, onProgress: (b, t) => seen.add(b));
+      expect(r.ok, isTrue, reason: r.error);
+      expect(r.error, isNull, reason: 'the progress crcs match what was sent');
+      expect(r.tag, 'mock');
+      expect([r.done!.slot, r.done!.id, r.done!.version, r.done!.abi], [2, 'sax', '0.3', mockEngineAbi]);
+      expect(seen, [4096, 8192, 10000]);
+      expect((await c.listModuleSlots())!.first, const ModuleSlot(2, SlotState.ok, id: 'sax', version: '0.3', abi: mockEngineAbi, bytes: 10000));
+      expect((await c.listVoices()).length, own, reason: 'a new module loads at the next start');
+      // another engine ABI: kept, listed disabled with the reason
+      expect((await c.installModule(mockModulePackage('clarinet', abi: 9))).done?.slot, 3);
+      final slots = (await c.listModuleSlots())!;
+      expect(slots[1].state, SlotState.disabled);
+      expect(slots[1].reason, 'abi 9, firmware has $mockEngineAbi');
+      expect((await c.installModule([1, 2, 3])).error, 'not a package the mock reads');
+      await c.disconnect();
+
+      // the next start: the ok one's voices after the built-in engines
+      c = StrisoClient(MockTransport(board: MockBoard(modules: store)));
+      await c.connect();
       final voices = await c.listVoices();
       expect(voices.length, own + 4);
-      expect(r.ofVoice(own + 1)?.id, 'sax');
       expect(voices[own + 1].name, 'sax:alto sax');
-      expect(r.ofVoice(own - 1), isNull);
+      expect(await c.eraseModuleSlot(2), isNull);
+      expect(await c.eraseModuleSlot(7), 'no slot 7 (slots 2..6)');
+      expect((await c.listModuleSlots())!.first.state, SlotState.empty);
       await c.disconnect();
-      // a build that cannot load engines does not answer
-      final n = StrisoClient(MockTransport(board: MockBoard(answersEngines: false)));
+
+      // a firmware without a store refuses, and takes the bytes without reading any as a
+      // command; one without slots at all (the stock firmware) does not answer
+      final n = StrisoClient(MockTransport(board: MockBoard()));
       await n.connect();
-      expect(await n.getEngines(timeout: const Duration(milliseconds: 150)), isNull);
+      expect((await n.installModule(pkg)).error, 'no module store');
+      expect(await n.listModuleSlots(), isEmpty);
+      expect((await n.listVoices()).length, own, reason: 'the package was never sent as commands');
       await n.disconnect();
+      final old = StrisoClient(MockTransport(board: MockBoard(stockFirmware: true)));
+      await old.connect();
+      expect(await old.listModuleSlots(timeout: const Duration(milliseconds: 150)), isNull);
+      await old.disconnect();
     });
 
-    test('Stce parsing: a file name with spaces, an unknown reason as it is, a cut reply is none', () {
-      final r = parseEngineReport([
-        'e engines 1 2',
-        'e ok 70 2 0a0b0c reed my reed.dll',
-        'e err new-reason other one.dll|its detail | with a bar',
-        'e end',
+    test('module lines: the slot list, install and erase replies, crc32', () {
+      expect(parseModuleSlots(['slot 2 empty']), isNull, reason: 'cut off');
+      final l = parseModuleSlots([
+        'slot 2 partial',
+        'slot 3 accordion 0.1.0 2 61440 ok',
+        'slot 4 trumpet 1.2 1 50000 disabled: abi 1, firmware has 2',
+        'slot 5 - - - - disabled: header crc',
+        'slot end',
       ])!;
-      expect(r.loaded.single.file, 'my reed.dll');
-      expect(r.loaded.single.color, 0x0a0b0c);
-      expect(r.refused.single.reason, 'new-reason');
-      expect(r.refused.single.file, 'other one.dll');
-      expect(r.refused.single.detail, 'its detail | with a bar');
-      expect(parseEngineReport(['e engines 1 0']), isNull);
-      expect(parseEngineReport(['e engines 1 0', 'e end'])!.loaded, isEmpty);
+      expect(l.map((s) => s.state), [SlotState.partial, SlotState.ok, SlotState.disabled, SlotState.disabled]);
+      expect([l[1].id, l[1].version, l[1].abi, l[1].bytes], ['accordion', '0.1.0', 2, 61440]);
+      expect(l[2].reason, 'abi 1, firmware has 2');
+      expect([l[3].id, l[3].holdsEngine, l[3].reason], [null, false, 'header crc']);
+      expect(parseModuleLine('m begin ok x86_64-windows 4'), isA<ModuleBegin>().having((m) => m.tag, 'tag', 'x86_64-windows').having((m) => m.free, 'free', 4));
+      expect(parseModuleLine('m 4096 0a0b0c0d'), isA<ModuleProgress>().having((m) => m.crc, 'crc', 0x0a0b0c0d));
+      expect(parseModuleLine('m ok 3 sax 1.0 2'), isA<ModuleDone>().having((m) => m.slot, 'slot', 3));
+      expect(parseModuleLine('m erased 4'), isA<ModuleErased>());
+      expect(parseModuleLine('m err no image for x86_64-windows'), isA<ModuleError>().having((m) => m.reason, 'reason', 'no image for x86_64-windows'));
+      expect(parseModuleLine('slot end'), isNull);
+      expect(crc32('123456789'.codeUnits), 0xCBF43926, reason: "zlib's check value");
+      expect(crc32('456789'.codeUnits, crc: crc32('123'.codeUnits)), 0xCBF43926, reason: 'resumable');
+      expect(moduleInstallCommand(List.filled(70000, 7)).sublist(0, 10), [0x53, 0x74, 0x63, 0x69, 0x73, 0x70, 0x11, 0x01, 0x00, 7]);
+      expect(moduleEraseCommand(3), [0x53, 0x74, 0x63, 0x7a, 0x33]);
     });
 
     test('unplug is reported and pending commands resolve', () async {

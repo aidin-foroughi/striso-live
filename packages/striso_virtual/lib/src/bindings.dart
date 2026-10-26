@@ -31,10 +31,21 @@ final class SvOptions extends Struct {
   @Int32()
   external int bootMs;
 
-  /// Engine components (awva's engine ABI) to load, listed after the compiled-in engines; null:
-  /// none. A build older than the field reads only its own part of the struct (it copies `size`
-  /// bytes at most), so it is safe to pass to any.
-  external Pointer<Char> engineDir;
+  /// sv_options.engine_dir, which the app never sets (engines reach Virtual through the module
+  /// slots only): here for the layout until the firmware deletes it (research/
+  /// board_engine_modules.md M6).
+  external Pointer<Char> unusedEngineDir;
+
+  /// Flash bank 2's sectors to start with (sv_get_bank2: the preset store, the modules) and their
+  /// length; null: erased (the app keeps the slots in [moduleStore]).
+  external Pointer<Uint8> bank2;
+  @Uint32()
+  external int bank2Len;
+
+  /// The engine-module slots' file (Stci/Stco/Stcz: the board's bank-2 slots); null: a temporary
+  /// one, deleted with the board. A build older than the field reads only its own part of the
+  /// struct (it copies `size` bytes at most).
+  external Pointer<Char> moduleStore;
 }
 
 final class SvLeds extends Struct {

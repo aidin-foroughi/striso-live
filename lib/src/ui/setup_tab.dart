@@ -1,6 +1,6 @@
 // Setup (DESIGN.md 3): a mode control (Sensitivity, Key equalizer, Settings keys) changes the
 // board's overlay and the right column; Save to Striso, Audio (Through PC, devices, Record), the
-// motion sensor and the firmware that plays are always at the lower right. The firmware builds
+// motion sensor, the firmware that plays and its engine slots are always at the lower right. The firmware builds
 // Virtual can run are chosen from the header's Virtual control (docs/flows.md 5), not here.
 
 import 'dart:math' as math;
@@ -15,6 +15,7 @@ import '../theme.dart';
 import 'audio.dart';
 import 'board_view.dart';
 import 'chrome.dart';
+import 'engine_slots.dart';
 import 'live_panel.dart';
 import 'paint_util.dart';
 import 'play_tab.dart';
@@ -85,6 +86,8 @@ class SetupTab extends StatelessWidget {
                 MidiOutSection(ctl),
                 const SizedBox(height: Space.xl),
                 if (c.maxWidth >= 1100) ...[MotionRow(ctl), const SizedBox(height: Space.l), FirmwareRow(ctl)],
+                const SizedBox(height: Space.xl),
+                EngineSlots(ctl),
                 const SizedBox(height: Space.m),
                 Align(
                   alignment: Alignment.centerLeft,

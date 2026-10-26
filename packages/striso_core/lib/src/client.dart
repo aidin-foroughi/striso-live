@@ -6,7 +6,7 @@ import 'dart:typed_data';
 
 import 'board_state.dart';
 import 'dials.dart';
-import 'engines.dart';
+import 'modules.dart';
 import 'presets.dart';
 import 'protocol.dart';
 import 'transport.dart';
@@ -348,14 +348,73 @@ class StrisoClient {
     return r.state['h'] as HeroKnobs?;
   }
 
-  /// The engines the virtual board loaded from its engine folder (Stce, docs/flows.md 10); null
-  /// without a reply (a build that cannot load engines does not answer).
-  Future<EngineReport?> getEngines({Duration timeout = const Duration(milliseconds: 500)}) async {
-    final r = await request(commandChar('e'), (l, s) {
-      if (!isEngineReportLine(l)) return Take.no;
-      return l.trim() == 'e end' ? Take.done : Take.more;
+  // the engine-module slots (modules.dart) ---------------------------------------------------------
+
+  /// The slots (Stco); null without a whole reply (a firmware without slots does not answer).
+  Future<List<ModuleSlot>?> listModuleSlots({Duration timeout = const Duration(milliseconds: 600)}) async {
+    final r = await request(moduleSlotsCommand(), (l, s) {
+      if (!isModuleSlotLine(l)) return Take.no;
+      return l.trim() == 'slot end' ? Take.done : Take.more;
     }, timeout: timeout);
-    return parseEngineReport(r.lines);
+    return parseModuleSlots(r.lines);
+  }
+
+  /// Puts an engine package into a slot (Stci): its bytes as they are, the firmware's progress
+  /// ([onProgress]: bytes it has, of the package's) checked against what was sent (zlib crc32 at
+  /// each line), then its slot or its reason. It waits as long as the progress lines keep coming
+  /// ([stall] between two at most; the board takes about 64 KB/s, the slot's erase first).
+  Future<ModuleInstall> installModule(List<int> package, {void Function(int bytes, int total)? onProgress, Duration stall = const Duration(seconds: 20)}) async {
+    final total = package.length;
+    String? mismatch;
+    final r = await request(
+      moduleInstallCommand(package),
+      (l, s) {
+        final m = parseModuleLine(l);
+        if (m == null) return Take.no;
+        switch (m) {
+          case ModuleBegin():
+            s['begin'] = m;
+            return Take.more;
+          case ModuleProgress():
+            if (m.bytes > total || crc32(package, end: m.bytes) != m.crc) mismatch ??= 'the bytes arrived changed (at ${m.bytes} of $total)';
+            onProgress?.call(m.bytes, total);
+            return Take.more;
+          case ModuleDone() || ModuleError():
+            s['end'] = m;
+            return Take.done;
+          case ModuleErased():
+            return Take.no;
+        }
+      },
+      // the slot's erase (seconds on the board), then a line every 4 KB
+      timeout: Duration(milliseconds: 30000 + total * 4),
+      idle: stall,
+    );
+    final begin = r.state['begin'] as ModuleBegin?;
+    final end = r.state['end'];
+    if (end is ModuleDone) {
+      onProgress?.call(total, total);
+      return ModuleInstall(done: end, tag: begin?.tag, error: mismatch);
+    }
+    if (end is ModuleError) return ModuleInstall(error: end.reason.isEmpty ? 'refused' : end.reason, tag: begin?.tag);
+    if (begin == null) return const ModuleInstall(error: 'no answer: this firmware has no engine slots');
+    return ModuleInstall(error: mismatch ?? 'the board stopped answering', tag: begin.tag);
+  }
+
+  /// Erases a slot (Stcz): null when it is erased, else the firmware's reason.
+  Future<String?> eraseModuleSlot(int slot) async {
+    final r = await request(moduleEraseCommand(slot), (l, s) {
+      final m = parseModuleLine(l);
+      if (m is ModuleErased || m is ModuleError) {
+        s['r'] = m;
+        return Take.done;
+      }
+      return Take.no;
+    }, timeout: const Duration(seconds: 6)); // a sector erase: 1 to 4 s on the board
+    final m = r.state['r'];
+    if (m is ModuleErased) return null;
+    if (m is ModuleError) return m.reason.isEmpty ? 'refused' : m.reason;
+    return 'no answer: this firmware has no engine slots';
   }
 
   // the voice keys (voice_keys.dart, src/synth/voice_keys.hpp) ------------------------------------
