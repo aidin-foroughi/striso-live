@@ -11,6 +11,7 @@ import 'protocol.dart';
 import 'transport.dart';
 import 'tuning.dart';
 import 'usb_audio_stats.dart';
+import 'voice_keys.dart';
 
 const _paramIntervalMs = 16; // at most ~60 writes per second per parameter
 const _streamSilenceMs = 3000;
@@ -354,6 +355,30 @@ class StrisoClient {
       return l.trim() == 'e end' ? Take.done : Take.more;
     }, timeout: timeout);
     return parseEngineReport(r.lines);
+  }
+
+  // the voice keys (voice_keys.dart, src/synth/voice_keys.hpp) ------------------------------------
+
+  /// The voice keys and the config edits that would keep them (Stca); null without a whole reply.
+  Future<VoiceKeys?> getVoiceKeys({Duration timeout = const Duration(milliseconds: 600)}) async {
+    final r = await request(commandChar('a'), (l, s) {
+      final t = l.trim();
+      if (!t.startsWith('a ')) return Take.no;
+      return t == 'a end' ? Take.done : Take.more;
+    }, timeout: timeout);
+    return parseVoiceKeys(r.lines);
+  }
+
+  /// Puts voice entry [entry]'s engine and preset on voice key [key] (StcA; [voiceKeyClear],
+  /// [voiceKeyFactory]); null without a reply.
+  Future<VoiceKeyReply?> assignVoiceKey(int key, int entry, {Duration timeout = const Duration(milliseconds: 400)}) async {
+    final r = await request(voiceKeyCommand(key, entry), (l, s) {
+      final a = parseVoiceKeyReply(l);
+      if (a == null) return Take.no;
+      s['a'] = a;
+      return Take.done;
+    }, timeout: timeout);
+    return r.state['a'] as VoiceKeyReply?;
   }
 
   // the sound presets (presets.dart, doc/presets_console.md) -------------------------------------

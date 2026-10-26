@@ -16,6 +16,7 @@ import 'protocol.dart';
 import 'board_state.dart';
 import 'settings_map.dart';
 import 'transport.dart';
+import 'voice_keys.dart';
 
 typedef _P = (String name, String group, double min, double max, int kind, double def);
 
@@ -600,6 +601,8 @@ class MockBoard implements PlayableBoard {
           _presetUpload(k, List<int>.of(p));
         } else if (_rxCmd == 'K') {
           _print(settingsKey(p[0]) ? 'K ok ${p[0]}\r\n' : 'K err ${p[0]}\r\n');
+        } else if (_rxCmd == 'A') {
+          _assignVoiceKey(p[0], p[1] | p[2] << 8);
         } else {
           final v = ByteData.sublistView(Uint8List.fromList(p.sublist(2, 6))).getFloat32(0, Endian.little);
           if (!setParam(p[0], p[1], v)) _print('Q err ${p[0]} ${p[1]}\r\n');
@@ -665,6 +668,12 @@ class MockBoard implements PlayableBoard {
       _rxNeed = 1;
       _rxCmd = 'K';
       _rxPayload.clear();
+    } else if (ch == 'A' && !stockFirmware) {
+      _rxNeed = 3;
+      _rxCmd = 'A';
+      _rxPayload.clear();
+    } else if (ch == 'a' && !stockFirmware) {
+      _printVoiceKeys();
     } else if (ch == 'N') {
       _printTuning();
     } else if (ch == 'X' && !stockFirmware) {
@@ -740,6 +749,94 @@ class MockBoard implements PlayableBoard {
   }
 
   int? _upKind;
+
+  // the voice keys (src/synth/voice_keys.hpp; Stca, StcA) --------------------------------------
+
+  /// The voice keys as the firmware's defaults have them (config_schema.hpp `sGv<key>a`).
+  static const factoryVoiceKeys = <int, String?>{
+    10: null, 12: null, 13: 'brass', 14: null, 15: 'trumpet', 16: 'accordion', 18: 'strisy', 20: 'va', //
+    22: 'modal', 24: 'bowed', 26: 'wind', 28: 'ep',
+  };
+
+  /// Which engine (and preset, null: its first) is on each voice key now; what the settings hold.
+  final voiceKeys = {for (final e in factoryVoiceKeys.entries) e.key: (e.value, null as String?)};
+  final savedVoiceKeys = {for (final e in factoryVoiceKeys.entries) e.key: (e.value, null as String?)};
+
+  // an engine's colour: a loaded one's (Stce), else its voice key's led in the recorded layout
+  int? _engineColour(String engine) {
+    for (final l in _engineLines) {
+      final w = l.split(' ');
+      if (w.length >= 6 && w[1] == 'ok' && w[5] == engine) return int.parse(w[4], radix: 16);
+    }
+    for (final (_, e, led) in mockSettingsLayout.voiceKeys) {
+      if (e == engine) return led[0] << 16 | led[1] << 8 | led[2];
+    }
+    return 0x808080;
+  }
+
+  void _printVoiceKeys() {
+    _print('a slots ${voiceKeys.length}\r\n');
+    for (final k in voiceKeys.keys.toList()..sort()) {
+      final (engine, preset) = voiceKeys[k]!;
+      final factory = factoryVoiceKeys[k] ?? '-';
+      if (engine == null) {
+        _print('a $k empty - - - - - - $factory\r\n');
+        continue;
+      }
+      final first = _entries.indexWhere((e) => e.engine == engine);
+      if (first < 0) {
+        _print('a $k missing - $engine ${preset ?? '-'} - - - $factory\r\n');
+        continue;
+      }
+      final count = _entries.where((e) => e.engine == engine).length;
+      final p = preset == null ? 0 : _entries.sublist(first, first + count).indexWhere((e) => e.preset == preset);
+      final at = voice >= first && voice < first + count ? voice : first + (p < 0 ? 0 : p);
+      _print(
+        'a $k ${p < 0 ? 'preset' : 'ok'} ${_engineColour(engine)!.toRadixString(16).padLeft(6, '0')} $engine ${preset ?? '-'} '
+        '$first $count $at $factory\r\n',
+      );
+    }
+    String half(String? s, int h) => s == null || s.length <= 8 * h ? '' : s.substring(8 * h, s.length < 8 * h + 8 ? s.length : 8 * h + 8);
+    for (final k in voiceKeys.keys.toList()..sort()) {
+      final now = voiceKeys[k]!, saved = savedVoiceKeys[k]!;
+      final factory = (factoryVoiceKeys[k], null);
+      final parts = {'a': (now.$1, 0), 'b': (now.$1, 1), 'p': (now.$2, 0), 'q': (now.$2, 1)};
+      for (final e in parts.entries) {
+        final want = half(e.value.$1, e.value.$2);
+        final fac = half(e.key == 'a' || e.key == 'b' ? factory.$1 : factory.$2, e.value.$2);
+        final had = half(e.key == 'a' || e.key == 'b' ? saved.$1 : saved.$2, e.value.$2);
+        final key = 'sGv$k${e.key}';
+        if (want == fac) {
+          if (had != fac) _print('a default $key\r\n');
+        } else if (want != had) {
+          _print(want.isEmpty ? 'a blank $key\r\n' : 'a set $key $want\r\n');
+        }
+      }
+    }
+    _print('a end\r\n');
+  }
+
+  void _assignVoiceKey(int key, int entry) {
+    if (!voiceKeys.containsKey(key)) {
+      _print('A err key $key\r\n');
+      return;
+    }
+    if (entry == voiceKeyClear) {
+      voiceKeys[key] = (null, null);
+    } else if (entry == voiceKeyFactory) {
+      voiceKeys[key] = (factoryVoiceKeys[key], null);
+    } else if (entry < 0 || entry >= _entries.length) {
+      _print('A err entry $key\r\n');
+      return;
+    } else if ('${_entries[entry].engine}${_entries[entry].preset ?? ''}'.contains(' ') || _entries[entry].engine.length > 16 || (_entries[entry].preset?.length ?? 0) > 16) {
+      _print('A err name $key\r\n');
+      return;
+    } else {
+      voiceKeys[key] = (_entries[entry].engine, _entries[entry].preset);
+    }
+    final (e, p) = voiceKeys[key]!;
+    _print('A ok $key ${e ?? '-'} ${p ?? '-'}\r\n');
+  }
 
   // the factory presets: the voice entries, by engine number (its order in the voice list) and
   // its preset
@@ -1040,7 +1137,7 @@ class MockBoard implements PlayableBoard {
         'fine=${(noteOffset * 100).toStringAsFixed(2)} transpose=0.000 pres=${f3(touch[0])} velo=${f3(touch[1])} '
         'tilt=${f3(touch[2])} bendsens=${f3(touch[3])} thres=${f3(touch[4])} vol=90 sustain=0.188 rate=1 '
         'alt=${(controlsDown[3]) != 0 ? 1 : 0} porta=0 flip=0 led=00AA00 updown=0000 legato=$legato';
-    final snap = '$body ${values.join(',')} ${keyFactors.join(',')}';
+    final snap = '$body ${values.join(',')} ${keyFactors.join(',')} $voiceKeys';
     if (snap != _stateSeen) {
       if (_stateSeen.isNotEmpty) _stateCount++;
       _stateSeen = snap;

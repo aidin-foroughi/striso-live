@@ -20,3 +20,4 @@ export 'src/touch.dart';
 export 'src/transport.dart';
 export 'src/tuning.dart';
 export 'src/usb_audio_stats.dart';
+export 'src/voice_keys.dart';

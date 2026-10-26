@@ -484,6 +484,22 @@ class BoardPainter extends CustomPainter {
     for (final k in boardKeys) {
       final center = g.at(k.x, k.y);
       final f = ctl.settingsLayout[k.id];
+      // a voice key the layout leaves out: free (a dashed hairline and +), or its engine isn't
+      // loaded (a quiet rim and the engine's id)
+      final slot = f == null ? ctl.voiceKeys[k.id] : null;
+      if (slot != null && (slot.empty || slot.missing)) {
+        c.drawCircle(center, r, Paint()..color = BoardPal.natural);
+        if (slot.empty) {
+          dashedCircle(c, center, r - 0.75, _stroke(Pal.hairline, 1), s * 1.2, s * 0.8);
+          drawText(c, '+', center, math.max(10.0, r * 0.58).roundToDouble(), Pal.text3, weight: FontWeight.w400);
+        } else {
+          c.drawCircle(center, r - 0.75, _stroke(Pal.text3, 1));
+          final id = slot.engine!;
+          drawText(c, id.length > 7 ? '${id.substring(0, 6)}…' : id, center, math.max(9.0, r * 0.36).roundToDouble(), Pal.text3, weight: FontWeight.w400);
+        }
+        if (k.id == ctl.settingsSelected) c.drawCircle(center, r + 3, _stroke(Pal.accent, 2));
+        continue;
+      }
       if (f == null) {
         c.drawCircle(center, r + 0.5, Paint()..color = _a(Pal.bg0, 0.78));
         continue;

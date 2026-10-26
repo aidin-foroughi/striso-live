@@ -18,6 +18,12 @@ no fallback for it.
   its tooltip.
 - **Voice select by StcW.** It reaches any entry of the voice list, for boards with more than 128
   voices (engines added in Virtual).
+- **Any engine on any voice key.** Setup, Settings keys: click a voice key to choose the engine
+  on it and the preset it starts on, put its own engine back (↺), or leave it empty. Three free
+  keys (10, 12, 14) take new engines. Right-click an engine button to **Put on key…**, with the
+  free keys first; putting it in place of another engine offers Undo. A key whose engine isn't
+  loaded shows that and stays dark. Changes are live; **Save to Striso** keeps them, in the
+  board's own settings records. Needs the firmware with the voice keys (Stca, StcA).
 
 ## 1.3.0
 

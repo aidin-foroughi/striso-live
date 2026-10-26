@@ -11,6 +11,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'config_uf2.dart';
+import 'voice_keys.dart';
 
 /// Roots where an update drive can appear.
 List<String> candidateRoots() {
@@ -66,6 +67,7 @@ final Uint8List fakeDriveConfig = configUf2([('iGoct   ', '0       '), ('fCfacC_
 
 Future<SaveResult> saveTouch(
   TouchValues values, {
+  List<ConfigEdit> voiceKeys = const [],
   required String backupDir,
   void Function(String text)? progress,
   String? fake, // null, 'ok' or 'fail': no drive is touched
@@ -77,7 +79,7 @@ Future<SaveResult> saveTouch(
   String? backupPath;
   try {
     // check the values before anything else happens
-    buildConfig(fakeDriveConfig, values);
+    buildConfig(fakeDriveConfig, values, voiceKeys: voiceKeys);
     say('Waiting for the Striso\u2019s update drive\u2026');
     String? root;
     Uint8List current;
@@ -100,7 +102,7 @@ Future<SaveResult> saveTouch(
     Directory(backupDir).createSync(recursive: true);
     backupPath = _join(backupDir, 'config_${_stamp(DateTime.now())}.uf2');
     File(backupPath).writeAsBytesSync(current, flush: true);
-    final built = buildConfig(current, values);
+    final built = buildConfig(current, values, voiceKeys: voiceKeys);
     say('Writing the new settings\u2026');
     if (fake != null) {
       await Future<void>.delayed(const Duration(milliseconds: 600));

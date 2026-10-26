@@ -435,6 +435,76 @@ void main() {
     });
   });
 
+  // The voice keys (Stca, StcA): an engine that is only loaded (the reed: a component the build
+  // doesn't link in) put on a free key, played from it, the board's edits saved through its drive
+  // with saveTouch, and the key still holds it after the restart; a board without the engine shows
+  // the key missing.
+  final reedDir = _componentDir();
+  final reed = reedDir == null ? null : File('$reedDir/reed.${Platform.isWindows ? 'dll' : (Platform.isMacOS ? 'dylib' : 'so')}');
+  test('voice keys: a loaded engine on a key, kept by Save to Striso, missing without it', skip: skip ?? (reed == null || !reed.existsSync() ? 'no reed component in the firmware build' : null), () async {
+    final dir = Directory.systemTemp.createTempSync('sv-keys');
+    addTearDown(() {
+      try {
+        dir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+    reed!.copySync('${dir.path}${Platform.pathSeparator}${reed.path.split(RegExp(r'[\\/]')).last}');
+    final b = VirtualBoard(engineDir: dir.path)..startRealtime();
+    addTearDown(b.dispose);
+    var c = await _connect(b);
+    final vk0 = await c.getVoiceKeys();
+    if (vk0 == null) {
+      await c.disconnect();
+      markTestSkipped('this build has no voice keys (Stca)');
+      return;
+    }
+    expect(vk0[14]!.empty, isTrue);
+    expect(vk0[26]!.engine, 'wind');
+    final entry = (await c.listVoices()).firstWhere((v) => v.engine == 'reed').index;
+    final a = await c.assignVoiceKey(14, entry);
+    expect(a?.ok, isTrue);
+    expect(a!.engine, 'reed');
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    final vk = (await c.getVoiceKeys())!;
+    expect(vk[14]!.state, 'ok');
+    expect(vk[14]!.colour, 0x203000, reason: 'the reed\'s own colour, from its descriptor');
+    expect(vk.edits.map((e) => '$e'), ['a set sGv14a reed']);
+    final layout = (await c.getSettingsLayout())!;
+    expect(layout[14]!.engine, 'reed');
+    expect(layout[14]!.short, 'reed');
+    // played from the key: Settings + key 14 selects it
+    expect((await c.pressSettingsKey(14))?.ok, isTrue);
+    await _until(() => b.state.voice == entry);
+    // Save to Striso: the board's edits, through the drive; the restart; the key holds the reed
+    final touch = (await c.getParams(Target.touch))!.params;
+    final keys = (await c.getParams(Target.keys))!.params;
+    final values = TouchValues([for (final p in touch) (p.name, p.value)], [for (final p in keys) (p.name, p.value)]);
+    await c.send(Cmd.bootloader());
+    await c.disconnect();
+    await _until(() => b.inBootloader);
+    final backups = Directory.systemTemp.createTempSync('sv_backup');
+    addTearDown(() => backups.deleteSync(recursive: true));
+    final res = await saveTouch(values, voiceKeys: vk.edits, backupDir: backups.path, roots: () => [b.drivePath!], driveTimeout: const Duration(seconds: 5));
+    expect(res.ok, isTrue, reason: res.message);
+    await _until(() => b.attached);
+    c = await _connect(b);
+    final after = (await c.getVoiceKeys())!;
+    expect(after[14]!.engine, 'reed');
+    expect(after[14]!.state, 'ok');
+    expect(after.saved, isTrue, reason: 'nothing left to write');
+    await c.disconnect();
+    // the same settings, no reed loaded: the key is missing (no other engine on it)
+    final b2 = VirtualBoard(flash: b.flash)..startRealtime();
+    addTearDown(b2.dispose);
+    final c2 = await _connect(b2);
+    final bare = (await c2.getVoiceKeys())!;
+    expect(bare[14]!.state, 'missing');
+    expect(bare[14]!.engine, 'reed');
+    expect((await c2.getSettingsLayout())![14], isNull);
+    expect((await c2.pressSettingsKey(14))?.ok, isFalse);
+    await c2.disconnect();
+  });
+
   // StcW: any voice-list entry, also past the 128 that 0x80 + n reaches. The firmware build's own
   // components (build/<preset>/components) loaded all at once make the list that long.
   final many = _componentDir();

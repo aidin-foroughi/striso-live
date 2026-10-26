@@ -7,6 +7,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'voice_keys.dart';
+
 const int configStart = 0x08020000;
 const int configEnd = 0x08040000;
 const int _magic0 = 0x0A324655, _magic1 = 0x9E5D5157, _magicEnd = 0x0AB16F30, _flagFamily = 0x2000, _family = 0xA21E1295;
@@ -197,10 +199,35 @@ class BuiltConfig {
   const BuiltConfig(this.data, this.recs, this.updates, this.current);
 }
 
-/// A whole save: the current config UF2 and the values give the UF2 to write.
-BuiltConfig buildConfig(Uint8List currentUf2, TouchValues values) {
+// the voice keys' records: sGv<key><part> (src/synth/voice_keys.hpp), nothing else
+final _voiceKeyRecord = RegExp(r'^sGv\d\d[abpq]$');
+
+/// The voice keys' config edits as the board lists them (Stca), as they are: set writes the
+/// value, blank a blank one, default drops the record. Only voice-key records are taken.
+({List<Record> updates, List<String> remove}) voiceKeyUpdates(List<ConfigEdit> edits) {
+  final updates = <Record>[], remove = <String>[];
+  for (final e in edits) {
+    if (!_voiceKeyRecord.hasMatch(e.key)) throw ConfigError('not a voice key setting: ${jsonEncode(e.key)}');
+    final key = e.key.padRight(8); // (a record's key as the page has it)
+    switch (e.kind) {
+      case 'set':
+        updates.add((key, e.value));
+      case 'blank':
+        updates.add((key, ''));
+      case 'default':
+        remove.add(key);
+      default:
+        throw ConfigError('unknown voice key edit ${jsonEncode(e.kind)}');
+    }
+  }
+  return (updates: updates, remove: remove);
+}
+
+/// A whole save: the current config UF2, the values and the voice keys' edits give the UF2 to write.
+BuiltConfig buildConfig(Uint8List currentUf2, TouchValues values, {List<ConfigEdit> voiceKeys = const []}) {
   final current = configParse(currentUf2);
-  final u = touchUpdates(values);
+  final t = touchUpdates(values), k = voiceKeyUpdates(voiceKeys);
+  final u = (updates: [...t.updates, ...k.updates], remove: [...t.remove, ...k.remove]);
   final recs = configMerge(current, u.updates, u.remove);
   final data = configUf2(recs);
   // the file must read back as exactly these records, all inside the config area

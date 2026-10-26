@@ -7,6 +7,7 @@ import 'package:striso_core/striso_core.dart';
 import '../controller.dart';
 import '../harmony_tracker.dart';
 import '../theme.dart';
+import 'voice_keys.dart';
 
 class RomanText extends StatelessWidget {
   final Roman r;
@@ -424,6 +425,8 @@ class _SettingsInfoState extends State<SettingsInfo> {
         final f = id >= 0 ? ctl.settingsLayout[id] : null;
         final voices = ctl.settingsVoices();
         final v = f?.engine != null ? voices[f!.engine] : null;
+        // a voice key: the board's voice-key map (Stca) says what is on it, loaded or not
+        final slot = id >= 0 ? ctl.voiceKeys[id] : null;
         return Column(
           key: const Key('settings-panel'),
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -456,7 +459,9 @@ class _SettingsInfoState extends State<SettingsInfo> {
                 ),
             ],
             const SizedBox(height: Space.l),
-            if (f == null)
+            if (slot != null)
+              VoiceKeyEditor(ctl, slot, editable: id == ctl.settingsSelected)
+            else if (f == null)
               Text(id >= 0 ? 'Key $id has no settings function.' : 'Point at a key, or click one.', style: ui(TypeSize.body, color: Pal.text2))
             else ...[
               Text(

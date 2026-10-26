@@ -6,6 +6,8 @@
 
 import 'dart:typed_data';
 
+import 'voice_keys.dart';
+
 class Usb {
   static const vendorId = 0xF055;
   static const productId = 0x57C0;
@@ -83,6 +85,15 @@ class Cmd {
 Uint8List selectVoiceCommand(int n) {
   if (n < 0 || n > 0xffff) throw RangeError('bad voice index $n');
   return Uint8List.fromList([0x53, 0x74, 0x63, 0x57, n & 0xff, n >> 8]);
+}
+
+/// "StcA" + key + entry (16 bit LE): put voice entry [entry]'s engine and preset on voice key [key]
+/// ([voiceKeyClear]: none, [voiceKeyFactory]: its factory engine). The board answers
+/// `A ok <key> <engine|-> <preset|->` or `A err <why> <key>` (src/synth/voice_keys.hpp).
+Uint8List voiceKeyCommand(int key, int entry) {
+  if (key < 0 || key > 127) throw RangeError('bad key id $key');
+  if (entry < 0 || entry > 0xffff) throw RangeError('bad voice entry $entry');
+  return Uint8List.fromList([0x53, 0x74, 0x63, 0x41, key, entry & 0xff, entry >> 8]);
 }
 
 /// "StcK" + one byte: press a settings key (button id) as if Settings were held on the instrument.

@@ -11,6 +11,7 @@ import 'package:striso_core/striso_core.dart';
 
 import '../controller.dart';
 import '../theme.dart';
+import 'voice_keys.dart';
 import 'board_view.dart';
 import 'chrome.dart';
 import 'knobs.dart';
@@ -199,7 +200,9 @@ class EnginePanel extends StatelessWidget {
                                 on: e.engine == cur && ctl.connected,
                                 size: size,
                                 number: i < 8 ? i + 1 : null,
+                                keys: ctl.voiceKeys.keysOf(e.engine),
                                 onTap: () => ctl.selectEngine(e.engine),
+                                onMenu: ctl.voiceKeys.slots.isEmpty ? null : (pos) => showPutOnKey(context, ctl, e.engine, pos),
                               ),
                           ],
                         );
@@ -267,7 +270,11 @@ class EngineDot extends StatefulWidget {
   final double size;
   final int? number;
   final VoidCallback onTap;
-  const EngineDot({super.key, required this.e, required this.on, required this.onTap, this.size = 24, this.number});
+
+  /// The voice keys it is on (Stca), and "Put on key…" (a right click), null: none.
+  final List<int> keys;
+  final void Function(Offset position)? onMenu;
+  const EngineDot({super.key, required this.e, required this.on, required this.onTap, this.size = 24, this.number, this.keys = const [], this.onMenu});
   @override
   State<EngineDot> createState() => _EngineDotState();
 }
@@ -282,7 +289,9 @@ class _EngineDotState extends State<EngineDot> {
     final info = engineInfo(e.engine);
     return Tooltip(
       message: has
-          ? '${info.label}${info.blurb.isNotEmpty ? ': ${info.blurb}' : ''} (${e.count} preset${e.count == 1 ? '' : 's'})${widget.number != null ? ' · key ${widget.number}' : ''}'
+          ? '${info.label}${info.blurb.isNotEmpty ? ': ${info.blurb}' : ''} (${e.count} preset${e.count == 1 ? '' : 's'})'
+                '${widget.keys.isNotEmpty ? ' · on key ${widget.keys.join(', ')}' : ''}${widget.number != null ? ' · ${widget.number} on the keyboard' : ''}'
+                '${widget.onMenu != null ? '\nRight click: put on key…' : ''}'
           : '${info.label}: not in this firmware',
       child: MouseRegion(
         cursor: has ? SystemMouseCursors.click : SystemMouseCursors.basic,
@@ -291,6 +300,7 @@ class _EngineDotState extends State<EngineDot> {
         child: GestureDetector(
           key: Key('engine-${e.engine}'),
           onTap: has ? widget.onTap : null,
+          onSecondaryTapUp: has && widget.onMenu != null ? (d) => widget.onMenu!(d.globalPosition) : null,
           child: AnimatedContainer(
             duration: Timing.quick,
             width: widget.size,

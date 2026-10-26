@@ -378,6 +378,10 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   /// What every key does with Settings held, as the board lists it (StcX).
   SettingsLayout settingsLayout = SettingsLayout.empty;
 
+  /// The voice keys as the board reports them (Stca): which engine is on which key, and the config
+  /// edits a save needs to keep them. Empty on a firmware without them.
+  VoiceKeys voiceKeys = VoiceKeys.empty;
+
   /// The current voice's hero knobs as the board names them (StcH).
   HeroKnobs? heroes;
 
@@ -1346,6 +1350,8 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     settingsLayout = layout;
     heroes = hero;
     _stateCount = count;
+    voiceKeys = await c.getVoiceKeys() ?? VoiceKeys.empty;
+    if (!current()) return null;
     _applyState(await c.getState());
     await refreshVoices();
     if (!current()) return null;
@@ -1402,6 +1408,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     _confirmTimer = null;
     listsLoading = false;
     settingsLayout = SettingsLayout.empty;
+    voiceKeys = VoiceKeys.empty;
     heroes = null;
     boardState = null;
     _stateCount = null;
@@ -1452,7 +1459,20 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     }
     await _readHeroes(c);
     await refreshTuning();
+    await _readVoiceKeys(c);
     notifyListeners();
+  }
+
+  /// The voice keys again; when they changed, the layout too (its voice keys are theirs).
+  Future<void> _readVoiceKeys(StrisoClient c) async {
+    if (voiceKeys.slots.isEmpty) return; // (a firmware without them)
+    final vk = await c.getVoiceKeys();
+    if (vk == null || !identical(client, c)) return;
+    final changed = vk.slots.join('\n') != voiceKeys.slots.join('\n');
+    voiceKeys = vk;
+    if (!changed) return;
+    final layout = await c.getSettingsLayout();
+    if (layout != null && identical(client, c)) settingsLayout = layout;
   }
 
   void _resetUi() {
@@ -2113,6 +2133,8 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     final virtualSave = b.mode == Mode.virtual && !virtual.isMock;
     // the values as the board lists them right now
     await refreshParams([2, 3]);
+    // and the voice keys' edits as the board lists them now (Stca)
+    if (voiceKeys.slots.isNotEmpty) voiceKeys = await c.getVoiceKeys() ?? voiceKeys;
     final values = TouchValues([for (final p in params[2]!.params) (p.name, p.value)], [for (final p in params[3]!.params) (p.name, p.value)]);
     final expect = {2: values.touch, 3: values.keys};
     _setSaveStatus('Putting the Striso into update mode…');
@@ -2124,8 +2146,11 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
       } catch (_) {}
     }
     await session.beginReboot('save');
+    final keyEdits = voiceKeys.edits;
+    if (keyEdits.isNotEmpty) log('saving voice keys: ${keyEdits.join('; ')}');
     final res = await saveTouch(
       values,
+      voiceKeys: keyEdits,
       backupDir: backupDir,
       progress: (t) => _setSaveStatus(t),
       fake: options.fakeSave,
@@ -2165,6 +2190,79 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
       );
       toast('Touch settings saved to the Striso');
     }
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // voice keys (Stca, StcA): the board decides what is on a key; the app shows it and asks
+
+  /// Puts voice entry [entry]'s engine and preset on voice key [key] ([voiceKeyClear]: none,
+  /// [voiceKeyFactory]: the key's factory engine), then reads back what the board did. Live at
+  /// once; Save to Striso keeps it.
+  Future<bool> putOnKey(int key, int entry) async {
+    final c = client;
+    if (c == null || !canSend) {
+      toast(connecting ? 'Connecting…' : 'Connect first: the voice keys are on the board', 'warn');
+      return false;
+    }
+    final before = voiceKeys[key];
+    final r = await c.assignVoiceKey(key, entry);
+    if (!identical(c, client)) return false;
+    if (r == null || !r.ok) {
+      final why = switch (r?.why) {
+        'key' => 'key $key is not a voice key',
+        'entry' => 'the board has no such voice',
+        'name' => 'its name doesn’t fit a voice key (over 16 characters, or a space)',
+        'busy' => 'the board was busy: try again',
+        null => 'no answer',
+        final w => w,
+      };
+      toast('Not on key $key: $why', 'warn');
+      log('A ${r == null ? 'no reply' : 'err ${r.why}'} $key $entry', LogKind.err);
+      return false;
+    }
+    log('A ok $key ${r.engine ?? '-'} ${r.preset ?? '-'}');
+    await Future<void>.delayed(const Duration(milliseconds: 20)); // (the board's control thread takes it)
+    if (!identical(c, client)) return false;
+    final vk = await c.getVoiceKeys();
+    final layout = await c.getSettingsLayout();
+    if (!identical(c, client)) return false;
+    if (vk != null) voiceKeys = vk;
+    if (layout != null) settingsLayout = layout;
+    _stateCount = await c.getChangeCount() ?? _stateCount;
+    final was = before?.engine;
+    final now = r.engine;
+    lastVoiceKeyUndo = before == null ? null : (key, before);
+    if (now == null) {
+      toast('Key $key: no voice');
+    } else if (was != null && was != now) {
+      toastAction('${engineInfo(now).label} on key $key, in place of ${engineInfo(was).label}. Save to keep it.', 'Undo', () => unawaited(undoVoiceKey()));
+    } else {
+      toast('${engineInfo(now).label} on key $key. Save to keep it.');
+    }
+    notifyListeners();
+    return true;
+  }
+
+  /// The key and what it held before the last [putOnKey] (for Undo); null after none.
+  (int, VoiceKeySlot)? lastVoiceKeyUndo;
+
+  /// Puts back what [lastVoiceKeyUndo] holds: its engine at its preset, the factory engine, or none.
+  Future<bool> undoVoiceKey() async {
+    final u = lastVoiceKeyUndo;
+    if (u == null) return false;
+    final (key, s) = u;
+    final entry = s.empty
+        ? voiceKeyClear
+        : s.isFactory
+        ? voiceKeyFactory
+        : voices.where((v) => v.engine == s.engine && v.preset == s.preset).firstOrNull?.index ??
+              voices.where((v) => v.engine == s.engine).firstOrNull?.index;
+    if (entry == null) {
+      toast('${engineInfo(s.engine ?? '').label} is not loaded: it can\'t go back on key $key', 'warn');
+      return false;
+    }
+    lastVoiceKeyUndo = null;
+    return putOnKey(key, entry);
   }
 
   // ---------------------------------------------------------------------------------------------
