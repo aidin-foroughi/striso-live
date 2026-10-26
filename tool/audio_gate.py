@@ -17,10 +17,11 @@ sa_test_input. Each build runs in its own process, once per scenario:
 each at gain -6 dB (the default) and 0 dB, with the output asked shared and exclusive (the null
 backend opens it shared either way; a build that simulates an exclusive device's volume,
 sa_test_output_volume, is measured at that volume too, and must equal its shared output times the
-volume). Per run: the level (RMS, dBFS), the peak, and the sine's distortion (the residual after
-fitting a 440 Hz sine, dB under it). The gate fails when the candidate's level or peak differs from
-the reference's by more than 0.1 / 0.2 dB, its distortion is worse by more than 3 dB (above -90 dB), or (virtual)
-its samples differ from the reference's.
+volume). Per run: the level (RMS, dBFS), the peak, and the sine's harmonic distortion (harmonics
+2..10, dB under the fundamental). The gate fails when the candidate's level or peak differs from
+the reference's by more than 0.1 / 0.2 dB, its distortion is worse by more than 3 dB (above
+-90 dB), any peak is over 0 dBFS (the device would clip), or (virtual) its samples differ from
+the reference's.
 Exit status 0: pass, 1: fail, 2: a build could not run.
 """
 import ctypes
@@ -98,24 +99,24 @@ def run_one(dll, scenario, gain_db, exclusive, volume):
     print(json.dumps({'samples': samples}))
 
 
-def _fit(block, freq, rate):
-    """Least squares a sin + b cos at freq: the sine's RMS and the residual's RMS."""
-    w = 2 * math.pi * freq / rate
-    ss = sc = cc = ys = yc = 0.0
-    for i, v in enumerate(block):
-        sn, cs = math.sin(w * i), math.cos(w * i)
-        ss += sn * sn
-        sc += sn * cs
-        cc += cs * cs
-        ys += v * sn
-        yc += v * cs
-    det = ss * cc - sc * sc
-    if not det:
-        return 0.0, 0.0
-    a = (ys * cc - yc * sc) / det
-    b = (yc * ss - ys * sc) / det
-    res = sum((v - (a * math.sin(w * i) + b * math.cos(w * i))) ** 2 for i, v in enumerate(block))
-    return math.sqrt((a * a + b * b) / 2), math.sqrt(res / len(block))
+def _thd(block, freq, rate):
+    """Harmonic distortion of a sine at freq: the power at its harmonics 2..10 (under Nyquist) over
+    the fundamental's, Hann windowed (Goertzel at each). Overdrive and clipping put energy there; the
+    passthrough's resampling (its drift servo bends the pitch by ppm) does not."""
+    n = len(block)
+    win = [0.5 - 0.5 * math.cos(2 * math.pi * i / (n - 1)) for i in range(n)]
+    x = [v * w for v, w in zip(block, win)]
+
+    def power(f):
+        c = 2 * math.cos(2 * math.pi * f / rate)
+        s1 = s2 = 0.0
+        for v in x:
+            s1, s2 = v + c * s1 - s2, s1
+        return s1 * s1 + s2 * s2 - c * s1 * s2
+
+    fund = power(freq)
+    harm = sum(power(k * freq) for k in range(2, 11) if k * freq < rate / 2 - 200)
+    return fund, harm
 
 
 def _freq(block, rate):
@@ -132,9 +133,9 @@ def _freq(block, rate):
 
 def measure(x, rate=48000):
     """Level, peak and distortion of the left channel after the settle time. Distortion: per block
-    of 0.1 s, the residual after fitting a sine at the block's own frequency (the passthrough
-    resamples by its drift servo), dB under the sine; the median over the blocks (a block with a
-    dropout or the priming is an outlier, not the sound)."""
+    of 0.1 s, the harmonic distortion of the sine at the block's own frequency (the passthrough
+    resamples by its drift servo), dB under it; the median over the blocks (a block with a dropout
+    or the priming is an outlier, not the sound)."""
     left = x[0::2][int(SETTLE * rate):]
     if len(left) < rate // 2:
         return None
@@ -148,9 +149,9 @@ def measure(x, rate=48000):
         block = left[o:o + k]
         if max(abs(v) for v in block) < 1e-6:
             continue
-        sine, resid = _fit(block, _freq(block, rate), rate)
-        if sine > 0:
-            dist.append(db(resid) - db(sine))
+        fund, harm = _thd(block, _freq(block, rate), rate)
+        if fund > 0:
+            dist.append(10 * math.log10(max(harm, 1e-30) / fund))
     dist.sort()
     return {'rms_db': db(rms), 'peak_db': db(peak), 'distortion_db': dist[len(dist) // 2] if dist else 0.0, 'frames': n}
 
@@ -168,12 +169,17 @@ def main():
         _, _, dll, scenario, gain_db, exclusive, volume = sys.argv
         run_one(dll, scenario, float(gain_db), exclusive == '1', float(volume))
         return 0
-    args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    argv = sys.argv[1:]
+    report_path = None
+    if '--json' in argv:
+        i = argv.index('--json')
+        report_path = argv[i + 1] if i + 1 < len(argv) else None
+        del argv[i:i + 2]
+    args = [a for a in argv if not a.startswith('--')]
     if len(args) != 2:
         print(__doc__)
         return 2
     ref, cand = (os.path.abspath(a) for a in args)
-    report_path = sys.argv[sys.argv.index('--json') + 1] if '--json' in sys.argv else None
     report, ok = [], True
     cases = [(s, g, e, v) for s in ('monitor', 'virtual') for g in (-6.0, 0.0) for e, v in ((False, 1.0), (True, 1.0), (True, 0.3))]
     for scenario, gain_db, exclusive, volume in cases:
@@ -193,7 +199,7 @@ def main():
             shared = child_run(cand, scenario, gain_db, False, 1.0)
             ms, mc = measure(shared['samples']), measure(c['samples'])
             want = ms['rms_db'] + 20 * math.log10(volume)
-            good = abs(mc['rms_db'] - want) <= 0.1 and mc['distortion_db'] <= max(ms['distortion_db'], DIST_FLOOR) + DIST_TOL
+            good = mc['peak_db'] <= 0.0 and abs(mc['rms_db'] - want) <= 0.1 and mc['distortion_db'] <= max(ms['distortion_db'], DIST_FLOOR) + DIST_TOL
             ok &= good
             print(f'{"PASS" if good else "FAIL"}  {name}: candidate {mc["rms_db"]:.2f} dB, its shared x volume {want:.2f} dB')
             report.append({'case': name, 'pass': good, 'candidate': mc, 'shared_times_volume_db': want})
@@ -203,7 +209,7 @@ def main():
             print(f'FAIL  {name}: too few frames (reference {len(r["samples"])}, candidate {len(c["samples"])})')
             ok = False
             continue
-        good = abs(mc['rms_db'] - mr['rms_db']) <= 0.1 and abs(mc['peak_db'] - mr['peak_db']) <= 0.2 and mc['distortion_db'] <= max(mr['distortion_db'], DIST_FLOOR) + DIST_TOL
+        good = mc['peak_db'] <= 0.0 and abs(mc['rms_db'] - mr['rms_db']) <= 0.1 and abs(mc['peak_db'] - mr['peak_db']) <= 0.2 and mc['distortion_db'] <= max(mr['distortion_db'], DIST_FLOOR) + DIST_TOL
         diff = None
         if scenario == 'virtual':
             k = min(len(r['samples']), len(c['samples']), 2 * 48000)
