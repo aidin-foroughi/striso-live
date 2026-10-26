@@ -122,6 +122,9 @@ static struct {
     volatile uint32_t gain_bits, lvl_l, lvl_r, rec_dropped;
     volatile uint32_t cap_tid, play_tid, rt_cap, rt_play;
     volatile uint32_t jit_us, jit_every, jit_out, jit_n_cap, jit_n_play;
+    volatile uint32_t tin_hz_bits, tin_amp_bits; /* sa_test_input: a sine instead of the null capture's silence */
+    double tin_phase;                            /* capture thread */
+    float* tin_buf;
     sa_evq ev_cap, ev_play; /* the callbacks' own events (real-time setup) */
     float peak_l, peak_r;   /* capture callback's meter state */
 
@@ -139,7 +142,8 @@ static struct {
 /* ======================================================================== measurements (API 3)
  *
  * sa_probe: the callbacks record timing marks (one queue per device thread) and copy the input as
- * it arrives and the output before its gain into two taps; the caller reads them (under G.lock,
+ * it arrives, the output before its gain and the output as the device gets it (every gain applied,
+ * before miniaudio converts it to the device's format) into three taps; the caller reads them (under G.lock,
  * which the callbacks never take). A device's queue and tap are reset only while that device is
  * closed (its thread is not running), when it opens: session goes up and frames start at 0. */
 #define SA_MARKQ 8192
@@ -155,11 +159,11 @@ static struct {
     int alloc;
     volatile uint32_t on, guard, lost, violations, discont;
     sa_markq qcap, qplay;
-    sa_ring tap[2];
-    volatile uint32_t tap_state[2]; /* 0 waiting for its first frame, 1 running, 2 stopped (overflowed) */
-    int64_t tap_first[2];           /* the device frame of the tap's first frame (set by the producer) */
-    int64_t tap_read[2];            /* consumer */
-    int32_t tap_session[2];
+    sa_ring tap[3];                 /* 0 the input, 1 the output before its gain, 2 the output as the device gets it */
+    volatile uint32_t tap_state[3]; /* 0 waiting for its first frame, 1 running, 2 stopped (overflowed) */
+    int64_t tap_first[3];           /* the device frame of the tap's first frame (set by the producer) */
+    int64_t tap_read[3];            /* consumer */
+    int32_t tap_session[3];
     float* scratch;                 /* playback thread: the output before its gain */
     /* capture thread */
     int64_t cap_frames, cap_pkt_frames;
@@ -193,13 +197,14 @@ static void probe_reset(int capture) {
     sa_markq* q = capture ? &P.qcap : &P.qplay;
     sa_st(&q->w, 0);
     sa_st(&q->r, 0);
-    int k = capture ? 0 : 1;
-    if (P.alloc) {
-        sa_st(&P.tap[k].w, 0);
-        sa_st(&P.tap[k].r, 0);
+    for (int k = capture ? 0 : 1; k <= (capture ? 0 : 2); k++) {
+        if (P.alloc) {
+            sa_st(&P.tap[k].w, 0);
+            sa_st(&P.tap[k].r, 0);
+        }
+        sa_st(&P.tap_state[k], 0);
+        P.tap_read[k] = 0;
     }
-    sa_st(&P.tap_state[k], 0);
-    P.tap_read[k] = 0;
     if (capture) {
         P.cap_frames = P.cap_pkt_frames = 0;
         P.tap_session[0] = ++P.cap_session;
@@ -210,7 +215,7 @@ static void probe_reset(int capture) {
         P.out_ahead_n = 0;
         P.out_ahead_s = 0;
         sa_stf(&P.out_ahead, 0);
-        P.tap_session[1] = ++P.play_session;
+        P.tap_session[1] = P.tap_session[2] = ++P.play_session;
     }
     ma_mutex_unlock(&G.lock);
 }
@@ -475,6 +480,20 @@ static void capture_cb(ma_device* d, void* out, const void* in, ma_uint32 n) {
     rt_once(d, &G.cap_tid, &G.rt_cap, &G.ev_cap, 1);
     jitter(&G.jit_n_cap);
     const float* x = (const float*)in;
+    const float tin_hz = sa_ldf(&G.tin_hz_bits);
+    if (x && d->capture.channels == 2 && tin_hz > 0 && G.backend == SA_BACKEND_NULL && G.tin_buf && n <= SA_SCRATCH) {
+        /* sa_test_input: a known sine as the input (the null capture device gives silence) */
+        const float a = sa_ldf(&G.tin_amp_bits);
+        const double step = 2.0 * 3.14159265358979323846 * tin_hz / (double)d->sampleRate;
+        for (ma_uint32 i = 0; i < n; i++) {
+            const float v = (float)(a * sin(G.tin_phase));
+            G.tin_buf[2 * i] = v;
+            G.tin_buf[2 * i + 1] = v;
+            G.tin_phase += step;
+            if (G.tin_phase > 6.283185307179586) G.tin_phase -= 6.283185307179586;
+        }
+        x = G.tin_buf;
+    }
     if (x && d->capture.channels == 2 && probing) tap_write(0, x, n, frame0);
     if (x && d->capture.channels == 2) {
         uint32_t now = sa_now_us();
@@ -537,6 +556,7 @@ static void playback_cb(ma_device* d, void* out, const void* in, ma_uint32 n) {
         }
         if (bad) sa_addu(&P.violations, bad);
     }
+    if (probing && P.alloc && d->playback.channels == 2) tap_write(2, (const float*)out, n, frame0);
     P.play_frames += n;
     /* where the output plays, by its own clock: every callback while probing, every 8th otherwise
        (the latency the app shows is measured this way, not modelled) */
@@ -1468,6 +1488,12 @@ SA_API void sa_test_jitter(int32_t max_late_us, int32_t every_n, int32_t output)
     sa_st(&G.jit_out, output ? 1u : 0u);
 }
 
+SA_API void sa_test_input(float hz, float amplitude) {
+    if (hz > 0 && !G.tin_buf) G.tin_buf = (float*)calloc(2 * SA_SCRATCH, sizeof(float)); /* (kept for the process) */
+    sa_stf(&G.tin_amp_bits, amplitude);
+    sa_stf(&G.tin_hz_bits, hz > 0 && G.tin_buf ? hz : 0.0f);
+}
+
 SA_API int32_t sa_documents_dir(char* out, int32_t size) {
     if (!out || size <= 0) return 0;
     return sa_documents_dir_impl(out, size);
@@ -1484,11 +1510,11 @@ SA_API void sa_probe(int32_t on) {
     if (on && !P.alloc) {
         /* once, before any callback can see it on (they check P.alloc after P.on) */
         P.scratch = (float*)malloc(sizeof(float) * 2 * SA_SCRATCH);
-        if (!P.scratch || sa_ring_init(&P.tap[0], SA_TAP_FRAMES) != 0 || sa_ring_init(&P.tap[1], SA_TAP_FRAMES) != 0) {
+        if (!P.scratch || sa_ring_init(&P.tap[0], SA_TAP_FRAMES) != 0 || sa_ring_init(&P.tap[1], SA_TAP_FRAMES) != 0 ||
+            sa_ring_init(&P.tap[2], SA_TAP_FRAMES) != 0) {
             free(P.scratch);
             P.scratch = NULL;
-            sa_ring_free(&P.tap[0]);
-            sa_ring_free(&P.tap[1]);
+            for (int k = 0; k < 3; k++) sa_ring_free(&P.tap[k]);
             return;
         }
         P.alloc = 1;
@@ -1497,7 +1523,7 @@ SA_API void sa_probe(int32_t on) {
 }
 
 SA_API int32_t sa_probe_audio(int32_t which, float* out, int32_t max_frames, int64_t* first_frame, int32_t* session) {
-    if (!G.inited || !P.alloc || which < 0 || which > 1 || !out || max_frames <= 0) return 0;
+    if (!G.inited || !P.alloc || which < 0 || which > 2 || !out || max_frames <= 0) return 0;
     ma_mutex_lock(&G.lock);
     uint32_t n = sa_ring_read(&P.tap[which], out, (uint32_t)max_frames);
     if (first_frame) *first_frame = P.tap_first[which] + P.tap_read[which];

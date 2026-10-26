@@ -296,6 +296,11 @@ SA_API void sa_request_mic(void);
  * comes up to max_late_us late (the callback sleeps). 0 turns it off. Ignored on the system backend. */
 SA_API void sa_test_jitter(int32_t max_late_us, int32_t every_n, int32_t output);
 
+/* Tests on the null backend only: the input delivers a sine of hz at amplitude (both channels)
+ * instead of the null capture device's silence, so the passthrough carries a known signal. hz 0:
+ * silence again. Ignored on the system backend. */
+SA_API void sa_test_input(float hz, float amplitude);
+
 /* Self-tests of the passthrough math, the resampler, the drift servo, the WAV writer and a
  * session on the null backend. Writes a report (UTF-8 lines) into report and its scratch files
  * into dir. Returns the number of failures. Must not run while the app uses the library. */
@@ -308,9 +313,12 @@ SA_API int32_t sa_selftest(const char* dir, char* report, int32_t report_size);
 SA_API int64_t sa_clock_us(void);
 SA_API int32_t sa_sizeof_mark(void);
 
-/* 1: the device callbacks record timing marks and copy what they carry into two taps (stereo,
- * float): the input as it arrives (which 0) and the output before the gain (which 1: the
- * passthrough's resampled signal, so a marker can be followed to the output even at gain 0).
+/* 1: the device callbacks record timing marks and copy what they carry into three taps (stereo,
+ * float): the input as it arrives (which 0), the output before the gain (which 1: the
+ * passthrough's resampled signal, so a marker can be followed to the output even at gain 0) and
+ * the output as the device gets it (which 2: every gain applied, the passthrough's or the
+ * source's, before the conversion to the device's sample format; the install gate,
+ * tool/audio_gate.py, compares builds by it).
  * About 2.7 s of each is kept; whatever is not read in time is dropped (probe_lost) and a tap that
  * overflowed stops until its device opens again. 0: off. */
 SA_API void sa_probe(int32_t on);
