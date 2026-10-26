@@ -141,5 +141,9 @@ void main() {
     expect(saved!.autoMemory.values.any((m) => m.failed != null), isTrue);
     expect(pc.period, greaterThan(64));
     pc.dispose();
-  }, skip: skip, timeout: const Timeout(Duration(seconds: 60)));
+  },
+      // a macOS CI runner's null playback device wakes late on its own (a busy VM: 256 -> 512 seen),
+      // so "a clean system" does not hold there; the Mac mini and the Windows runner run it
+      skip: skip ?? (Platform.isMacOS && Platform.environment['GITHUB_ACTIONS'] == 'true' ? 'a macOS CI runner is no clean system for the null device' : null),
+      timeout: const Timeout(Duration(seconds: 60)));
 }

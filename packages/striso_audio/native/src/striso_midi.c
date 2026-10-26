@@ -509,7 +509,13 @@ static void mac_thread(void* arg) {
     CFRelease(rl);
 }
 
+/* The client lives as long as the process (as Windows MIDI Services' worker does): a CoreMIDI
+ * client created again in a process that disposed one can fail (a CI runner's headless CoreMIDI
+ * refused it: "the system's MIDI set up" after an earlier init and shutdown in the same process).
+ * A shutdown closes every input (sa_midi_shutdown forgets them all) and keeps the client and its
+ * thread; the next init takes them up again. */
 static int32_t os_init(void) {
+    if (M.thread && __atomic_load_n(&M.ready, __ATOMIC_ACQUIRE) == 1) return SA_OK;
     M.ready = 0;
     M.quit = 0;
     M.thread = sa_thread_start(mac_thread, NULL);
@@ -525,11 +531,7 @@ static int32_t os_init(void) {
 }
 
 static void os_shutdown(void) {
-    if (!M.thread) return;
-    __atomic_store_n(&M.quit, 1u, __ATOMIC_RELEASE);
-    if (M.rl) CFRunLoopStop(M.rl);
-    sa_thread_join(M.thread);
-    M.thread = NULL;
+    /* the client and its thread stay (os_init above); the inputs are closed by the caller */
 }
 
 static void cfstr_utf8(CFStringRef s, char* out, int size) {
