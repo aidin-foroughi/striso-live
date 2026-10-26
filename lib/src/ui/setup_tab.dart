@@ -82,6 +82,8 @@ class SetupTab extends StatelessWidget {
                 const SizedBox(height: Space.xxl),
                 AudioSection(ctl),
                 const SizedBox(height: Space.xl),
+                MidiOutSection(ctl),
+                const SizedBox(height: Space.xl),
                 if (c.maxWidth >= 1100) ...[MotionRow(ctl), const SizedBox(height: Space.l), FirmwareRow(ctl)],
                 const SizedBox(height: Space.m),
                 Align(
@@ -646,6 +648,63 @@ class MotionRow extends StatelessWidget {
       SizedBox(height: 72, child: MotionView(ctl)),
     ],
   );
+}
+
+/// MIDI out as the board has it (StcY): its mode, the channels and the bend range, the volume,
+/// sustain and message rate; the mode switched with its settings keys (StcX's MIDI switches,
+/// pressed over USB and read back). The dials are set on the instrument.
+class MidiOutSection extends StatelessWidget {
+  final AppController ctl;
+  const MidiOutSection(this.ctl, {super.key});
+  @override
+  Widget build(BuildContext context) {
+    final st = ctl.boardState;
+    final modes = [
+      for (final e in ctl.settingsLayout.keys.entries)
+        if (e.value.group == SettingsGroup.midi && e.value.switchable) e,
+    ];
+    final mode = st?.midi;
+    final current = modes.where((e) => e.value.short.toLowerCase() == mode).map((e) => e.key).firstOrNull ?? -1;
+    String? channels;
+    if (st != null) {
+      final ch = st.channel, n = st.voices, bend = st.bend;
+      channels = [
+        if (mode == 'mpe' && n != null && ch != null) '$n voices from channel $ch' else if (ch != null) 'channel $ch',
+        if (mode == 'mpe' && bend != null) 'pitch bend $bend semitones',
+      ].join(' · ');
+    }
+    final rest = st == null
+        ? null
+        : [
+            if (st.volume != null) 'volume ${st.volume}',
+            if (st.sustain != null) 'sustain ${st.sustain!.toStringAsFixed(2)}',
+            if (st.rate != null) 'a message every ${st.rate} ms',
+          ].join(' · ');
+    return Column(
+      key: const Key('midi-out'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Micro('MIDI out'),
+        const SizedBox(height: Space.xs),
+        if (st == null || modes.isEmpty)
+          Text(ctl.connected ? 'This firmware does not report its MIDI settings.' : 'Connect to see the board\'s MIDI settings.', style: ui(TypeSize.body, color: Pal.text2))
+        else ...[
+          Seg<int>(
+            items: [for (final e in modes) (e.key, e.value.short, e.value.title)],
+            value: current,
+            keys: {for (final e in modes) e.key: Key('midi-mode-${e.value.short.toLowerCase()}')},
+            onChanged: (k) => k == current ? null : ctl.pressSettingsKey(k),
+          ),
+          if (channels != null && channels.isNotEmpty) ...[
+            const SizedBox(height: Space.xs),
+            Text('${modes.where((e) => e.key == current).map((e) => e.value.short).firstOrNull ?? mode} · $channels', key: const Key('midi-out-channels'), style: ui(TypeSize.body)),
+          ],
+          if (rest != null && rest.isNotEmpty) Text(rest, key: const Key('midi-out-rest'), style: ui(TypeSize.body, color: Pal.text2)),
+          Text('The channels, bend range, volume and rate are dials: Settings + tilt on the instrument.', style: ui(TypeSize.small, color: Pal.text3)),
+        ],
+      ],
+    );
+  }
 }
 
 /// The firmware that plays: the Striso's version, or Virtual's build (its title and the version

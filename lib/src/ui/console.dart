@@ -90,6 +90,18 @@ class _ConsoleDrawerState extends State<ConsoleDrawer> {
                                 )
                               else
                                 const Spacer(),
+                              ListenableBuilder(
+                                listenable: ctl,
+                                builder: (context, _) => Btn(
+                                  'MIDI in',
+                                  key: const Key('midi-monitor'),
+                                  kind: BtnKind.ghost,
+                                  pressed: ctl.midiMonitor,
+                                  tooltip: "The board's MIDI monitor (StcM): every MIDI message the firmware gets, in this log",
+                                  onPressed: ctl.canSend ? () => ctl.setMidiMonitor(!ctl.midiMonitor) : null,
+                                ),
+                              ),
+                              const SizedBox(width: Space.m),
                               Text('Stc +', style: mono(12)),
                               const SizedBox(width: Space.xs),
                               InputField(

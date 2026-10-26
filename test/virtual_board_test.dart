@@ -14,6 +14,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:striso_audio/striso_audio.dart';
 import 'package:striso_core/striso_core.dart';
+import 'package:striso_live/src/app_log.dart';
 import 'package:striso_live/src/controller.dart';
 import 'package:striso_live/src/firmware_library.dart';
 import 'package:striso_live/src/store.dart';
@@ -709,5 +710,27 @@ void main() {
         dir.deleteSync(recursive: true);
       } catch (_) {}
     });
+  });
+
+  // the console's MIDI in toggle on the real firmware: StcM on, a controller's notes in the log
+  // as the board reports them, Stcm off
+  testWidgets('the MIDI monitor on the real firmware: what the board gets, in the console log', skip: noAudio, (tester) async {
+    final ctl = virtualApp();
+    await run(tester, ctl.start());
+    await run(tester, ctl.playVirtual());
+    await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+    await run(tester, ctl.setMidiMonitor(true));
+    expect(ctl.midiMonitor, isTrue);
+    expect(ctl.midi!.backend.inject('test controller', const [0x91, 60, 100, 0xB1, 74, 70, 0x81, 60, 30]), greaterThanOrEqualTo(0));
+    bool logged(String t) => appLog.lines.any((l) => l.text == t);
+    await waitFor(tester, () => logged('MIDI in · ch 1 · note off 60 velocity 30'), ms: 4000);
+    expect(logged('MIDI in · ch 1 · note on 60 velocity 100'), isTrue);
+    expect(logged('MIDI in · ch 1 · control 74 = 70'), isTrue);
+    await run(tester, ctl.setMidiMonitor(false));
+    final n = appLog.lines.where((l) => l.text.startsWith('MIDI in ·')).length;
+    ctl.midi!.backend.inject('test controller', const [0x91, 62, 90]);
+    await settle(tester, ms: 400);
+    expect(appLog.lines.where((l) => l.text.startsWith('MIDI in ·')).length, n, reason: 'off: nothing more');
+    await finish(tester, ctl);
   });
 }
