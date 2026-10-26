@@ -613,4 +613,101 @@ void main() {
       });
     },
   );
+
+  // the board's sound presets on the real firmware (mod-presets, doc/presets_console.md): what
+  // the app does with J, j, F, x and O, against a build that has them (the virtual board always
+  // has the store); skipped by a build that does not answer StcJ
+  testWidgets('presets on the real firmware: list, text, save as, install, load with the report, delete', skip: skip != null, (tester) async {
+    final dir = await tester.runAsync(() async => Directory.systemTemp.createTempSync('sv_presets'));
+    final sep = Platform.pathSeparator;
+    final ctl = AppController(options: AppOptions(noUsb: true, virtualLib: lib), store: Store('${dir!.path}${sep}settings.json'));
+    await run(tester, ctl.playVirtual());
+    await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+    await waitFor(tester, () => ctl.boardPresets != null, ms: 2000).catchError((_) {});
+    if (ctl.boardPresets == null) {
+      markTestSkipped('this build does not answer StcJ');
+      await finish(tester, ctl);
+      return;
+    }
+    final c = ctl.client!;
+    // J: the factory presets are the voice entries, in voice order; the store is there
+    final list = ctl.boardPresets!;
+    expect(list.storeOn, isTrue, reason: 'the virtual board always has the store');
+    expect(list.presets.where((p) => p.factory).length, ctl.voices.length);
+    for (final v in ctl.voices) {
+      expect(ctl.factoryPresetOf(v.index)!.title, v.preset ?? v.engine, reason: 'entry ${v.index}');
+      expect(ctl.factoryPresetOf(v.index)!.engine, v.engine);
+    }
+    expect(list.user, isEmpty);
+    // j: a factory preset's file; strisy has none
+    final pad = ctl.voices.firstWhere((v) => v.name == 'va:pad');
+    final padText = await run(tester, ctl.presetFileText(ctl.factoryPresetOf(pad.index)!));
+    expect(describePresetFile(padText!).title, 'pad');
+    expect(describePresetFile(padText).engine, 'va');
+    expect(describePresetFile(padText).preset, isTrue);
+    final strisy = await run(tester, c.presetText(ctl.factoryPresetOf(ctl.voices.firstWhere((v) => v.engine == 'strisy').index)!.id));
+    expect(strisy!.why, startsWith('no text '));
+    expect(AppController.presetWhy(strisy.why), 'this voice has no preset text');
+    // F kind 2: save as, with a title and a description; the board writes the preset
+    await run(tester, ctl.selectVoice(pad.index));
+    final saved = await run(tester, ctl.savePresetAs('Warm | pad', 'Slow, dark.'));
+    expect(saved, isNotNull, reason: ctl.toasts.value.lastOrNull?.text);
+    expect(saved!.title, 'Warm / pad', reason: 'a | in a title is listed as /');
+    expect(saved.description, 'Slow, dark.');
+    expect(saved.engine, 'va');
+    final savedText = (await run(tester, ctl.presetFileText(saved)))!;
+    expect(describePresetFile(savedText).title, 'Warm | pad', reason: 'the file keeps the title as given');
+    expect(describePresetFile(savedText).description, 'Slow, dark.');
+    // O: it loads exactly on this engine
+    final o = await run(tester, ctl.openBoardPreset(saved));
+    expect(o!.exact, isTrue);
+    expect(ctl.openPreset?.id, saved.id);
+    // F kind 1: a file from another version of va, stored as sent; O reports what it changed
+    final file = jsonEncode({
+      'format': 'awva-preset/1',
+      'engine': {'id': 'va', 'version': 'v2.2.4-200', 'params_hash': '00000000'},
+      'title': 'Older lead',
+      'params': {'gain': 99, 'old_knob': 1},
+    });
+    final f = File('${dir.path}${sep}older.preset.json')..writeAsStringSync(file);
+    final inst = await run(tester, ctl.installPresetFile(f.path));
+    expect(inst, isNotNull, reason: ctl.toasts.value.lastOrNull?.text);
+    expect((await run(tester, ctl.presetFileText(inst!))), file, reason: 'stored byte for byte');
+    final rep = await run(tester, ctl.openBoardPreset(inst));
+    expect(rep!.exact, isFalse);
+    expect(rep.clampedNames, ['gain']);
+    expect(rep.skippedNames, ['old_knob']);
+    expect(rep.missing, greaterThan(0));
+    expect(ctl.banner?.text, contains('gain'));
+    expect(ctl.banner?.text, contains('old_knob'));
+    await waitFor(tester, () => ctl.voices.where((v) => v.current).firstOrNull?.engine == 'va');
+    // refusals, in words
+    final junk = File('${dir.path}${sep}junk.json')..writeAsStringSync('{not json');
+    expect(await run(tester, ctl.installPresetFile(junk.path)), isNull);
+    expect(ctl.toasts.value.last.text, contains('not a preset file (syntax)'));
+    final flute = File('${dir.path}${sep}flute.json')..writeAsStringSync(file.replaceAll('"va"', '"flute"'));
+    expect(await run(tester, ctl.installPresetFile(flute.path)), isNull);
+    expect(ctl.toasts.value.last.text, contains('its engine (flute) is not on this Striso'));
+    expect(await run(tester, ctl.savePresetAs('x' * 64, '')), isNull, reason: 'refused before it is sent');
+    final long = await run(tester, c.savePresetAs('x' * 64, ''));
+    expect(long!.why, 'fields');
+    // a byte above 0x80 is refused by the board too (the app refuses it before sending)
+    final high = await run(tester, c.installPreset([...utf8.encode('{"title": "Caf'), 0xc3, 0xa9, ...utf8.encode('"}')]));
+    expect(high!.why, 'not ascii 14');
+    expect(AppController.presetWhy(high.why), contains('beyond plain ASCII (at byte 14)'));
+    // x: delete; a factory preset stays
+    expect(await run(tester, ctl.deleteBoardPreset(saved)), isTrue);
+    expect(ctl.boardPresets!.user.map((p) => p.title), ['Older lead']);
+    final again = await run(tester, c.deletePreset(saved.id));
+    expect(again!.why, 'no preset ${saved.id}');
+    final factory = await run(tester, c.deletePreset(ctl.factoryPresetOf(pad.index)!.id));
+    expect(factory!.why, startsWith('factory '));
+    expect(AppController.presetWhy(factory.why), 'factory presets stay');
+    await finish(tester, ctl);
+    await tester.runAsync(() async {
+      try {
+        dir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+  });
 }

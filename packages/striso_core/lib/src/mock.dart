@@ -792,13 +792,14 @@ class MockBoard implements PlayableBoard {
   }
 
   // a voice entry's values as a preset text (the board writes it: kind 2, and j of a factory id)
-  String _presetOf(int n, String title, String? description) {
+  String _presetOf(int n, String title, String? description, {bool factory = false}) {
     final e = _entries[n];
     final params = e.eng.params;
     final vals = n == voice ? values : _presetValues(params, e.seed);
     final m = <String, Object?>{
       'format': 'awva-preset/1',
-      'engine': {'id': e.engine, 'version': firmware, 'params_hash': 'm0c4${e.engine.length.toRadixString(16).padLeft(4, '0')}'},
+      // a factory file names no version; a saved one has the firmware's
+      'engine': {'id': e.engine, if (!factory) 'version': firmware, 'params_hash': 'm0c4${e.engine.length.toRadixString(16).padLeft(4, '0')}'},
       'title': title,
       if (description != null && description.isNotEmpty) 'description': description,
       'params': {for (var i = 0; i < params.length; i++) params[i].$1: vals[i].clamp(params[i].$3, params[i].$4)},
@@ -818,7 +819,7 @@ class MockBoard implements PlayableBoard {
         _print('j err no text $id\r\n'); // an engine without presets
         return;
       }
-      t = _presetOf(n, _entries[n].preset!, null);
+      t = _presetOf(n, _entries[n].preset!, null, factory: true);
     } else if (!presetStore) {
       _print('j err store off\r\n');
       return;
@@ -839,12 +840,15 @@ class MockBoard implements PlayableBoard {
   }
 
   void _presetUpload(int kind, List<int> bytes) {
+    // in the firmware's order: what is refused at the start, then a byte >= 0x80, then the text
     if (!presetStore) return _print('F err store off\r\n');
     if (kind != 1 && kind != 2) return _print('F err kind\r\n');
+    if (bytes.length > (kind == 1 ? presetMaxText : presetMaxFields)) return _print('F err too long\r\n');
+    final high = bytes.indexWhere((b) => b >= 0x80);
+    if (high >= 0) return _print('F err not ascii $high\r\n');
     String text;
     if (kind == 1) {
       if (bytes.isEmpty) return _print('F err empty\r\n');
-      if (bytes.length > presetMaxText) return _print('F err too long\r\n');
       text = utf8.decode(bytes, allowMalformed: true);
       final j = _json(text);
       if (j == null) return _print('F err syntax\r\n');
@@ -853,7 +857,6 @@ class MockBoard implements PlayableBoard {
       if (eng is! Map || eng['id'] is! String) return _print('F err no_engine\r\n');
       if (!_entries.any((e) => e.engine == eng['id'])) return _print('F err engine ${_word(eng['id'] as String)}\r\n');
     } else {
-      if (bytes.length > presetMaxFields) return _print('F err too long\r\n');
       final f = _json(utf8.decode(bytes, allowMalformed: true));
       final title = f?['title'] ?? '', desc = f?['description'] ?? '';
       if (f == null || title is! String || desc is! String) return _print('F err fields\r\n');

@@ -2536,6 +2536,8 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     if (why.startsWith('no preset')) return 'it is no longer on the board';
     if (why.startsWith('factory')) return 'factory presets stay';
     if (why.startsWith('no text')) return 'this voice has no preset text';
+    final high = RegExp(r'^not ascii (\d+)$').firstMatch(why);
+    if (high != null) return 'it has a character beyond plain ASCII (at byte ${high[1]}): the board takes ASCII only';
     return switch (why) {
       'store off' => 'this firmware keeps no presets of your own',
       'syntax' || 'no_format' || 'no_engine' || 'bad_hash' || 'bad_value' => 'it is not a preset file ($why)',
