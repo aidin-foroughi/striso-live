@@ -1,5 +1,5 @@
 // The board's engine-module slots (the firmware's doc/engines.md, "Engine modules"; research/
-// board_engine_modules.md): an awva engine package (.nsc) is put into a slot over the console,
+// board_engine_modules.md): an awva engine package (.awvapkg, research/package_format.md) is put into a slot over the console,
 // the firmware checks it, keeps it in flash (Virtual: its module store file) and lists its voices
 // after the built-in engines from the next start. The app sends the package's bytes and shows what
 // the firmware says; it reads nothing of a package itself.

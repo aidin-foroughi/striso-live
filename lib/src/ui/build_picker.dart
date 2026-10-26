@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../controller.dart';
+import '../engine_library.dart' show packageExt;
 import '../firmware_library.dart';
 import '../theme.dart';
 import 'audio.dart';
@@ -131,12 +132,12 @@ String virtualLabel(AppController ctl, {bool compact = false}) {
 }
 
 /// A file dialog for a release zip (`striso_virtual-<version>-<platform>.zip`), a library, or an
-/// engine (a package, .nsc, or a zip of them); a build is installed into the firmware folder and
+/// engine (a package, .awvapkg, or a zip of them); a build is installed into the firmware folder and
 /// played, an engine into the engine library and put into a slot of the board that plays.
 Future<void> installBuild(BuildContext context, AppController ctl) async {
   final f = await openFile(
     acceptedTypeGroups: [
-      XTypeGroup(label: 'striso_virtual or an engine', extensions: ['zip', virtualLibName().split('.').last, 'nsc']),
+      XTypeGroup(label: 'striso_virtual or an engine', extensions: ['zip', virtualLibName().split('.').last, packageExt]),
     ],
   );
   if (f != null) await ctl.installAndUseFirmware(f.path);

@@ -470,10 +470,15 @@ void main() {
   // package refused with the firmware's words; erased. The packages come from the firmware's build
   // ($STRISO_PACKAGE_DIR, or its virtual/tests/packages; $STRISO_ARM_PACKAGE_DIR, build/firmware/
   // modules); skipped by a build without slots.
+  // a package by its engine id; the firmware's build names its test packages .nsc (the
+  // container is the same): those are copied as <id>.awvapkg, the name the library takes
+  final pkgDir = Directory.systemTemp.createTempSync('sv_pkgs');
   String? pkg(String name, List<String> dirs) {
     for (final d in dirs) {
+      final a = File('$d/$name.awvapkg');
+      if (a.existsSync()) return a.absolute.path;
       final f = File('$d/$name.nsc');
-      if (f.existsSync()) return f.absolute.path;
+      if (f.existsSync()) return f.copySync('${pkgDir.path}${Platform.pathSeparator}$name.awvapkg').path;
     }
     return null;
   }

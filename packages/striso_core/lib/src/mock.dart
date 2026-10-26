@@ -232,7 +232,7 @@ const List<_Engine> _engines = [
   _Engine('trumpet', ['bb classical', 'bb jazz', 'c trumpet', 'piccolo', 'cornet', 'harmon', 'cup mute', 'straight', 'plunger'], _trumpet, 9400),
 ];
 
-/// The engine ABI the mock loads (NSC_ABI), as the virtual board reports it in Stce.
+/// The engine ABI the mock runs (NSC_ABI): a slot of another ABI is listed disabled.
 const mockEngineAbi = 1;
 
 /// An engine the mock can run from a slot (modules.dart): its presets (none: one entry).

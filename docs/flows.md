@@ -300,110 +300,56 @@ The flows are the same. What differs is named where it happens: the library's fi
 C++ runtime problems (Windows), the microphone permission for Through PC (macOS, in Setup › Audio),
 and how the firmware folder is opened (`open`, `explorer`).
 
-## 10. Engines as sounds
+## 10. Engines in the board's slots
 
-The virtual board can load engine components (awva's C ABI, `nsc.h`: one engine per DLL / dylib)
-from a folder, `sv_options.engine_dir` (striso-control-firmware combined 239de55). They are listed
-after the compiled-in engines in the voice list (`Stcv`) and play through the board's own voice
-controls, so a loaded engine gets exactly what a compiled-in one would. This is how a new engine
-can be tried without a firmware build: the build stays, the engine is added.
+An awva engine reaches a board, Virtual or the Striso, in one way: as a package
+(`<id>-<slug>.awvapkg`, research/package_format.md) put into one of the board's engine slots
+over the console. The firmware checks it, keeps it in flash (Virtual: its module store file,
+`<app data>/virtual/module_store.bin`), and lists its voices after the built-in engines from the
+next start. Every board takes the same file: it carries the board's Cortex-M7 image and an image
+per computer Virtual runs on, and each takes its own. There is no other way in (the old
+`sv_options.engine_dir` folder and its `Stce` report are gone, with no dual path).
 
-**Where it shows.** In the build chooser, under the builds, a second list:
-
-```
-│ VIRTUAL · PLAY A BUILD                                          │
-│ ● v2.2.4-330                                       239de55     │
-│   Sax v1                                           56f7266     │
-│ ─────────────────────────────────────────────────────────────── │
-│ ENGINES TO ADD                                                  │
-│ ☑ sax                 0a00222 · 4 presets · 4 voices loaded     │  ← loaded with the build that plays
-│   physical saxophones: reed, mouthpiece and conical bore…       │
-│ ☐ clarinet                              0a00222 · 2 presets     │
-│ ☐ flute         built for engine ABI 2; this build loads 1      │  ← greyed, the firmware's reason
-│ ─────────────────────────────────────────────────────────────── │
-│   Install a build or an engine…                                 │
-│   Open the firmware folder                                      │
-```
-
-- **An engine is a checkbox, a build is a choice.** Exactly one build plays; any number of
-  engines are loaded with it. A click on an engine ticks or unticks it and starts Virtual again on
-  the same build with the new set; the set is remembered with the build (per build file; the Dart
-  mock is one build of its own).
-- **Named by the awva build's manifest**: the awva build writes `<engine>.json` next to each
-  `<engine>.dll` (nsc_manifest: `id`, `name`, `summary`, `abi`, `version`, `presets`); the row is
-  its name, summary, version and preset count, else the folder's name. Engines live in
-  `<app data>/engines/<id>/` beside `firmware/`. **Install a build or an engine…** takes either: a
-  striso_virtual release zip or library is a build; an engine library (with its `.json` beside it,
-  as the awva build leaves it) or a zip of the two is an engine. The same engine installed again
-  replaces the old one. macOS: the quarantine is cleared on what is installed, as for builds.
-- **A tick plays it**: the app selects the engine's first voice once (it has no voice key on the
-  Striso, so the same-key rule cannot apply); it is in Play's engine row after the compiled-in
-  engines, in the colour the firmware gives it (`Stce`). ⇄ in the header then goes between "the
-  build with the engine" and "the build without it": on one build each side goes back to the
-  voice it was on; between two builds, the same key as before.
-- **Greyed with the reason**, the firmware's: another engine ABI (the build's `Stce` against the
-  engine's manifest, before it is tried), and what the firmware refused when it loaded it (the
-  OS's message for a library that does not load: a missing runtime, a quarantine). A refused
-  engine is unticked; it can be ticked again once its file changes (installed again). A build that
-  does not answer `Stce` cannot add engines: they are greyed with "this build cannot add engines"
-  and none are given to it (the app could not show what it loaded).
-- **The app passes only a folder.** It copies the ticked engines into a fresh folder per run
-  (`<app data>/engines/.loaded/<n>/`, named by their folders, so the firmware's load order is the
-  list's) and hands it to `sv_create` as `engine_dir`. What a build file reported is kept, so the
-  first time a build runs with engines installed it is asked once without any; a tick on it then
-  starts it twice (once to ask, once with the engines).
-
-**What the firmware reports: `Stce`, the loaded engines** (requested; the app reads only this, it
-guesses nothing). A new console command, `e` (`E` is the scanner's), no payload, read-only, in a
-build with SYNTH_EXTERNAL_ENGINES (the virtual board). A build without it does not answer: it has
-no engines to add, and the chooser says so. The reply, one line per library file in `engine_dir`
-(`.dll` / `.dylib` / `.so`, other files not listed), in the order the firmware loads them (file
-name order):
+**Where it shows.** Setup, under the firmware, for the board that plays:
 
 ```
-e engines <abi> <files>
-e ok <first> <count> <rrggbb> <id> <file>
-e err <reason> <file>|<detail>
-e end
+│ ENGINES ON VIRTUAL                                        │
+│ slot 2  accordion 0.1.0                  81 KB       🗑   │
+│ slot 3  trumpet 1.2      disabled: abi 3, firmware has 4 🗑 │  ← the firmware's reason
+│ slot 4  empty                                              │
+│ …                                                          │
+│ Putting clarinet-v3-fit on Virtual · 40 of 84 KB ▬▬▬───    │  ← the firmware's progress
+│ ENGINE LIBRARY                                             │
+│ clarinet-v3-fit                       [Put on Virtual]     │
+│ [Add an engine…]                                           │
 ```
 
-- `e engines <abi> <files>`: the engine ABI this build loads (`NSC_ABI`), and how many library
-  files it found (0 with no `engine_dir`). Always first, also with no files.
-- `e ok <first> <count> <rrggbb> <id> <file>`: loaded. Its voices are the `Stcv` entries
-  `first` .. `first + count - 1` (one per preset, or one with none); `rrggbb` is the colour the
-  board gives its voices (hex, as its LEDs show it for that voice); `id` the descriptor's id (as
-  in `Stcv`); `file` the file name (no directory; the rest of the line).
-- `e err <reason> <file>|<detail>`: refused, nothing of it in `Stcv`. `<reason>` is one token:
-  - `library`: the OS would not load it; `detail` the OS's own message (`dlerror()`, or
-    `FormatMessage` of `GetLastError()`), so a macOS quarantine or a missing C++ runtime shows as
-    the OS says it;
-  - `entry`: no `nsc_entry`;
-  - `component`: `nsc_entry` gave no descriptor or a wrong magic;
-  - `abi`: another engine ABI; `detail` `<its abi> <this build's abi>`;
-  - `voices`: fewer voices than the board plays; `detail` `<max_voices> <the board's>`;
-  - `memory`: its regions could not be allocated;
-  - `full`: the voice list was full (128 entries); `detail` how many of its entries were left out
-    (then it is also `ok` for the ones that fit: a line of each).
-- `e end`: the last line.
-- The reply changes only when the board is created (the engines are read at boot), so the app asks
-  once per run, after `Stcv`. `Stcy` need not count it.
+- **The slots are the firmware's** (`Stco`): what each holds, its size, and why a disabled one may
+  not run, in its words. The app works out nothing about slots.
+- **The engine library** is `<app data>/engines/`: one `.awvapkg` per engine build, by its file
+  name. **Add an engine…** (and the build chooser's Install a build or an engine…) copies a
+  package, or each package of a zip, into it (as `<name>.awvapkg.tmp`, then renamed), and puts it
+  on the board that plays. The app reads nothing of a package.
+- **Put on …** sends the package unchanged (`Stci`) with the firmware's progress; each 4 KB line's
+  crc is checked against what was sent. Virtual then starts again on the same build, so its
+  firmware loads the slots, and plays the new engine's first voice. The Striso lists it from its
+  next start (the app says so).
+- **Erase** (confirmed) frees a slot (`Stcz`); Virtual starts again without the engine. The
+  package stays in the library.
+- An engine from a slot is like a built-in one from then on: its voices, parameters, hero knobs
+  and presets come from the firmware, and it can go on a voice key (`StcA`).
 
-Example (two loaded, one refused):
+**The console** (the firmware's doc/engines.md, "Engine modules"):
+- `Stci` `s` length (u32 LE), then the package's bytes, in one go: `m begin ok <tag> <free>`,
+  `m <bytes> <crc32>` every 4 KB, then `m ok <slot> <id> <version> <abi>`, or `m err <reason>`
+  (bytes that stop for the console's 100 ms gap: `m err timeout`). A refused upload's bytes are
+  taken and dropped; none is read as a command.
+- `Stco`: `slot <k> empty|partial`, or `slot <k> <id> <version> <abi> <bytes> ok|disabled:
+  <reason>`, then `slot end`. A firmware without slots does not answer.
+- `Stcz<digit>`: `m erased <k>`, or `m err <reason>`.
 
-```
-e engines 1 3
-e ok 46 4 c08040 sax sax.dll
-e err abi flute.dll|2 1
-e ok 50 1 40a0ff sine sine.dll
-e end
-```
-
-The app's mock (striso_core `MockStriso`) answers `Stce` with recorded replies of this form, so the
-app is built and tested against it until the firmware has it.
-
-**In the app**: `sv_options.engine_dir` in the striso_virtual bindings (a build older than the
-field copies only its own part of the struct), `lib/src/engine_library.dart` (the folder, the
-manifest, Install, the staging), the controller's engine list and ⇄ setups, the chooser's rows,
-and striso_core's `Stce` parser and mock (`MockComponent`: sax and clarinet load, flute is refused
-for its ABI). Nothing else changes: voices, parameters, hero knobs (StcH) and presets of a loaded
-engine come from the firmware like any other's.
+**In the app**: striso_core's `modules.dart` (the commands, the lines, zlib crc32) and the client's
+`listModuleSlots` / `installModule` / `eraseModuleSlot`; the mock's slots (`MockModuleStore`,
+`mockModulePackage`); `sv_options.module_store` in the striso_virtual bindings;
+`lib/src/engine_library.dart` (the library); the controller's slots, put and erase; Setup's
+`EngineSlots`.
