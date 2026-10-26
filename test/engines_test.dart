@@ -19,10 +19,10 @@ import 'flows_test.dart' show boot, finish, pumpUntil, settle, untilLive;
 
 final sep = Platform.pathSeparator;
 
-/// A mock package file `<name>.nsc` (the mock reads its id; a real one is the firmware's to read).
+/// A mock package file `<name>.awvapkg` (the mock reads its id; a real one is the firmware's to read).
 String package(Directory d, String name, {String? id, String version = '1.0', int abi = mockEngineAbi, int padTo = 9000}) {
   d.createSync(recursive: true);
-  return (File('${d.path}$sep$name.nsc')..writeAsBytesSync(mockModulePackage(id ?? name, version: version, abi: abi, padTo: padTo))).path;
+  return (File('${d.path}$sep$name.awvapkg')..writeAsBytesSync(mockModulePackage(id ?? name, version: version, abi: abi, padTo: padTo))).path;
 }
 
 void main() {
@@ -38,10 +38,10 @@ void main() {
     final out = '${tmp.path}${sep}engines';
     final sax = package(Directory('${tmp.path}${sep}built'), 'sax');
     expect(isEngineSource(sax), isTrue);
-    expect(installEngine(sax, out), ['$out${sep}sax.nsc']);
+    expect(installEngine(sax, out), ['$out${sep}sax.awvapkg']);
     final zip = Archive()
-      ..addFile(ArchiveFile('pkgs/clarinet.nsc', 4, [1, 2, 3, 4]))
-      ..addFile(ArchiveFile('pkgs/sine.nsc', 2, [5, 6]))
+      ..addFile(ArchiveFile('pkgs/clarinet.awvapkg', 4, [1, 2, 3, 4]))
+      ..addFile(ArchiveFile('pkgs/sine.awvapkg', 2, [5, 6]))
       ..addFile(ArchiveFile.string('pkgs/readme.txt', 'not a package'));
     final zf = File('${tmp.path}${sep}engines.zip')..writeAsBytesSync(ZipEncoder().encode(zip));
     expect(isEngineSource(zf.path), isTrue);
@@ -50,7 +50,7 @@ void main() {
     File(sax).writeAsBytesSync([9, 9]);
     installEngine(sax, out);
     expect(findEngines(out), hasLength(3), reason: 'replaced, not added');
-    expect(File('$out${sep}sax.nsc').readAsBytesSync(), [9, 9]);
+    expect(File('$out${sep}sax.awvapkg').readAsBytesSync(), [9, 9]);
     final bare = File('${tmp.path}${sep}bare.zip')..writeAsBytesSync(ZipEncoder().encode(Archive()..addFile(ArchiveFile('x.dll', 1, [1]))));
     expect(isEngineSource(bare.path), isFalse);
     expect(() => installEngine(bare.path, out), throwsA(isA<FirmwareInstallError>().having((e) => '$e', 'why', contains('no engine package'))));
@@ -111,7 +111,7 @@ void main() {
     expect(ctl.voices.length, own + 4, reason: 'a disabled one gives no voices');
 
     // what the firmware refuses: its reason, nothing restarts
-    final junk = File('${built.path}${sep}junk.nsc')..writeAsBytesSync([1, 2, 3]);
+    final junk = File('${built.path}${sep}junk.awvapkg')..writeAsBytesSync([1, 2, 3]);
     expect(await pumpUntil(tester, ctl.installAndAddEngine(junk.path)), isFalse);
     await settle(tester, 300);
     expect(ctl.moduleNote, (text: 'junk is not on Virtual: not a package the mock reads', error: true));

@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:striso_core/striso_core.dart';
 
 import '../controller.dart';
+import '../engine_library.dart' show packageExt;
 import '../theme.dart';
 import 'chrome.dart';
 
@@ -92,7 +93,7 @@ class EngineSlots extends StatelessWidget {
           'Add an engine…',
           key: const Key('slots-add'),
           kind: BtnKind.ghost,
-          tooltip: ctl.engineDir == null ? 'There is no engine folder in this run' : 'An engine package (.nsc), or a zip of them, into the library and onto the board that plays',
+          tooltip: ctl.engineDir == null ? 'There is no engine folder in this run' : 'An engine package (.$packageExt), or a zip of them, into the library and onto the board that plays',
           onPressed: busy || ctl.engineDir == null ? null : () => _add(ctl),
         ),
       ],
@@ -102,7 +103,7 @@ class EngineSlots extends StatelessWidget {
   Future<void> _add(AppController ctl) async {
     final f = await openFile(
       acceptedTypeGroups: const [
-        XTypeGroup(label: 'Engine package', extensions: ['nsc', 'zip']),
+        XTypeGroup(label: 'Engine package', extensions: [packageExt, 'zip']),
       ],
     );
     if (f != null) await ctl.installAndAddEngine(f.path);
