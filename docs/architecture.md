@@ -18,14 +18,14 @@ own booleans. What the user sees of it, flow by flow, is `docs/flows.md`.
    virtual) last reported and asks it again after every request, on its change counter (`Stcy`)
    or on an event. It never models board state by guessing what a command did, and keeps no copy
    of firmware tables. When the UI needs something the firmware cannot tell, the firmware gets a
-   read-only command: `StcX` (settings-key layout), `StcY` (state), `Stcy` (change counter), `StcH`
-   (hero knobs).
+   read-only command: `StcG` (key layout), `StcX` (settings-key layout), `StcY` (state), `Stcy`
+   (change counter), `StcH` (hero knobs).
 3. **One `Board` interface.** Both modes give the UI a `Board`: the console protocol
    (`StrisoClient`: version, lists, voice select, parameters, `K`, `N`, `X`, `Y`, `y`, load), what
    plays it by hand, where Save writes, and a `lost` event. Voices, presets, parameters with undo,
    A/B, harmony, tuning labels, the settings overlay and the key equalizer talk only to the
    active `Board`.
-4. **Current firmware only.** On connect the board must answer `StcX` and `Stcy`. If it doesn't,
+4. **Current firmware only.** On connect the board must answer `StcG`, `StcX` and `Stcy`. If it doesn't,
    the session fails with one message: "This Striso needs a firmware update to work with Striso
    Live (found <version>)". There are no fallbacks for older firmware.
 5. **The app ships no firmware.** Virtual loads a `striso_virtual` library at run time:

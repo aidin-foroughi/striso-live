@@ -19,7 +19,7 @@ void main() {
       }
       final keys = (await c.getParams(Target.keys))!;
       expect(keys.count, 61);
-      expect(keys.params[0].name, firmwareKeyName(0));
+      expect(keys.params[0].name, (await c.getKeyLayout())!.keys[0].name);
       final last = touch.params.length - 1;
       final errs = <({int target, int index})>[];
       final sub = c.qErrors.listen(errs.add);

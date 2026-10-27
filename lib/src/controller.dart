@@ -1,7 +1,7 @@
 // Striso Live's state and behaviour: connection (with the reconnect rules), voices, parameters
 // with undo, mutate and morph, user presets, synth load, key and harmony, the key equalizer,
 // saving touch settings to the board, the settings overlay and the console. The widgets only
-// show this and call into it. Port of tools/app/js/app.js.
+// show this and call into it.
 
 import 'dart:async';
 import 'dart:convert';
@@ -112,10 +112,11 @@ class BuildProbe {
   const BuildProbe(this.stamp, {this.api, this.firmwareVersion, this.failure});
 }
 
-/// The oldest firmware this app works with: next3 4c0ab4e, the first with everything it uses
-/// (StcX, StcY with mono= and midikey=, Stcy, StcH, StcW, StcT, the voice keys, the presets and the
-/// engine slots). There is no older path: an older firmware is told to update.
-const minFirmware = 'v2.2.4-338-82';
+/// The oldest firmware this app works with: next5 1532ce2, the first with everything it uses
+/// (StcG, the key layout; StcX, StcY with mono= and midikey=, Stcy, StcH, StcW, StcT, the voice
+/// keys, the presets and the engine slots). There is no older path: an older firmware is told to
+/// update.
+const minFirmware = 'v2.2.4-338-93';
 
 /// "2026-10-25_v2.2.4-308-g3e05282_all" or "strisoboard_v2.2.4-308-g3e05282" -> "3e05282".
 String? commitOf(String? v) => v == null ? null : RegExp(r'-g([0-9a-f]{7,})').firstMatch(v)?.group(1);
@@ -264,6 +265,10 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   final audioLevels = Pulse();
 
   final live = LiveState();
+
+  /// The board's keys as it last reported them (StcG; remembered from the last board until one
+  /// reports): null before any board has, then the board view draws no keys.
+  KeyLayout? get keyLayout => live.layout;
 
   /// The live parameters with undo, A/B, Mutate (params_model.dart).
   late final ParamsModel sound = ParamsModel(this, clock: clockMs);
@@ -460,6 +465,9 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   // lifecycle
 
   void _loadPrefs() {
+    // the last board's key layout (its StcG reply as it sent it), for the picture until a board reports
+    final kl = store.raw('keyLayout');
+    if (kl is List) live.layout = parseKeyLayout(kl.whereType<String>().toList());
     final n = store.get<String>('names');
     names = Names.values.firstWhere((x) => x.name == n, orElse: () => Names.octave);
     colour = KeyColour.values.firstWhere((x) => x.name == store.get<String>('colour'), orElse: () => KeyColour.off);
@@ -757,7 +765,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
         if (s.mode == Mode.virtual) {
           return Problem(
             '$title is too old for Striso Live',
-            'It runs ${virtual.version ?? 'an old firmware'}; Striso Live needs firmware $minFirmware or newer (it reports its settings layout, state and hero knobs). Pick a newer build.',
+            'It runs ${virtual.version ?? 'an old firmware'}; Striso Live needs firmware $minFirmware or newer (it reports its key layout, settings layout, state and hero knobs). Pick a newer build.',
             const [Fix.pickBuild],
           );
         }
@@ -766,7 +774,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
           'This Striso needs a firmware update',
           fw == null
               ? 'Striso Live needs firmware $minFirmware or newer, and this Striso did not say which it runs. Flash a newer firmware, then plug it in again.'
-              : 'Striso Live needs firmware $minFirmware or newer (it reports its settings layout, state and hero knobs); this Striso runs $fw. Flash a newer firmware, then plug it in again.',
+              : 'Striso Live needs firmware $minFirmware or newer (it reports its key layout, settings layout, state and hero knobs); this Striso runs $fw. Flash a newer firmware, then plug it in again.',
           [if (fw != null) Fix.copyVersion, Fix.playVirtual],
         );
       case FailKind.library:
@@ -1247,14 +1255,16 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     if (usbBoard) strisoVersion = v;
     log('connected: ${v.line}');
     if (usbBoard) _trace('version');
-    // the app needs the current firmware: it reports its settings layout and its state
-    final layout = await c.getSettingsLayout();
+    // the app needs the current firmware: it reports its key layout, settings layout and state
+    final keys = await c.getKeyLayout();
+    final layout = keys == null ? null : await c.getSettingsLayout();
     final count = layout == null ? null : await c.getChangeCount();
     final hero = count == null ? null : await c.getHeroes();
     if (!current()) return null;
-    if (layout == null || count == null || hero == null) {
+    if (keys == null || layout == null || count == null || hero == null) {
       return FailEv(FailKind.needsUpdate, '${b.caps.outdated} (found ${v.fw}).');
     }
+    _setKeyLayout(keys);
     settingsLayout = layout;
     heroes = hero;
     _stateCount = count;
@@ -1330,6 +1340,14 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     lastOpen = null;
     moduleSlots = null;
     _resetUi();
+  }
+
+  /// The board's key layout: for the live state and the picture, and remembered for the next start.
+  void _setKeyLayout(KeyLayout l) {
+    final was = live.layout;
+    if (was != null && was.lines.join('\n') == l.lines.join('\n')) return;
+    live.layout = l;
+    store.set('keyLayout', l.lines);
   }
 
   void _applyState(BoardState? st) {
@@ -1822,7 +1840,10 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   }
 
   /// What a key plays, MIDI-like semitones: the board's word, else 12-TET from the layout.
-  double keyPitch(int id) => tuning?.pitchOfButton(id) ?? (startNote + pitchOf(id) + live.transpose).toDouble();
+  double keyPitch(int id) {
+    final l = keyLayout!;
+    return tuning?.pitchOfButton(l, id) ?? (l.startNote + l.pitchOf(id) + live.transpose).toDouble();
+  }
 
   /// The pitch a label is drawn from: the fine tune is taken out (the chip shows it), and with the
   /// root reference the key's root is made exact.
@@ -1834,25 +1855,25 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
 
   /// How far the key root's key is from 12-TET (semitones), the shift the root reference removes.
   double get rootShift {
-    final t = tuning;
-    if (t == null) return 0;
+    final t = tuning, l = keyLayout;
+    if (t == null || l == null) return 0;
     final tonic = currentKey?.tonic ?? 0; // C when there is no key
     // the key with this spelling nearest the middle of the board
     int? best;
-    for (final id in keyIds) {
-      if (keyTpc(id, live.transposeFifths) != tonic) continue;
-      if (best == null || pitchOf(id).abs() < pitchOf(best).abs()) best = id;
+    for (final id in l.keyIds) {
+      if (l.keyTpc(id, live.transposeFifths) != tonic) continue;
+      if (best == null || l.pitchOf(id).abs() < l.pitchOf(best).abs()) best = id;
     }
     if (best == null) return 0;
-    final p = t.pitchOfButton(best);
+    final p = t.pitchOfButton(l, best);
     if (p == null) return 0;
-    final nominal = startNote + pitchOf(best) + live.transpose;
+    final nominal = l.startNote + l.pitchOf(best) + live.transpose;
     return p - t.offset - nominal;
   }
 
   /// The quarter-tone label of a key on its spelled letter.
   QtLabel qtLabel(int id) {
-    final n = noteName(id, live.transpose, live.transposeFifths);
+    final n = keyLayout!.noteName(id, live.transpose, live.transposeFifths);
     return quarterToneLabel(labelPitch(id), n.letter, nominalMidi: n.midi);
   }
 
@@ -1894,7 +1915,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   // key equalizer
 
   Param? keyParam(int buttonId) {
-    final n = keyNumberOf[buttonId];
+    final n = keyLayout?.keyNumberOf(buttonId);
     if (n == null) return null;
     final list = params[3]!.params;
     if (n < list.length && list[n].index == n) return list[n];
@@ -1905,10 +1926,12 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
 
   List<Measured> measuredKeys() {
     final out = <Measured>[];
-    for (final MapEntry(key: id, value: n) in keyNumberOf.entries) {
-      final peak = lastPeakOf(id);
-      final p = peak > 0 ? keyParam(id) : null;
-      if (p != null) out.add(Measured(n: n, id: id, peak: peak, factor: p.value, name: noteName(id, live.transpose, live.transposeFifths).full));
+    final l = keyLayout;
+    if (l == null) return out;
+    for (final k in l.keys) {
+      final peak = lastPeakOf(k.id);
+      final p = peak > 0 ? keyParam(k.id) : null;
+      if (p != null) out.add(Measured(n: k.n, id: k.id, peak: peak, factor: p.value, name: l.noteName(k.id, live.transpose, live.transposeFifths).full));
     }
     return out;
   }
@@ -1935,12 +1958,12 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   }
 
   void eqSelect(int id) {
-    if (!keyNumberOf.containsKey(id) || eqSelected == id) return;
+    if (keyLayout?[id] == null || eqSelected == id) return;
     eqSelected = id;
     values.ping();
   }
 
-  String eqLabel(int id) => 'Key ${noteName(id, live.transpose, live.transposeFifths).full} sensitivity';
+  String eqLabel(int id) => 'Key ${keyLayout!.noteName(id, live.transpose, live.transposeFifths).full} sensitivity';
 
   void eqSetFactor(double v, String phase) {
     final p = keyParam(eqSelected);

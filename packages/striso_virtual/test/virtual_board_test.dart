@@ -160,7 +160,8 @@ void main() {
         }
       }
       expect(other, isNotNull, reason: 'a settings card tuning with a fifth other than 700 cents');
-      final n = keyNumberOf[keyIds.first]!;
+      final keys = (await c.getKeyLayout())!;
+      final n = keys.keyNumberOf(keys.keyIds.first)!;
       final qt = quarterToneLabel(other!.notes[n]!, 'C');
       expect(qt.centsFrom12.abs() + qt.qt.abs(), greaterThan(0));
       // back to 12-TET

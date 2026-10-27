@@ -1,7 +1,8 @@
 // striso_core's client against the virtual board (the firmware's own code): the version, the voice
 // list and the parameter lists while the stream runs, a voice switch, a burst of writes coalesced,
-// writes the board clamps or refuses (Q err), replies to back to back commands kept apart, and an
-// engine package into a slot with its progress, as the board lists it, and the board's refusals.
+// writes the board clamps or refuses (Q err), replies to back to back commands kept apart, the key
+// layout (StcG) against what the stream, the key list and StcN say of the keys, and an engine
+// package into a slot with its progress, as the board lists it, and the board's refusals.
 // What the board answers is what is expected. The client without a board: striso_core's
 // test/client_test.dart.
 import 'dart:io';
@@ -70,18 +71,21 @@ void main() {
       expect(errs, [(target: Target.voice, index: ps.count)]);
       await sub.cancel();
 
-      // keys played on the board arrive as stream messages, with the motion sensor's
+      // keys played on the board arrive as stream messages, with the motion sensor's; every id the
+      // stream reports is a button of the board's key layout
+      final layout = (await c.getKeyLayout())!;
+      final played = layout.keys[30].id;
       for (var k = 0; k < 20; k++) {
-        b.injectKey(30, pres: 2000 + 50 * k, velo: k == 0 ? 2000 : 0);
+        b.injectKey(played, pres: 2000 + 50 * k, velo: k == 0 ? 2000 : 0);
         await sleep(20);
       }
-      b.injectKey(30, pres: 0);
+      b.injectKey(played, pres: 0);
       await sleep(100);
       expect(keys, greaterThan(5));
       expect(motions, greaterThan(20));
-      expect(ids, contains(30));
+      expect(ids, contains(played));
       for (final id in ids) {
-        expect(keyIds, contains(id));
+        expect(layout.keyIds, contains(id));
       }
       expect(c.parser.stats.truncated, 0);
 
@@ -95,7 +99,8 @@ void main() {
       expect(g.complete, isTrue);
       final k = (await c.getParams(Target.keys))!;
       expect(k.params.length, 61);
-      expect(k.params.map((p) => p.name), [for (var n = 0; n < 61; n++) firmwareKeyName(n)], reason: 'the key names as the firmware writes them');
+      final layout = (await c.getKeyLayout())!;
+      expect(k.params.map((p) => p.name), [for (final key in layout.keys) key.name], reason: 'the key list in key-number order, named as the layout names the keys');
       final errs = <({int target, int index})>[];
       final sub = c.qErrors.listen(errs.add);
       c.setParam(Target.keys, 5, k.params[5].max * 2); // out of range: the board answers Q err
@@ -108,6 +113,27 @@ void main() {
       expect(k2[6].value, toFloat32(1.25));
       expect(k2[5].value, k.params[5].value, reason: 'the refused write changed nothing');
       await sub.cancel();
+    });
+
+    test('the key layout (StcG): the keys StcN names and tunes, the same in 12-TET', () async {
+      final (b, c) = await boot();
+      final layout = (await c.getKeyLayout())!;
+      expect(layout.keys.length, 61);
+      expect(layout.keyIds.every((id) => id < layout.buttons), isTrue);
+      expect(layout.flip, isFalse, reason: 'the factory settings');
+      final t = (await c.getTuning())!;
+      expect(t.isPlain12, isTrue);
+      expect(t.base, layout.startNote);
+      // StcN by key number: its names are the layout's, and every key plays its 12-TET pitch
+      final named = <int, String>{};
+      for (final l in (await c.request(Cmd.tuning(), (l, s) => tuningKeyLine.hasMatch(l) ? Take.more : Take.no, idle: const Duration(milliseconds: 90))).lines) {
+        final f = l.trim().split(RegExp(r'\s+'));
+        named[int.parse(f[0])] = f[1];
+      }
+      for (final k in layout.keys) {
+        expect(named[k.n], k.name, reason: 'key ${k.n}');
+        expect(t.pitchOfButton(layout, k.id), closeTo(layout.startNote + 12 * k.c0 + 7 * k.c1, 1e-4), reason: 'key ${k.n} ${k.name}');
+      }
     });
 
     test('replies to back to back commands are not mixed up', () async {

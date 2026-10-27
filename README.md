@@ -368,8 +368,7 @@ over 3 minutes.
 - `packages/striso_usb`: libusb-1.0 through `dart:ffi` (own thin bindings: no maintained package
   fits), the I/O in a background isolate with 16 bulk IN transfers in flight; the UI never waits
   on USB.
-- `lib/`: the app (controller, panels, painters). Several files are ports of the earlier web app
-  (`tools/app` in the Striso tooling repository), which their header comments name.
+- `lib/`: the app (controller, panels, painters).
 - `tool/`: packaging (`package_windows.ps1`, `installer.iss`, `package_macos.sh`,
   `bundle_libusb_macos.sh`) and the icon generator; `install-mac.sh`, `install-windows.ps1`: the
   one-line installers.

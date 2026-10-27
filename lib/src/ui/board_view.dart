@@ -1,7 +1,8 @@
 // The instrument (DESIGN.md 4.1 and 5): a dark plate with slightly lighter discs at rest, light
 // while playing. Scale shows in rims and label strength, never fills; pressure is a warm fill
 // from the tilt point with a halo; one thrown ring per strike. Overlays: the key equalizer and
-// the settings keys. A static picture holds what does not move. Port of tools/app/js/board.js.
+// the settings keys. A static picture holds what does not move. The keys are the board's own
+// (its key layout, StcG); before any board has reported there are none, only the plate.
 
 import 'dart:math' as math;
 import 'dart:ui' as dui;
@@ -43,7 +44,7 @@ Color _lighter(Color c, double by) => Color.lerp(c, Colors.white, by)!;
 
 /// The smoothed key display state, advanced once per frame; also holds the static picture.
 class BoardAnim {
-  final dp = List<double>.filled(buttonCount, 0), dx = List<double>.filled(buttonCount, 0), dy = List<double>.filled(buttonCount, 0);
+  var dp = <double>[], dx = <double>[], dy = <double>[]; // per button id
   double lastDraw = -1e9;
   bool force = true;
   dui.Picture? picture;
@@ -53,7 +54,15 @@ class BoardAnim {
   bool step(LiveState live, double now, double dt, {required bool hovering, bool direct = false}) {
     final kUp = direct ? 1.0 : 1 - math.exp(-dt / 16), kDown = direct ? 1.0 : 1 - math.exp(-dt / 110), kXY = 1 - math.exp(-dt / 30);
     var busy = hovering || now - lastDraw > 1000;
-    for (final id in keyIds) {
+    final l = live.layout;
+    final n = l?.buttons ?? 0;
+    if (dp.length != n) {
+      dp = List.filled(n, 0);
+      dx = List.filled(n, 0);
+      dy = List.filled(n, 0);
+      force = true;
+    }
+    for (final id in l?.keyIds ?? const <int>[]) {
       final target = math.min(1.0, live.pres[id].toDouble());
       final d = dp[id];
       dp[id] = d + (target - d) * (target > d ? kUp : kDown);
@@ -160,7 +169,7 @@ class _BoardViewState extends State<BoardView> with SingleTickerProviderStateMix
   ({int? key, double dx, double dy, int? control})? _hit(Offset p) {
     final g = _Geo.of(_size);
     final x = (p.dx - g.ox) / g.s, y = -(p.dy - g.oy) / g.s;
-    for (final k in boardKeys) {
+    for (final k in ctl.keyLayout?.boardKeys ?? const <KeyInfo>[]) {
       final dx = x - k.x, dy = y - k.y;
       if (dx * dx + dy * dy <= keyRadius * keyRadius * 1.1) return (key: k.id, dx: dx / keyRadius, dy: dy / keyRadius, control: null);
     }
@@ -268,6 +277,10 @@ class BoardPainter extends CustomPainter {
     : super(repaint: Listenable.merge([repaint, ctl, ctl.values, ctl.harmony]));
 
   LiveState get live => ctl.live;
+
+  /// The board's keys (none before a board has reported its layout).
+  KeyLayout? get layout => ctl.keyLayout;
+  List<KeyInfo> get _keys => layout?.boardKeys ?? const [];
   bool get _eq => overlays && ctl.eqOn && ctl.params[3]!.params.isNotEmpty && !ctl.settingsOn;
   bool get _settings => overlays && ctl.settingsOn;
   bool get _hoverable => overlays || ctl.playable;
@@ -275,7 +288,7 @@ class BoardPainter extends CustomPainter {
   String _signature(Size size) {
     final eqSig = _eq
         ? [
-            for (final id in keyIds) '${ctl.keyParam(id)?.value.toStringAsFixed(3)}:${ctl.lastPeakOf(id).toStringAsFixed(3)}',
+            for (final id in layout?.keyIds ?? const <int>[]) '${ctl.keyParam(id)?.value.toStringAsFixed(3)}:${ctl.lastPeakOf(id).toStringAsFixed(3)}',
             ctl.eqMedian?.toStringAsFixed(3),
             ctl.eqSelected,
           ].join(',')
@@ -286,7 +299,7 @@ class BoardPainter extends CustomPainter {
         ? '${t?.index}|${t?.fifth}|${t?.octave}|${t?.offset}|${t == null ? 0 : Object.hashAll(t.notes.values)}|${ctl.pitchRef.name}'
         : '';
     final chordSig = ctl.colour == KeyColour.chord ? '${_heldChord?.name}|${_heldChord?.root}|${_heldChord?.type}' : '';
-    return '${size.width.toStringAsFixed(1)}x${size.height.toStringAsFixed(1)}|${live.transpose}|${live.transposeFifths}|'
+    return '${size.width.toStringAsFixed(1)}x${size.height.toStringAsFixed(1)}|${identityHashCode(layout)}|${live.transpose}|${live.transposeFifths}|'
         '${ctl.currentKey?.name}|${ctl.names.name}|${ctl.colour.name}|$labelScale|$eqSig|$setSig|$tuneSig|$chordSig';
   }
 
@@ -345,7 +358,7 @@ class BoardPainter extends CustomPainter {
 
   /// The look of a key at rest: rim colour and width (null: none), label colour, dashed rim.
   ({Color? rim, double rimW, Color label, bool dash}) _look(KeyInfo k) {
-    final tpc = keyTpc(k.id, live.transposeFifths);
+    final tpc = layout!.keyTpc(k.id, live.transposeFifths);
     final base = _baseLook(k, tpc);
     final col = _colourOf(k, tpc);
     if (col == null) return base;
@@ -380,15 +393,15 @@ class BoardPainter extends CustomPainter {
     final x0 = g.px(plate.x0), y0 = g.py(plate.y1), x1 = g.px(plate.x1), y1 = g.py(plate.y0);
     c.drawRRect(RRect.fromLTRBR(x0, y0, x1, y1, Radius.circular(plate.radius * s)), Paint()..color = BoardPal.plate);
 
-    // the pitch axis: C labels at the right plate edge, no lines
-    final t = live.transpose;
-    for (var midi = 24; midi <= 108; midi += 12) {
-      final y = g.py((midi - startNote - t) * mmPerSemitone);
+    // the pitch axis: C labels at the right plate edge, no lines (with the board's keys)
+    final t = live.transpose, start = layout?.startNote;
+    for (var midi = 24; start != null && midi <= 108; midi += 12) {
+      final y = g.py((midi - start - t) * mmPerSemitone);
       if (y < y0 + 6 * s || y > y1 - 4 * s) continue;
       drawText(c, 'C${midi ~/ 12 - 1}', Offset(x1 - 2 * s, y), TypeSize.micro, Pal.text3, weight: FontWeight.w500, align: 1);
     }
 
-    for (final k in boardKeys) {
+    for (final k in _keys) {
       final center = g.at(k.x, k.y);
       c.drawCircle(center, r, Paint()..color = k.natural ? BoardPal.natural : BoardPal.accidental);
       final l = _look(k);
@@ -411,11 +424,11 @@ class BoardPainter extends CustomPainter {
     if (mode == Names.off) return;
     // under 700 px the octave digits go
     if (mode == Names.octave && boardWidth < 700) mode = Names.letters;
-    final n = noteName(k.id, live.transpose, live.transposeFifths);
+    final n = layout!.noteName(k.id, live.transpose, live.transposeFifths);
     final big = math.max(11.0, r * 0.72 * labelScale).roundToDouble();
     final key = ctl.currentKey;
     if (key != null && (mode == Names.degrees || mode == Names.solfege)) {
-      final tpc = keyTpc(k.id, live.transposeFifths);
+      final tpc = layout!.keyTpc(k.id, live.transposeFifths);
       final text = mode == Names.degrees ? degreeLabel(key, tpc) : solfege(key, tpc);
       drawText(c, text, Offset(cx, cy), text.length > 2 ? math.max(11.0, big * 0.85) : big, col, weight: FontWeight.w500);
       return;
@@ -449,7 +462,7 @@ class BoardPainter extends CustomPainter {
   // press's peak as an arc against the median of the measured keys
   void _drawEq(Canvas c, _Geo g, double r) {
     final med = ctl.eqMedian;
-    for (final k in boardKeys) {
+    for (final k in _keys) {
       final center = g.at(k.x, k.y);
       final f = ctl.keyParam(k.id)?.value;
       if (f != null && (math.log(f) / math.ln2).abs() > 0.004) {
@@ -481,7 +494,7 @@ class BoardPainter extends CustomPainter {
   void _drawSettings(Canvas c, _Geo g, double r) {
     final s = g.s;
     final voices = ctl.settingsVoices();
-    for (final k in boardKeys) {
+    for (final k in _keys) {
       final center = g.at(k.x, k.y);
       final f = ctl.settingsLayout[k.id];
       // a voice key the layout leaves out: free (a dashed hairline and +), or its engine isn't
@@ -574,12 +587,13 @@ class BoardPainter extends CustomPainter {
     final s = g.s, r = keyRadius * s;
     final now = clockMs();
     final sweepAge = now - ctl.waveT;
+    final keys = anim.dp.length == (layout?.buttons ?? 0) ? _keys : const <KeyInfo>[];
     final lit = [
-      for (final id in keyIds)
-        if (anim.dp[id] > 0) id,
+      for (final k in keys)
+        if (anim.dp[k.id] > 0) k.id,
     ].length;
     final halos = lit <= 20;
-    for (final k in boardKeys) {
+    for (final k in keys) {
       final id = k.id;
       final center = g.at(k.x, k.y);
       final p = anim.dp[id];

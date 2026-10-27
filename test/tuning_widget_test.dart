@@ -15,6 +15,9 @@ import 'support/virtual.dart';
 /// The settings key that loads tuning [n], where the firmware's layout (StcX) has it.
 int tuningKey(AppController ctl, int n) => ctl.settingsLayout.keys.entries.firstWhere((e) => e.value.tuningIndex == n).key;
 
+/// The button of the key at octaves [c0] and fifths [c1] from D4, as the board's key layout has it.
+int keyAt(AppController ctl, int c0, int c1) => ctl.keyLayout!.keys.singleWhere((k) => k.c0 == c0 && k.c1 == c1).id;
+
 void main() {
   final skip = virtualSkip != null;
 
@@ -35,14 +38,16 @@ void main() {
     await tester.tap(find.byKey(const Key('toast-Pitch labels')));
     await settle(tester, ms: 300);
     expect(ctl.names, Names.pitch);
-    // 31-TET C♯4 (button 30): a sharp whose second stroke is 68% tall, 16 cents under 12-TET
-    final cs = ctl.qtLabel(30);
+    // 31-TET C♯4 (7 fifths up, 3 octaves down from D4): a sharp whose second stroke is 68% tall,
+    // 16 cents under 12-TET
+    final csKey = keyAt(ctl, -3, 5);
+    final cs = ctl.qtLabel(csKey);
     expect(cs.letter, 'C');
     expect(cs.qt, closeTo(1.677, 0.001));
     expect(cs.centsFrom12, closeTo(-16.1, 0.1));
     expect(qtAccidentalWidth(20, cs.qt), greaterThan(0));
     // the hover readout tells the cents and the nearest quarter tone
-    ctl.hover = 30;
+    ctl.hover = csKey;
     ctl.stats.ping();
     await settle(tester, ms: 200);
     final readout = tester.widget<Text>(find.byKey(const Key('hover-readout'))).data!;
@@ -51,11 +56,11 @@ void main() {
     expect(readout, contains('nearest quarter tone C sharp −16 ¢'));
     ctl.hover = -1;
     // the key root as reference makes the root exact (C is +6.45 cents absolute in 31-TET on D)
-    final cKey = keyIds.firstWhere((id) => c0[id] == 1 && c1[id] == -2);
+    final cKey = keyAt(ctl, 1, -2);
     expect(ctl.qtLabel(cKey).centsFrom12, closeTo(6.45, 0.01));
     ctl.setPitchRef(PitchRef.root);
     expect(ctl.qtLabel(cKey).centsFrom12, closeTo(0, 1e-6));
-    expect(ctl.qtLabel(30).centsFrom12, closeTo(-22.6, 0.1)); // C♯ against the tuning's own C
+    expect(ctl.qtLabel(csKey).centsFrom12, closeTo(-22.6, 0.1)); // C♯ against the tuning's own C
     ctl.setPitchRef(PitchRef.absolute);
     // the suggestion came once: a second change only reports the name
     ctl.loadTuning(8);
@@ -222,7 +227,7 @@ void main() {
       await waitFor(tester, () => ctl.tuning?.index == n);
       for (final size in [11.0, 16.0, 24.0, 31.0]) {
         final small = (size * 0.55).roundToDouble();
-        for (final id in keyIds) {
+        for (final id in ctl.keyLayout!.keyIds) {
           final l = ctl.qtLabel(id);
           final run = qtLabelLayout(l, size, small: small);
           final why = 'tuning $n ($name) key $id ${l.letter} qt ${l.qt.toStringAsFixed(2)} at $size px';

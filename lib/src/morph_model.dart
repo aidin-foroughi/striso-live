@@ -1,6 +1,6 @@
 // Morph pad model: up to four captured sounds in the corners of an XY pad. The puck's position
 // blends every parameter between them (bilinear; integer and on/off parameters snap). The puck
-// follows the hand, an orbit, or the instrument's tilt. Port of tools/app/js/morph.js (state).
+// follows the hand, an orbit, or the instrument's tilt.
 
 import 'dart:math' as math;
 

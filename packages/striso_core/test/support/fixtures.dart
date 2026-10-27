@@ -3,6 +3,8 @@
 // from), then sections `[name] > command` followed by the board's reply lines.
 import 'dart:io';
 
+import 'package:striso_core/striso_core.dart';
+
 import 'firmware.dart';
 
 class Fixture {
@@ -36,3 +38,6 @@ Fixture readFixture(String file) {
   if (firmware.isEmpty) throw StateError('$file names no firmware');
   return Fixture(firmware, sections);
 }
+
+/// The board's key layout as the firmware reports it (StcG, test/fixtures/key_layout.txt).
+KeyLayout fixtureKeyLayout() => parseKeyLayout(readFixture('key_layout.txt')['G'])!;

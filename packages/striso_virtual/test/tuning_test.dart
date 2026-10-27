@@ -49,7 +49,7 @@ void main() {
       for (final e in layout.keys.entries.where((e) => !e.value.switchable)) {
         expect(await c.pressSettingsKey(e.key), (ok: false, id: e.key), reason: '${e.key} ${e.value.title}');
       }
-      final none = keyIds.firstWhere((id) => layout[id] == null);
+      final none = (await c.getKeyLayout())!.keyIds.firstWhere((id) => layout[id] == null);
       expect(await c.pressSettingsKey(none), (ok: false, id: none));
     });
   });

@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'board_state.dart';
 import 'dials.dart';
+import 'layout.dart';
 import 'modules.dart';
 import 'presets.dart';
 import 'protocol.dart';
@@ -324,6 +325,21 @@ class StrisoClient {
       return t == 'X end' ? Take.done : Take.more;
     }, timeout: const Duration(milliseconds: 1200));
     return parseSettingsLayout(r.lines);
+  }
+
+  /// The key layout (StcG): every key's number, button, coordinates and name. Null without a whole
+  /// reply (then the firmware needs an update).
+  Future<KeyLayout?> getKeyLayout() async {
+    final r = await request(commandChar('G'), (l, s) {
+      if (s['header'] != true) {
+        if (!isKeyLayoutHeader(l)) return Take.no;
+        s['header'] = true;
+        return Take.more;
+      }
+      if (isKeyLayoutEnd(l)) return Take.done;
+      return isKeyLayoutKey(l) ? Take.more : Take.no;
+    }, timeout: const Duration(milliseconds: 1200));
+    return parseKeyLayout(r.lines);
   }
 
   /// The board's state in one line (StcY); null without a reply.

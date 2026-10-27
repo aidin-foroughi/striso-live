@@ -128,7 +128,7 @@ void main() {
     await waitFor(tester, () => ctl.measuredKeys().length >= 4);
     expect(ctl.eqSelected, 31, reason: 'follows the last pressed key');
     await settle(tester, ms: 200);
-    expect(tester.widget<Text>(find.byKey(const Key('eq-keyname'))).data, noteName(31).full);
+    expect(tester.widget<Text>(find.byKey(const Key('eq-keyname'))).data, ctl.keyLayout!.noteName(31).full);
     await tester.ensureVisible(find.byKey(const Key('eq-suggest')));
     await tester.tap(find.byKey(const Key('eq-suggest')));
     await settle(tester, ms: 300);
@@ -139,11 +139,12 @@ void main() {
     expect(ctl.history.canUndo, isTrue);
     // the board took the new factors
     final onBoard = (await run(tester, ctl.client!.getParams(3)))!.params;
+    final layout = ctl.keyLayout!;
     for (final id in keys) {
-      final n = keyNumberOf[id]!;
+      final n = layout.keyNumberOf(id)!;
       expect(onBoard[n].value, closeTo(ctl.keyParam(id)!.value, 1e-6), reason: 'key $id');
     }
-    expect(onBoard[keyNumberOf[25]!].value, greaterThan(onBoard[keyNumberOf[29]!].value), reason: 'the softer key gets more');
+    expect(onBoard[layout.keyNumberOf(25)!].value, greaterThan(onBoard[layout.keyNumberOf(29)!].value), reason: 'the softer key gets more');
     await finish(tester, ctl);
   });
 

@@ -1,6 +1,7 @@
 // Records the firmware's console replies that striso_core's parser tests read
-// (packages/striso_core/test/fixtures/): the settings layout (StcX) and the tuning reply (StcN) of
-// every settings-card tuning, from a virtual board (the firmware's own code, striso_virtual).
+// (packages/striso_core/test/fixtures/): the key layout (StcG), the settings layout (StcX) and the
+// tuning reply (StcN) of every settings-card tuning, from a virtual board (the firmware's own
+// code, striso_virtual).
 // Each file names the firmware it came from; run it again after a firmware change that changes
 // these replies:
 //
@@ -61,6 +62,11 @@ void main(List<String> args) {
   final b = VirtualBoard();
   try {
     final fw = b.firmwareVersion;
+
+    final keyLayout = Fixture("The key layout (StcG): every key's number, button id, coordinates and name.");
+    final g = commandChar('G');
+    keyLayout.section('G', g, ask(b, g));
+    keyLayout.write('$out/key_layout.txt', fw);
 
     final layout = Fixture('The settings layout (StcX) of a board with the factory settings.');
     final x = commandChar('X');

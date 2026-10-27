@@ -87,7 +87,7 @@ void main() {
     expect(ctl.settingsClick(38), isTrue); // tuning 2
     await waitFor(tester, () => ctl.tuning != null && ctl.tuning!.index == 2);
     expect(ctl.tuning!.isPlain12, isFalse);
-    final id = keyIds.firstWhere((k) => ctl.qtLabel(k).centsFrom12.abs() > 1);
+    final id = ctl.keyLayout!.keyIds.firstWhere((k) => ctl.qtLabel(k).centsFrom12.abs() > 1);
     expect(ctl.qtLabel(id).name, isNotEmpty);
     // a voice key on the overlay picks the engine (24: bowed, 20: va)
     expect(ctl.settingsClick(20), isTrue);

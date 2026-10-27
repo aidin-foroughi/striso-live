@@ -1,167 +1,149 @@
-// Striso board key layout, from the firmware's button coordinates (synth_control.cpp c0_dis/c1_dis)
-// and the DCompose geometry of utils/dcompose.py.
+// The Striso's keys as the firmware reports them (console StcG), and the app's picture of the
+// board around them (the DCompose geometry of utils/dcompose.py, the control buttons, the plate).
 //
-// Button ids 0..67 are 4 rows of 17 columns; row 3 has only 10 keys (button_read.c disables
-// 52 54 57 59 61 64 66). c0 counts octaves, c1 fifths from D (start note 62 = D4). Columns run
-// Gb Db Ab Eb Bb F C G D A E B F# C# G# D# A# (c1 = -8..8), and a key's height is its pitch.
+// The StcG reply, lines ending in CRLF:
+//   layout <keys> <buttons> <start note> flip=<0|1>
+//   <n> <button> <c0> <c1> <name>        one line per key, n = key number 0..keys-1
+//   layout end
+// button: the button id (0..buttons-1) the live key stream reports; a button no key line names is
+// not on the board. c0/c1: the physical coordinates, octaves and fifths from the key at 0 0. The
+// start note is the MIDI note of 0 0 in 12-TET (62 = D4), so a key's 12-TET pitch is
+// 12 * c0 + 7 * c1 above it. name: the firmware's 3 character key name (the one StcN uses). flip:
+// the board's flipdir; the keys stay where they are, so the picture ignores it.
 
-const List<int> c0 = [
-  6,
-  5,
-  5,
-  4,
-  4,
-  3,
-  2,
-  2,
-  1,
-  1,
-  0,
-  0,
-  -1,
-  -2,
-  -2,
-  -3,
-  -3,
-  5,
-  4,
-  4,
-  3,
-  3,
-  2,
-  1,
-  1,
-  0,
-  0,
-  -1,
-  -1,
-  -2,
-  -3,
-  -3,
-  -4,
-  -4,
-  4,
-  3,
-  3,
-  2,
-  2,
-  1,
-  0,
-  0,
-  -1,
-  -1,
-  -2,
-  -2,
-  -3,
-  -4,
-  -4,
-  -5,
-  -5,
-  3,
-  2,
-  2,
-  1,
-  1,
-  0,
-  -1,
-  -1,
-  -2,
-  -2,
-  -3,
-  -3,
-  -4,
-  -5,
-  -5,
-  -6,
-  -6,
-];
-final List<int> c1 = [
-  for (var r = 0; r < 4; r++)
-    for (var c = -8; c <= 8; c++) c,
-];
+/// One key of the board, as StcG reports it, with its place in the picture.
+class KeyInfo {
+  /// The firmware's key number (0..60): the order of StcN and the per-key sensitivity list.
+  final int n;
 
-const Set<int> missingButtons = {52, 54, 57, 59, 61, 64, 66};
-const int buttonCount = 68;
-final List<int> keyIds = [
-  for (var id = 0; id < buttonCount; id++)
-    if (!missingButtons.contains(id)) id,
-];
+  /// The button id the key stream reports.
+  final int id;
 
-const int startNote = 62; // D4, synth_control.cpp start_note_offset
+  /// Octaves and fifths from the key at 0 0.
+  final int c0, c1;
 
-/// Firmware key numbers (config_store.c button_number_map): key n (0..60) is button id map[n];
-/// the per-key sensitivity list (console 'k', target 3) is in key-number order.
-const List<int> buttonNumberMap = [
-  56,
-  51,
-  63,
-  58,
-  53,
-  65,
-  60,
-  55,
-  67,
-  62,
-  40,
-  35,
-  47,
-  42,
-  37,
-  49,
-  44,
-  39,
-  34,
-  46,
-  41,
-  36,
-  48,
-  43,
-  38,
-  50,
-  45,
-  23,
-  18,
-  30,
-  25,
-  20,
-  32,
-  27,
-  22,
-  17,
-  29,
-  24,
-  19,
-  31,
-  26,
-  21,
-  33,
-  28,
-  6,
-  1,
-  13,
-  8,
-  3,
-  15,
-  10,
-  5,
-  0,
-  12,
-  7,
-  2,
-  14,
-  9,
-  4,
-  16,
-  11,
-];
-final Map<int, int> keyNumberOf = {for (var n = 0; n < buttonNumberMap.length; n++) buttonNumberMap[n]: n};
+  /// The firmware's key name, e.g. 'F_1', 'Gb1', 'D_3'.
+  final String name;
+  const KeyInfo({required this.n, required this.id, required this.c0, required this.c1, required this.name});
 
-const _fwNoteNames = 'C_DbC#D_EbD#E_F_GbF#G_AbG#A_BbA#B_';
+  /// Semitones above the start note in 12-TET.
+  int get pitch => 12 * c0 + 7 * c1;
 
-/// The firmware's 3 character key names (put_button_name), e.g. 'F_1', 'Gb1', 'C_3'.
-String firmwareKeyName(int n) {
-  final note = (n + 7) % 17, octave = (n + 7) ~/ 17;
-  return '${_fwNoteNames.substring(note * 2, note * 2 + 2)}${1 + octave}';
+  /// A natural (no accidental in its spelling).
+  bool get natural => spell(c1).acc == 0;
+
+  /// The key's centre in mm, y up, origin at the key at 0 0.
+  double get x => c1 * mmPerColumn;
+  double get y => pitch * mmPerSemitone;
+}
+
+/// The board's keys as the firmware reports them (StcG).
+class KeyLayout {
+  /// The keys by key number.
+  final List<KeyInfo> keys;
+
+  /// Button ids are 0..buttons-1.
+  final int buttons;
+
+  /// The MIDI note of the key at 0 0 in 12-TET.
+  final int startNote;
+
+  /// The board's flipdir (the keys stay where they are).
+  final bool flip;
+
+  /// The reply as the board sent it (kept to show the picture before the board reports again).
+  final List<String> lines;
+
+  /// The keys in button id order, and their ids.
+  final List<KeyInfo> boardKeys;
+  final List<int> keyIds;
+  final Map<int, KeyInfo> _byId;
+
+  KeyLayout._(this.keys, this.buttons, this.startNote, this.flip, this.lines, this._byId)
+    : boardKeys = List.unmodifiable([...keys]..sort((a, b) => a.id.compareTo(b.id))),
+      keyIds = List.unmodifiable([for (final k in [...keys]..sort((a, b) => a.id.compareTo(b.id))) k.id]);
+
+  /// The key on button [id], or null when the board has no key there.
+  KeyInfo? operator [](int id) => _byId[id];
+
+  /// The key on button [id]; throws when the board has no key there.
+  KeyInfo keyInfo(int id) => _byId[id] ?? (throw ArgumentError.value(id, 'id', 'no key on this button'));
+
+  /// The firmware's key number of button [id], or null.
+  int? keyNumberOf(int id) => _byId[id]?.n;
+
+  /// Semitones above [startNote] (12-TET).
+  int pitchOf(int id) => keyInfo(id).pitch;
+
+  /// Spelled pitch of a key on the line of fifths with C = 0 (harmony tpc), for a spelling shift.
+  int keyTpc(int id, [int fifths = 0]) => keyInfo(id).c1 + 2 + fifths;
+
+  /// Note name with scientific octave for a transposition (semitones) and spelling shift.
+  NoteName noteName(int id, [int transpose = 0, int fifths = 0]) {
+    final k = keyInfo(id);
+    final s = spell(k.c1 + fifths);
+    final midi = startNote + k.pitch + transpose;
+    final natural = midi - s.acc;
+    final octave = ((natural - _letterPc[s.letter]!) / 12).round() - 1;
+    final text = '${s.letter}${s.accidental}';
+    return NoteName(letter: s.letter, accidental: s.accidental, acc: s.acc, midi: midi, octave: octave, text: text, full: '$text$octave');
+  }
+
+  @override
+  String toString() => 'KeyLayout(${keys.length} keys, $buttons buttons, start note $startNote${flip ? ', flipped' : ''})';
+}
+
+final _header = RegExp(r'^layout (\d+) (\d+) (\d+) flip=([01])$');
+final _keyLine = RegExp(r'^(\d+) (\d+) (-?\d+) (-?\d+) (\S+)$');
+const _end = 'layout end';
+
+/// The reply's first line.
+bool isKeyLayoutHeader(String line) => _header.hasMatch(line.trim());
+
+/// A key line of the reply.
+bool isKeyLayoutKey(String line) => _keyLine.hasMatch(line.trim());
+
+/// The reply's last line.
+bool isKeyLayoutEnd(String line) => line.trim() == _end;
+
+/// The reply to StcG, or null unless it is all there: the header, a line for every key (numbers
+/// 0..keys-1, each button once and below the button count) and the end.
+KeyLayout? parseKeyLayout(List<String> lines) {
+  final kept = <String>[];
+  RegExpMatch? head;
+  final keys = <int, KeyInfo>{}, byId = <int, KeyInfo>{};
+  var ended = false;
+  for (final raw in lines) {
+    final line = raw.trim();
+    if (line.isEmpty) continue;
+    if (head == null) {
+      head = _header.firstMatch(line);
+      if (head != null) kept.add(line);
+      continue;
+    }
+    if (line == _end) {
+      kept.add(line);
+      ended = true;
+      break;
+    }
+    final m = _keyLine.firstMatch(line);
+    if (m == null) return null;
+    final k = KeyInfo(n: int.parse(m[1]!), id: int.parse(m[2]!), c0: int.parse(m[3]!), c1: int.parse(m[4]!), name: m[5]!);
+    if (keys.containsKey(k.n) || byId.containsKey(k.id)) return null;
+    keys[k.n] = k;
+    byId[k.id] = k;
+    kept.add(line);
+  }
+  if (head == null || !ended) return null;
+  final count = int.parse(head[1]!), buttons = int.parse(head[2]!);
+  if (keys.length != count || byId.keys.any((id) => id >= buttons)) return null;
+  final byN = <KeyInfo>[];
+  for (var n = 0; n < count; n++) {
+    final k = keys[n];
+    if (k == null) return null;
+    byN.add(k);
+  }
+  return KeyLayout._(List.unmodifiable(byN), buttons, int.parse(head[3]!), head[4] == '1', List.unmodifiable(kept), byId);
 }
 
 // geometry in millimetres (dcompose.get_default: 8.5 mm per column, octave = 4.5356 columns)
@@ -185,12 +167,6 @@ Spelling spell(int c1v) {
   return Spelling(_letters[c1v - acc * 7 + 3], acc, _accidentals[acc + 2]);
 }
 
-/// Semitones above [startNote] (12-TET).
-int pitchOf(int id) => 12 * c0[id] + 7 * c1[id];
-
-/// Spelled pitch of a key on the line of fifths with C = 0 (harmony tpc), for a spelling shift.
-int keyTpc(int id, [int fifths = 0]) => c1[id] + 2 + fifths;
-
 class NoteName {
   final String letter, accidental, text, full;
   final int acc, midi, octave;
@@ -204,28 +180,6 @@ class NoteName {
     required this.full,
   });
 }
-
-/// Note name with scientific octave for a transposition (semitones) and spelling shift.
-NoteName noteName(int id, [int transpose = 0, int fifths = 0]) {
-  final s = spell(c1[id] + fifths);
-  final midi = startNote + pitchOf(id) + transpose;
-  final natural = midi - s.acc;
-  final octave = ((natural - _letterPc[s.letter]!) / 12).round() - 1;
-  final text = '${s.letter}${s.accidental}';
-  return NoteName(letter: s.letter, accidental: s.accidental, acc: s.acc, midi: midi, octave: octave, text: text, full: '$text$octave');
-}
-
-class KeyInfo {
-  final int id, row, col, c0v, c1v, pitch;
-  final bool natural;
-  final double x, y; // mm, y up, origin at D4 (button 25)
-  const KeyInfo(this.id, this.row, this.col, this.c0v, this.c1v, this.pitch, this.natural, this.x, this.y);
-}
-
-KeyInfo keyInfo(int id) =>
-    KeyInfo(id, id ~/ 17, id % 17, c0[id], c1[id], pitchOf(id), spell(c1[id]).acc == 0, c1[id] * mmPerColumn, pitchOf(id) * mmPerSemitone);
-
-final List<KeyInfo> boardKeys = [for (final id in keyIds) keyInfo(id)];
 
 enum ControlShape { ring, up, down, square }
 

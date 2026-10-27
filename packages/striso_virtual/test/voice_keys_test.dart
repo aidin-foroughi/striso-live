@@ -29,7 +29,7 @@ void main() {
     expect(vk2.edits.map((e) => '$e'), contains('a blank sGv${factory.key}a'));
     expect((await c.assignVoiceKey(factory.key, voiceKeyFactory))!.engine, factory.engine);
     // refused: a key that holds no voice, an entry that isn't there
-    final notAVoiceKey = keyIds.firstWhere((id) => vk0[id] == null);
+    final notAVoiceKey = (await c.getKeyLayout())!.keyIds.firstWhere((id) => vk0[id] == null);
     expect((await c.assignVoiceKey(notAVoiceKey, 0))!.why, 'key');
     expect((await c.assignVoiceKey(free, voices.length + 100))!.why, 'entry');
   });

@@ -61,32 +61,18 @@ class TuningInfo {
   double get offsetCents => offset * 100;
   bool get complete => notes.length >= 61;
 
-  /// The pitch of a key by its button id (null when the reply lacked it).
-  double? pitchOfButton(int id) {
-    final n = keyNumberOf[id];
+  /// The pitch of the key on button [id] (null when the reply lacked it): StcN gives it per key
+  /// number, the board's key layout says which button that is.
+  double? pitchOfButton(KeyLayout layout, int id) {
+    final n = layout.keyNumberOf(id);
     return n == null ? null : notes[n];
   }
 
   /// Plain 12-TET at A440 with no offset: the spelled names say it all.
   bool get isPlain12 => (fifthCents - 700).abs() < _fifthTol && (octaveCents - 1200).abs() < _octaveTol && offsetCents.abs() < 0.5 && !hasKeyOffsets;
 
-  /// Per-key offsets beyond the generators (just intonation): reported as such, or the keys'
-  /// pitches do not all fit base + octave * c0 + fifth * c1 for one base.
-  bool get hasKeyOffsets => keyOffsets.isNotEmpty ? keyOffsets.values.any((o) => o.abs() * 100 > 0.5) : keyOffsetSpread > 0.5;
-
-  /// The spread (cents) of the per-key residuals around their median.
-  double get keyOffsetSpread {
-    final res = <double>[];
-    for (final MapEntry(key: n, value: p) in notes.entries) {
-      if (n < 0 || n >= buttonNumberMap.length) continue;
-      final id = buttonNumberMap[n];
-      res.add((p - octave * c0[id] - fifth * c1[id]) * 100);
-    }
-    if (res.length < 2) return 0;
-    res.sort();
-    final med = res[res.length ~/ 2];
-    return res.fold(0.0, (m, r) => math.max(m, (r - med).abs()));
-  }
+  /// Per-key offsets beyond the generators (just intonation), as the board reports them.
+  bool get hasKeyOffsets => keyOffsets.values.any((o) => o.abs() * 100 > 0.5);
 
   /// The tuning's name, as the board names it: the settings card's tuning [index] by its key in
   /// the board's settings layout (StcX: "Tuning 1: 31-TET", short "31TET"; a tuning renamed in the

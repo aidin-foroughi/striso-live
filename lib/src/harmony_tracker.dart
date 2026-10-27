@@ -1,6 +1,6 @@
 // The chord readout behind the live view: held keys must be stable for 70 ms before they are
 // named (no flicker in rolled chords) and for 160 ms before they join the progression; a key
-// finder listens along. Port of updateHarmony() in tools/app/js/app.js.
+// finder listens along.
 
 import 'dart:math' as math;
 
@@ -31,9 +31,11 @@ class HarmonyTracker extends ChangeNotifier {
 
   List<(int, SNote)> heldNotes(double now) {
     final out = <(int, SNote)>[];
-    for (final id in keyIds) {
+    final l = live.layout;
+    if (l == null) return out;
+    for (final id in l.keyIds) {
       if (live.down[id] == 1 && live.pres[id] >= 0.02 && now - live.onT[id] >= 40) {
-        out.add((id, SNote(keyTpc(id, live.transposeFifths), startNote + pitchOf(id) + live.transpose)));
+        out.add((id, SNote(l.keyTpc(id, live.transposeFifths), l.startNote + l.pitchOf(id) + live.transpose)));
       }
     }
     return out;

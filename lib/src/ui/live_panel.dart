@@ -370,7 +370,7 @@ class HoverReadout extends StatelessWidget {
               ? 'Settings: hold it and press a key'
               : (settingsControls[hc] ?? 'Glissando');
         } else if (id >= 0) {
-          final n = noteName(id, live.transpose, live.transposeFifths);
+          final n = ctl.keyLayout!.noteName(id, live.transpose, live.transposeFifths);
           final f = ctl.tab == AppTab.setup ? ctl.keyParam(id)?.value : null;
           final pitchy = ctl.names == Names.pitch || ctl.names == Names.cents || ctl.nonTwelve;
           final q = pitchy ? ctl.qtLabel(id) : null;

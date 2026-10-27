@@ -59,8 +59,9 @@ void main() {
   });
 
   // The firmware release (v2.2.4-335, tagged) reports "2026-10-25_v2.2.4-335-0-g<sha>_all"; the app
-  // needs v2.2.4-338-82 or newer. It compares no version numbers: what it needs is that the firmware
-  // answers StcX, Stcy and StcH, so a tagged build's string is taken as it is, and its commit read.
+  // needs v2.2.4-338-93 or newer. It compares no version numbers: what it needs is that the firmware
+  // answers StcG, StcX, Stcy and StcH, so a tagged build's string is taken as it is, and its commit
+  // read.
   test('a tagged firmware release\'s version string: parsed, its commit read', () {
     const tagged = '2026-10-25_v2.2.4-335-0-g1a2b3c4_all';
     final v = parseVersion('striso_control_strisoboard_$tagged 0043002B3132510A33383339 STRISO');
@@ -68,7 +69,7 @@ void main() {
     expect(commitOf(v.fw), '1a2b3c4');
     expect(commitOf(tagged), '1a2b3c4');
     expect(shortVersion(tagged), '1a2b3c4');
-    expect(minFirmware, 'v2.2.4-338-82');
+    expect(minFirmware, 'v2.2.4-338-93');
   });
   testWidgets('the firmware release (a tagged build\'s version string) connects: the app asks for what it needs, not a number', skip: skip, (
     tester,
@@ -88,7 +89,7 @@ void main() {
     await disposeBoard(tester, b);
   });
   testWidgets('an older firmware: no session, the problem says which firmware the app needs and what to do', (tester) async {
-    // the firmware as released upstream: it answers StcV, not StcX, Stcy or StcH
+    // the firmware as released upstream: it answers StcV, not StcG, StcX, Stcy or StcH
     final usb = ScriptedUsb({
       'V': ['striso_control_strisoboard_v2.2.4 0043002B3132510A33383339 STRISO'],
     });
@@ -103,6 +104,40 @@ void main() {
     expect(p.detail, contains('Flash a newer firmware'));
     expect(p.actions, containsAll([Fix.copyVersion, Fix.playVirtual]));
     await finish(tester, ctl);
+  });
+  testWidgets('a firmware without the key layout (StcG) needs an update, like one without StcX: no keys guessed', skip: skip, (tester) async {
+    final b = await startBoard(tester);
+    final ctl = make(CannedUsb(b, {'G': []}), intent: 'connected');
+    expect(ctl.keyLayout, isNull);
+    await run(tester, ctl.start());
+    await waitFor(tester, () => ctl.problem != null);
+    expect(ctl.connected, isFalse);
+    expect(ctl.problem!.title, 'This Striso needs a firmware update');
+    expect(ctl.problem!.detail, contains(minFirmware));
+    expect(ctl.keyLayout, isNull);
+    await finish(tester, ctl);
+    await disposeBoard(tester, b);
+  });
+  testWidgets('the key layout is the board\'s (StcG), kept as it sent it for the next start', skip: skip, (tester) async {
+    final b = await startBoard(tester);
+    final store = Store.memory()..set('usbIntent', 'connected');
+    final ctl = AppController(options: const AppOptions(), store: store, usb: VirtualUsb(b));
+    expect(ctl.keyLayout, isNull, reason: 'no board has reported: no keys');
+    await run(tester, ctl.start());
+    await live(tester, ctl);
+    final board = (await run(tester, ctl.client!.getKeyLayout()))!;
+    final l = ctl.keyLayout!;
+    expect(l.lines, board.lines);
+    expect(l.keys.length, board.keys.length);
+    expect(ctl.live.pres.length, board.buttons);
+    expect(store.raw('keyLayout'), board.lines);
+    await finish(tester, ctl);
+    await disposeBoard(tester, b);
+    // the next start: the last board's keys before any board reports
+    final next = AppController(options: const AppOptions(), store: store, usb: ScriptedUsb({}));
+    expect(next.keyLayout!.lines, board.lines);
+    expect(next.keyLayout!.keyIds, board.keyIds);
+    await finish(tester, next);
   });
   testWidgets('first launch (nothing chosen yet): a Striso on USB connects by itself; one plugged in later too, after 4 s', skip: skip, (tester) async {
     final b = await startBoard(tester);

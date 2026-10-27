@@ -12,6 +12,9 @@ import 'package:test/test.dart';
 import 'support/firmware.dart';
 import 'support/fixtures.dart';
 
+/// The board's keys (StcG, as the firmware reports them).
+final keyLayout = fixtureKeyLayout();
+
 List<Param> P() => [
   Param(index: 0, name: 'gain', group: 'level', min: 0, max: 4, kind: 0, value: 1),
   Param(index: 1, name: 'steps', group: 'osc', min: 0, max: 7, kind: 1, value: 2),
@@ -115,15 +118,11 @@ void main() {
   });
 
   group('touch', () {
-    test('key numbers: 61 distinct buttons, names like the firmware', () {
-      expect(buttonNumberMap.length, 61);
-      expect([...buttonNumberMap]..sort(), [...keyIds]..sort());
-      expect(keyNumberOf[56], 0);
-      expect(firmwareKeyName(0), 'F_1');
-      expect(firmwareKeyName(1), 'Gb1');
-      expect(firmwareKeyName(2), 'F#1');
-      expect(firmwareKeyName(10), 'C_2');
-      expect(firmwareKeyName(60), 'B_4');
+    test('key numbers: the per-key list is in the key layout\'s key-number order, named as it names them', () {
+      expect(keyLayout.keys.length, 61);
+      expect({for (final k in keyLayout.keys) k.id}, {...keyLayout.keyIds});
+      expect(keyLayout.keyNumberOf(keyLayout.keys[27].id), 27);
+      expect(parseParamLine('27 ${keyLayout.keys[27].name} keys 3dcccccd 41200000 3f800000 0')!.name, keyLayout.keys[27].name);
       expect(parseParamsHeader('params 3 keys 61'), (target: 3, name: 'keys', count: 61));
       expect(parseParamsHeader('params 2 touch 5'), (target: 2, name: 'touch', count: 5));
       expect(parseParamLine('27 F#2 keys 3dcccccd 41200000 3f800000 0')!.name, 'F#2');
@@ -166,23 +165,24 @@ void main() {
     });
 
     test('peaks of each press, and pressure of 1.0 and more unwrapped', () {
-      final live = LiveState();
+      final live = LiveState(keyLayout);
+      final a = keyLayout.keyIds[25], b = keyLayout.keyIds[30];
       void f(int id, int p, double t) => live.apply(Src.dis, id, Int32List.fromList([p, 0, 0, 0]), 4, t);
       final presses = <int>[];
       live.pressListeners.add((id, _) => presses.add(id));
-      f(25, 2000, 1);
-      f(25, 4000, 2);
-      f(25, 3000, 3);
-      f(25, 0, 4);
-      expect(presses, [25]);
-      expect(live.lastPeak[25], closeTo(4000 / 8191, 1e-6));
-      expect(live.lastPeakT[25], 4);
-      f(30, 6000, 10);
-      f(30, 9000 - 16384, 11);
-      expect(live.down[30], 1);
-      expect(live.pres[30], closeTo(9000 / 8191, 1e-6));
-      f(30, 0, 12);
-      expect(live.lastPeak[30], greaterThan(1.09));
+      f(a, 2000, 1);
+      f(a, 4000, 2);
+      f(a, 3000, 3);
+      f(a, 0, 4);
+      expect(presses, [a]);
+      expect(live.lastPeak[a], closeTo(4000 / 8191, 1e-6));
+      expect(live.lastPeakT[a], 4);
+      f(b, 6000, 10);
+      f(b, 9000 - 16384, 11);
+      expect(live.down[b], 1);
+      expect(live.pres[b], closeTo(9000 / 8191, 1e-6));
+      f(b, 0, 12);
+      expect(live.lastPeak[b], greaterThan(1.09));
     });
 
     test('pressure trace keeps the last two seconds in order', () {
@@ -204,7 +204,7 @@ void main() {
       expect(stcx.first, 'X keys 43');
       expect(l.keys.length, 43);
       for (final id in l.keys.keys) {
-        expect(keyIds, contains(id), reason: 'key $id is a key on the board');
+        expect(keyLayout.keyIds, contains(id), reason: 'key $id is a key on the board');
       }
       expect(l[0]!.group, SettingsGroup.midi);
       expect(l[0]!.switchable, isTrue);

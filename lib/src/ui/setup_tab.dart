@@ -295,7 +295,7 @@ class KeyEqualizer extends StatelessWidget {
           name = 'No key selected';
           meta = 'Click a key on the board, or press one.';
         } else {
-          name = noteName(sel, live.transpose, live.transposeFifths).full;
+          name = ctl.keyLayout!.noteName(sel, live.transpose, live.transposeFifths).full;
           final pk = ctl.lastPeakOf(sel);
           final med = ctl.eqMedian;
           meta = 'key ${p.index} (${p.name} in the settings)';

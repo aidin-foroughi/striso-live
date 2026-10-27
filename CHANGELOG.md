@@ -2,9 +2,14 @@
 
 ## 1.4.0 (unreleased)
 
-Needs board firmware v2.2.4-338-82 or newer (next3 4c0ab4e: presets, StcW, the dials StcT, the
-voice keys, the engine slots, Mono, midikey). Voices are selected only with StcW, so with an older firmware voice changes don't
-go through. There is no fallback for it.
+Needs board firmware v2.2.4-338-93 or newer (next5 1532ce2: the key layout StcG, presets, StcW,
+the dials StcT, the voice keys, the engine slots, Mono, midikey). Voices are selected only with
+StcW, so with an older firmware voice changes don't go through. There is no fallback for it.
+
+- **The keys as the board reports them.** The board view, the note names, the tuning labels, the
+  chord readout and the key equalizer take the keys from the firmware's key layout (StcG): which
+  button each key is, its place and its name. The app keeps no copy of the firmware's tables; it
+  remembers the last board's reply, so the board is drawn at the next start before one connects.
 
 - **Shared audio output by default.** Exclusive output was the default, and it played at full
   level whatever the Windows volume said. The output is now shared; Exclusive output is an

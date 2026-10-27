@@ -18,7 +18,11 @@ List<String> reply(int n) => _tunings['tuning $n'];
 /// The firmware's settings layout (StcX): it names the tunings.
 final layout = parseSettingsLayout(readFixture('settings_layout.txt')['X'])!;
 
-int buttonOf(int c0v, int c1v) => keyIds.firstWhere((id) => c0[id] == c0v && c1[id] == c1v);
+/// The firmware's key layout (StcG): which button each key number is.
+final keyLayout = fixtureKeyLayout();
+
+/// The button of the key at octaves [c0] and fifths [c1] from D4.
+int buttonOf(int c0, int c1) => keyLayout.keys.singleWhere((k) => k.c0 == c0 && k.c1 == c1).id;
 
 void main() {
   group('N reply parser', () {
@@ -39,8 +43,8 @@ void main() {
       expect(lines[1], matches(RegExp(r'^0 F_1 [0-9A-F]{8} [0-9A-F]{8}$')));
       expect(t.complete, isTrue);
       expect(t.notes.length, 61);
-      // D4 (button 25, key number 30: D_3 in the reply) is the anchor: exactly 62
-      expect(t.pitchOfButton(25), closeTo(62, 1e-5));
+      // D4 (the key at 0 0, D_3 in the reply) is the anchor: exactly 62
+      expect(t.pitchOfButton(keyLayout, buttonOf(0, 0)), closeTo(62, 1e-5));
       expect(t.nameIn(layout).name, '31-TET');
       expect(t.hasKeyOffsets, isFalse);
       expect(t.isPlain12, isFalse);
@@ -109,10 +113,6 @@ void main() {
         expect(t.nameIn(layout).name, expected[n], reason: 'tuning $n');
         expect(t.hasKeyOffsets, n == 8);
         if (n == 8) expect(t.keyOffsets[30]! * 100, closeTo(10.3616, 1e-3)); // D's just offset
-        // the per-key offsets are also found from the pitches alone (a reply without them)
-        final bare = reply(n).map((l) => l.startsWith('tuning') ? l : l.split(' ').take(3).join(' ')).toList();
-        expect(parseTuningReply(bare)!.keyOffsets, isEmpty);
-        expect(parseTuningReply(bare)!.hasKeyOffsets, n == 8, reason: 'tuning $n from pitches');
       }
       expect(parseTuningReply(reply(1))!.nameIn(layout).short, '31TET');
       final lines = reply(8).map((l) => l.startsWith('tuning 8 ') ? l.replaceFirst('tuning 8 ', 'tuning -1 ') : l).toList();
@@ -190,41 +190,41 @@ void main() {
     test('31-TET and just intonation keys, as the board plays them (D4 = 62 exact)', () {
       final t31 = parseTuningReply(reply(1))!;
       // C♯4: 7 fifths up, 3 octaves down from D4
-      final cs = quarterToneLabel(t31.pitchOfButton(buttonOf(-3, 5))!, 'C', nominalMidi: 61);
+      final cs = quarterToneLabel(t31.pitchOfButton(keyLayout, buttonOf(-3, 5))!, 'C', nominalMidi: 61);
       expect(cs.qt, closeTo(1.677, 0.001));
       expect(cs.nearest, 2);
       expect(cs.frac, closeTo(-0.323, 0.001));
       expect(cs.centsFrom12, closeTo(-16.1, 0.1));
       // D♭4: 7 fifths down, 4 octaves up
-      final db = quarterToneLabel(t31.pitchOfButton(buttonOf(4, -7))!, 'D', nominalMidi: 61);
+      final db = quarterToneLabel(t31.pitchOfButton(keyLayout, buttonOf(4, -7))!, 'D', nominalMidi: 61);
       expect(db.qt, closeTo(-1.548, 0.001));
       expect(db.nearest, -2);
       expect(db.frac, closeTo(0.452, 0.001));
       expect(db.centsFrom12, closeTo(22.6, 0.1));
       // C4 is 6.45 cents sharp (the system is anchored on D), A4 3.2 cents flat
-      expect(quarterToneLabel(t31.pitchOfButton(buttonOf(1, -2))!, 'C').centsFrom12, closeTo(6.45, 0.01));
-      expect(quarterToneLabel(t31.pitchOfButton(buttonOf(0, 1))!, 'A').centsFrom12, closeTo(-3.2, 0.05));
+      expect(quarterToneLabel(t31.pitchOfButton(keyLayout, buttonOf(1, -2))!, 'C').centsFrom12, closeTo(6.45, 0.01));
+      expect(quarterToneLabel(t31.pitchOfButton(keyLayout, buttonOf(0, 1))!, 'A').centsFrom12, closeTo(-3.2, 0.05));
       // just 7-limit: E4 a 5/4 above C (-13.7 vs C) and C +6.45: -7.2 cents absolute
       final just = parseTuningReply(reply(8))!;
-      final e = quarterToneLabel(just.pitchOfButton(buttonOf(-1, 2))!, 'E');
+      final e = quarterToneLabel(just.pitchOfButton(keyLayout, buttonOf(-1, 2))!, 'E');
       expect(e.centsFrom12, closeTo(-7.2, 0.05));
       expect(e.qt, closeTo(-0.145, 0.001));
       // A♯4 at 7/4 above C (968.8 cents): 75.3 cents above A absolute, so a sharp a shade short
-      final asharp = quarterToneLabel(just.pitchOfButton(buttonOf(-4, 8))!, 'A', nominalMidi: 70);
+      final asharp = quarterToneLabel(just.pitchOfButton(keyLayout, buttonOf(-4, 8))!, 'A', nominalMidi: 70);
       expect(asharp.qt, closeTo(1.506, 0.001));
       expect(asharp.centsFrom12, closeTo(-24.7, 0.1));
       expect(asharp.nearest, 2);
       expect(asharp.frac, closeTo(-0.494, 0.001));
       // 7-TET: C♯ is C (both 28.6 cents above 12-TET C, a half-sharp), D♭ is D
       final t7 = parseTuningReply(reply(5))!;
-      expect(t7.pitchOfButton(buttonOf(-3, 5)), closeTo(t7.pitchOfButton(buttonOf(1, -2))!, 1e-5));
-      expect(quarterToneLabel(t7.pitchOfButton(buttonOf(-3, 5))!, 'C').nearest, 1);
-      expect(quarterToneLabel(t7.pitchOfButton(buttonOf(4, -7))!, 'D').nearest, 0);
+      expect(t7.pitchOfButton(keyLayout, buttonOf(-3, 5)), closeTo(t7.pitchOfButton(keyLayout, buttonOf(1, -2))!, 1e-5));
+      expect(quarterToneLabel(t7.pitchOfButton(keyLayout, buttonOf(-3, 5))!, 'C').nearest, 1);
+      expect(quarterToneLabel(t7.pitchOfButton(keyLayout, buttonOf(4, -7))!, 'D').nearest, 0);
       // 12-TET with the fine dial at -31.25 cents: every key reads -0.625 qt absolute, exact once the
       // offset is taken out
       final low = parseTuningReply(_tunings['tuning 0 fine -31.25'])!;
       expect(low.offsetCents, closeTo(-31.25, 1e-3));
-      final a = low.pitchOfButton(buttonOf(0, 1))!;
+      final a = low.pitchOfButton(keyLayout, buttonOf(0, 1))!;
       expect(quarterToneLabel(a, 'A').qt, closeTo(-0.625, 1e-3));
       expect(quarterToneLabel(a - low.offset, 'A').qt, closeTo(0, 1e-3));
     });

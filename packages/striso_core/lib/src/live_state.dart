@@ -18,20 +18,50 @@ class Motion {
 }
 
 class LiveState {
-  final pres = Float32List(buttonCount); // shown pressure: 0 unless the key is on
-  final raw = Float32List(buttonCount); // pressure as received
-  final down = Uint8List(buttonCount);
-  final onT = Float64List(buttonCount)..fillRange(0, buttonCount, -1e9);
-  final peak = Float32List(buttonCount); // highest pressure of the press in progress
-  final lastPeak = Float32List(buttonCount); // highest pressure of the last finished press
-  final lastPeakT = Float64List(buttonCount)..fillRange(0, buttonCount, -1e9);
-  final vpres = Float32List(buttonCount);
-  final x = Float32List(buttonCount);
-  final y = Float32List(buttonCount);
-  final strikeT = Float64List(buttonCount)..fillRange(0, buttonCount, -1e9);
-  final strikeA = Float32List(buttonCount);
-  final releaseT = Float64List(buttonCount)..fillRange(0, buttonCount, -1e9);
-  final releaseA = Float32List(buttonCount);
+  // per button id, sized by the board's key layout (no layout yet: no keys)
+  var pres = Float32List(0); // shown pressure: 0 unless the key is on
+  var raw = Float32List(0); // pressure as received
+  var down = Uint8List(0);
+  var onT = Float64List(0);
+  var peak = Float32List(0); // highest pressure of the press in progress
+  var lastPeak = Float32List(0); // highest pressure of the last finished press
+  var lastPeakT = Float64List(0);
+  var vpres = Float32List(0);
+  var x = Float32List(0);
+  var y = Float32List(0);
+  var strikeT = Float64List(0);
+  var strikeA = Float32List(0);
+  var releaseT = Float64List(0);
+  var releaseA = Float32List(0);
+  KeyLayout? _layout;
+
+  LiveState([KeyLayout? layout]) {
+    if (layout != null) this.layout = layout;
+  }
+
+  /// The board's keys as it reports them (StcG); null until a board (or the last one, remembered)
+  /// has. Key messages for buttons beyond its button count are dropped.
+  KeyLayout? get layout => _layout;
+  set layout(KeyLayout? l) {
+    _layout = l;
+    final n = l?.buttons ?? 0;
+    if (n == pres.length) return;
+    pres = Float32List(n);
+    raw = Float32List(n);
+    down = Uint8List(n);
+    onT = Float64List(n)..fillRange(0, n, -1e9);
+    peak = Float32List(n);
+    lastPeak = Float32List(n);
+    lastPeakT = Float64List(n)..fillRange(0, n, -1e9);
+    vpres = Float32List(n);
+    x = Float32List(n);
+    y = Float32List(n);
+    strikeT = Float64List(n)..fillRange(0, n, -1e9);
+    strikeA = Float32List(n);
+    releaseT = Float64List(n)..fillRange(0, n, -1e9);
+    releaseA = Float32List(n);
+  }
+
   final controls = Uint8List(16);
   final controlT = Float64List(16)..fillRange(0, 16, -1e9);
   final motion = Motion();
@@ -46,12 +76,12 @@ class LiveState {
   final controlListeners = <void Function(int id, bool down, bool before)>[];
 
   void clear() {
-    pres.fillRange(0, buttonCount, 0);
-    raw.fillRange(0, buttonCount, 0);
-    down.fillRange(0, buttonCount, 0);
-    vpres.fillRange(0, buttonCount, 0);
-    x.fillRange(0, buttonCount, 0);
-    y.fillRange(0, buttonCount, 0);
+    pres.fillRange(0, pres.length, 0);
+    raw.fillRange(0, raw.length, 0);
+    down.fillRange(0, down.length, 0);
+    vpres.fillRange(0, vpres.length, 0);
+    x.fillRange(0, x.length, 0);
+    y.fillRange(0, y.length, 0);
     controls.fillRange(0, 16, 0);
   }
 
@@ -59,7 +89,7 @@ class LiveState {
   void apply(int src, int id, Int32List v, int n, double now) {
     messages++;
     _rateCount++;
-    if (src == Src.dis && n == 4 && id < buttonCount) {
+    if (src == Src.dis && n == 4 && id < pres.length) {
       // older firmware sent pressure / 2^11 unclamped, so 1.0 and more wrapped to negative
       final pv = v[0] < -2048 ? v[0] + 16384 : v[0];
       final r = pv / fullScale, vp = v[1] / fullScale;

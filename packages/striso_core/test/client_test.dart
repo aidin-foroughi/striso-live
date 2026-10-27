@@ -8,7 +8,14 @@ import 'dart:typed_data';
 import 'package:striso_core/striso_core.dart';
 import 'package:test/test.dart';
 
+import 'support/fixtures.dart';
 import 'support/silent_transport.dart';
+
+/// The board's keys (StcG, as the firmware reports them): the live state's buttons.
+final keyLayout = fixtureKeyLayout();
+
+/// The key at 0 0 (D4): the key the scripted board plays.
+final dKey = keyLayout.keys.singleWhere((k) => k.c0 == 0 && k.c1 == 0).id;
 
 Future<void> sleep(int ms) => Future<void>.delayed(Duration(milliseconds: ms));
 List<int> ascii(String s) => s.codeUnits;
@@ -27,7 +34,7 @@ List<int> boardSecond(bool withKeys, [bool splitText = true]) {
     out.addAll(motion(k));
     if (withKeys) {
       for (var j = 0; j < 11; j++) {
-        out.addAll(key(25, 2000 + 10 * j));
+        out.addAll(key(dKey, 2000 + 10 * j));
       }
     }
     if (k >= 20 && ti < text.length) {
@@ -68,7 +75,7 @@ class ScriptedBoard implements Transport {
       for (var j = 0; j < 2; j++) {
         bytes
           ..addAll(motion(k++))
-          ..addAll(key(25, 3000));
+          ..addAll(key(dKey, 3000));
       }
       packets(bytes).forEach(_data.add);
     });
@@ -102,7 +109,7 @@ class ScriptedBoard implements Transport {
 
 Future<(StrisoClient, LiveState)> connectLikeTheApp(Transport board) async {
   final c = StrisoClient(board);
-  final live = LiveState();
+  final live = LiveState(keyLayout);
   final clock = Stopwatch()..start();
   c.onStream = (src, id, v, n) => live.apply(src, id, v, n, clock.elapsedMilliseconds.toDouble() + 1);
   await c.connect();
@@ -167,30 +174,10 @@ void main() {
     });
   });
 
-  test('layout: 61 keys, spelled from the line of fifths', () {
-    expect(boardKeys.length, 61);
-    expect(noteName(25).full, 'D4');
-    expect(noteName(0).full, 'G♭5');
-    expect(noteName(11).full, 'B5');
-    expect(noteName(16).full, 'A♯5');
-    expect(noteName(56).full, 'F2');
-    expect(noteName(25, 12).full, 'D5');
-    final ys = boardKeys.map((k) => k.y);
-    expect((ys.reduce(math.max) + ys.reduce(math.min)).abs(), lessThan(1e-9));
-    var minD = double.infinity;
-    for (final a in boardKeys) {
-      for (final b in boardKeys) {
-        if (!identical(a, b)) minD = math.min(minD, math.sqrt(math.pow(a.x - b.x, 2) + math.pow(a.y - b.y, 2)));
-      }
-    }
-    expect(minD, inExclusiveRange(17, 19));
-    expect(keyInfo(52).id, 52);
-  });
-
   group('board byte pattern', () {
     test('headers 0x9F and 0x84, L reply split by frames, 64 byte packets', () {
       expect(motion(0)[0], 0x9f);
-      expect(key(25, 1)[0], 0x84);
+      expect(key(dKey, 1)[0], 0x84);
       for (final split in [false, true]) {
         var motions = 0, keys = 0;
         final lines = <String>[];
@@ -199,7 +186,7 @@ void main() {
             if (src == Src.accel && n == 7) {
               motions++;
               expect(v[2], 1021);
-            } else if (src == Src.dis && n == 4 && id == 25) {
+            } else if (src == Src.dis && n == 4 && id == dKey) {
               keys++;
               expect(v[3], 900);
             } else {
@@ -250,11 +237,12 @@ void main() {
 
   group('live state', () {
     test('idle frames with pressure noise never light a key or throw a ring', () {
-      final live = LiveState();
+      final live = LiveState(keyLayout);
       var s = 3;
       double r() => (s = (s * 16807) % 2147483647) / 2147483647;
       for (var k = 0; k < 5000; k++) {
-        final id = keyIds[(r() * keyIds.length).floor()];
+        final ids = keyLayout.keyIds;
+        final id = ids[(r() * ids.length).floor()];
         frame(
           live,
           id,
@@ -274,19 +262,19 @@ void main() {
     });
 
     test('a press turns on above the threshold, holds through small dips and releases at zero', () {
-      final live = LiveState();
+      final live = LiveState(keyLayout);
       final on = (onLevel * 8191).ceil();
-      frame(live, 25, on + 200, 3000, 100, -200, 10);
+      frame(live, dKey, on + 200, 3000, 100, -200, 10);
       expect(live.activeCount(), 1);
-      expect(live.strikeT[25], 10);
-      frame(live, 25, 20, 0, 0, 0, 20);
-      expect(live.down[25], 1);
-      expect(live.strikeT[25], 10, reason: 'no second strike');
-      frame(live, 25, 0, -800, 0, 0, 30);
-      expect(live.down[25], 0);
-      expect(live.releaseT[25], 30);
-      frame(live, 25, 3, 0, 0, 0, 40);
-      expect(live.down[25], 0);
+      expect(live.strikeT[dKey], 10);
+      frame(live, dKey, 20, 0, 0, 0, 20);
+      expect(live.down[dKey], 1);
+      expect(live.strikeT[dKey], 10, reason: 'no second strike');
+      frame(live, dKey, 0, -800, 0, 0, 30);
+      expect(live.down[dKey], 0);
+      expect(live.releaseT[dKey], 30);
+      frame(live, dKey, 3, 0, 0, 0, 40);
+      expect(live.down[dKey], 0);
     });
 
     test('motion frames as the LSM6DSL path sends them: 1024 per g, 8192 = 500 dps', () {
@@ -294,7 +282,7 @@ void main() {
       int sh(int v) => v >> 2;
       final absG = math.sqrt(ax * ax + ay * ay + az * az) / 16384;
       final vals = [sh(ax ~/ 4), sh(ay ~/ 4), sh(az ~/ 4), sh((absG * 32768 / 8).truncate()), sh(gx), sh(gy), sh(gz)];
-      final live = LiveState();
+      final live = LiveState(keyLayout);
       final bytes = encodeMessage(0x13, 8, vals);
       expect((bytes[0] >> 3) & 0x0f, Src.accel);
       StreamParser(onMessage: (src, id, v, n) => live.apply(src, id, v, n, 5)).push(bytes);
@@ -310,7 +298,7 @@ void main() {
     });
 
     test('transposition: as the board reports it (no guess from the octave buttons)', () {
-      final live = LiveState();
+      final live = LiveState(keyLayout);
       void ctl(int id, int v) => live.apply(Src.control, id, Int32List.fromList([v]), 1, 1);
       ctl(Idc.octUp, 1);
       ctl(Idc.octUp, 0);
