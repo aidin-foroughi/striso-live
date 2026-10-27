@@ -1,13 +1,12 @@
 // The app's controller against the virtual Striso (the firmware's own code, striso_virtual):
-// as the USB board (a fake USB backend whose transport is a virtual board) and as Virtual (what
-// Demo was): connect, the lists, voice switch, a live parameter and its undo, A/B, touch and key
+// as the USB board (a fake USB backend whose transport is a virtual board) and as Virtual:
+// connect, the lists, voice switch, a live parameter and its undo, A/B, touch and key
 // parameters, StcK tunings and the quarter-tone labels, the settings overlay's clicks, Save to
 // Striso through the virtual board's bootloader drive, a reset and the reconnect; Virtual's sound.
 // Needs the library (cmake --build --preset host-virtual in the firmware checkout; found as the
 // striso_virtual package finds it); skips with the reason otherwise.
-import 'dart:io';
-
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
@@ -20,74 +19,16 @@ import 'package:striso_live/src/firmware_library.dart';
 import 'package:striso_live/src/store.dart';
 import 'package:striso_virtual/striso_virtual.dart';
 
-/// A USB backend whose Striso is a virtual board.
-class VirtualUsb implements UsbBackend {
-  final VirtualBoard board;
-  VirtualUsb(this.board);
-  @override
-  Future<({bool present, String where})> probe() async => (present: board.attached, where: 'virtual');
-  @override
-  Transport transport() => VirtualBoardTransport(board);
-  @override
-  Future<void> dispose() async {}
-}
-
-String? _lib() {
-  try {
-    return StrisoVirtualLib.load().path;
-  } catch (_) {
-    return null;
-  }
-}
-
-/// [step]: the fake time each pump moves; 5 keeps it near the real time the board runs in (the
-/// client's timeouts are on the fake clock).
-Future<void> waitFor(WidgetTester tester, bool Function() cond, {int ms = 10000, int step = 20}) async {
-  for (var t = 0; t < ms && !cond(); t += step) {
-    await tester.pump(Duration(milliseconds: step));
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
-  }
-  expect(cond(), isTrue, reason: 'condition not met in $ms ms');
-}
-
-/// Lets the app's timers (the client's writes, the transport's poll) and the board run a while.
-Future<void> settle(WidgetTester tester, {int ms = 200}) async {
-  for (var t = 0; t < ms; t += 10) {
-    await tester.pump(const Duration(milliseconds: 10));
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 2)));
-  }
-}
-
-Future<T> run<T>(WidgetTester tester, Future<T> f, {int seconds = 10, int step = 20}) async {
-  var done = false;
-  late T v;
-  f.then((x) {
-    v = x;
-    done = true;
-  });
-  await waitFor(tester, () => done, ms: seconds * 1000, step: step);
-  return v;
-}
-
-Future<void> finish(WidgetTester tester, AppController ctl) async {
-  await run(tester, ctl.endSession());
-  for (var i = 0; i < 100; i++) {
-    await tester.pump(const Duration(milliseconds: 100)); // the app's timers run out
-  }
-  ctl.dispose();
-  await tester.pump(const Duration(seconds: 1));
-  await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
-}
+import 'support/virtual.dart';
 
 void main() {
-  final lib = _lib();
-  final skip = lib == null ? 'striso_virtual not built' : null;
+  final lib = virtualLib;
+  final skip = virtualSkip;
 
   testWidgets('the controller on the virtual board as the USB Striso: lists, voices, undo, A/B, touch, tunings, settings keys', skip: skip != null, (
     tester,
   ) async {
-    late VirtualBoard b;
-    await tester.runAsync(() async => b = VirtualBoard(libPath: lib)..startRealtime());
+    final b = await startBoard(tester);
     final ctl = AppController(options: const AppOptions(), store: Store.memory()..set('usbIntent', 'connected'), usb: VirtualUsb(b));
     await run(tester, ctl.start());
     await waitFor(tester, () => ctl.dot == Dot.on && !ctl.listsLoading);
@@ -188,10 +129,10 @@ void main() {
     await waitFor(tester, () => ctl.dot == Dot.on && !ctl.listsLoading, ms: 20000);
     expect(b.state.resets, 1);
     await finish(tester, ctl);
-    await tester.runAsync(() async => b.dispose());
+    await disposeBoard(tester, b);
   });
 
-  testWidgets('Virtual (what Demo was): the virtual board, played by hand, saved to its flash through its drive', skip: skip != null, (tester) async {
+  testWidgets('Virtual: the virtual board, played by hand, saved to its flash through its drive', skip: skip != null, (tester) async {
     final dir = await tester.runAsync(() async => Directory.systemTemp.createTempSync('sv_app'));
     final ctl = AppController(
       options: AppOptions(virtualLib: lib),
@@ -200,7 +141,6 @@ void main() {
     );
     await run(tester, ctl.playVirtual());
     await waitFor(tester, () => ctl.dot == Dot.virtual && !ctl.listsLoading);
-    expect(ctl.virtual.isMock, isFalse);
     expect(ctl.status, startsWith('Virtual ·'));
     expect(ctl.playable, isTrue);
     expect(ctl.voices.length, ctl.virtual.instrument!.board.state.voices);

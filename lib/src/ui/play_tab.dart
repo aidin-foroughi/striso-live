@@ -586,7 +586,9 @@ class ColourLegend extends StatelessWidget {
   const ColourLegend(this.ctl, {super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(listenable: ctl.harmony, builder: (context, _) => _legend()); // follows the chord held
+
+  Widget _legend() {
     final chord = ctl.colour == KeyColour.chord && ctl.harmony.shown?.kind == HarmonyKind.chord && !ctl.harmony.released;
     final items = switch (ctl.colour) {
       KeyColour.function => [for (final e in functionColors.entries) (functionLetters[e.key]!, e.value)],
@@ -824,10 +826,16 @@ class SoundName extends StatelessWidget {
         ],
         if (ctl.caps?.tag case final tag?) ...[
           const SizedBox(width: Space.s),
-          Text(
-            tag,
-            key: const Key('board-tag'),
-            style: microStyle(color: Pal.demo),
+          // a narrow toolbar cuts it rather than overflow
+          Flexible(
+            child: Text(
+              tag,
+              key: const Key('board-tag'),
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.clip,
+              style: microStyle(color: Pal.demo),
+            ),
           ),
         ],
       ],

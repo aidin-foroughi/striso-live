@@ -1,7 +1,7 @@
-// The tuning-aware labels, the colour modes and the settings keys over USB, against the demo
-// board (no USB, no window). Helpers come from widget_test.dart.
+// The tuning-aware labels, the colour modes and the settings keys over the console, on Virtual,
+// the firmware's own code (striso_virtual; no USB, no window, no audio): the tunings, the layout
+// and what each key does are the firmware's.
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,34 +9,31 @@ import 'package:striso_core/striso_core.dart';
 import 'package:striso_live/src/controller.dart';
 import 'package:striso_live/src/ui/accidentals.dart';
 
-import 'widget_test.dart' show boot, finish, pumpUntil, runFor, settle, startDemo;
+import 'support/app1.dart';
+import 'support/virtual.dart';
 
-Future<void> waitFor(WidgetTester tester, bool Function() done, {int tries = 60}) async {
-  for (var i = 0; i < tries && !done(); i++) {
-    await runFor(tester, 50);
-  }
-  expect(done(), isTrue, reason: 'did not happen');
-}
+/// The settings key that loads tuning [n], where the firmware's layout (StcX) has it.
+int tuningKey(AppController ctl, int n) => ctl.settingsLayout.keys.entries.firstWhere((e) => e.value.tuningIndex == n).key;
 
 void main() {
-  testWidgets('the demo reports its tuning; a change suggests pitch labels once; the labels follow', (tester) async {
-    final ctl = await boot(tester);
-    await startDemo(tester, ctl);
-    await waitFor(tester, () => ctl.tuningSupported == true);
+  final skip = virtualSkip != null;
+
+  testWidgets('Virtual reports its tuning; a change suggests pitch labels once; the labels follow', skip: skip, (tester) async {
+    final ctl = await bootApp(tester);
+    await tapPlayVirtual(tester, ctl);
+    await waitFor(tester, () => ctl.tuningSupported == true && ctl.tuning != null);
     expect(ctl.tuning!.isPlain12, isTrue);
     expect(tester.widget<Text>(find.byKey(const Key('tuning-chip'))).data, '12-TET');
     expect(find.byKey(const Key('toast-Pitch labels')), findsNothing);
-    // the instrument switches to 31-TET (settings + key on the board): the app re-reads after the button
-    ctl.demoBoard!.loadTuning(1);
-    ctl.live.apply(Src.control, Idc.alt, Int32List.fromList([1]), 1, 0);
-    ctl.live.apply(Src.control, Idc.alt, Int32List.fromList([0]), 1, 0);
+    // the instrument switches to 31-TET (Settings + its key, on the instrument): the app follows
+    await settingsKeyOnBoard(tester, ctl, tuningKey(ctl, 1));
     await waitFor(tester, () => ctl.tuning?.index == 1);
-    await settle(tester, 300);
+    await settle(tester, ms: 300);
     expect(tester.widget<Text>(find.byKey(const Key('tuning-chip'))).data, '31-TET');
     expect(find.byKey(const Key('toast-Pitch labels')), findsOneWidget);
     expect(find.byKey(const Key('tuning-note')), findsOneWidget); // chords by spelling
     await tester.tap(find.byKey(const Key('toast-Pitch labels')));
-    await settle(tester, 300);
+    await settle(tester, ms: 300);
     expect(ctl.names, Names.pitch);
     // 31-TET C♯4 (button 30): a sharp whose second stroke is 68% tall, 16 cents under 12-TET
     final cs = ctl.qtLabel(30);
@@ -47,7 +44,7 @@ void main() {
     // the hover readout tells the cents and the nearest quarter tone
     ctl.hover = 30;
     ctl.stats.ping();
-    await settle(tester, 200);
+    await settle(tester, ms: 200);
     final readout = tester.widget<Text>(find.byKey(const Key('hover-readout'))).data!;
     expect(readout, contains('C♯4'));
     expect(readout, contains('−16.1 ¢ vs 12-TET'));
@@ -61,169 +58,174 @@ void main() {
     expect(ctl.qtLabel(30).centsFrom12, closeTo(-22.6, 0.1)); // C♯ against the tuning's own C
     ctl.setPitchRef(PitchRef.absolute);
     // the suggestion came once: a second change only reports the name
-    ctl.demoTuning(8);
+    ctl.loadTuning(8);
     await waitFor(tester, () => ctl.tuning?.index == 8);
-    await settle(tester, 300);
+    await settle(tester, ms: 300);
     expect(find.byKey(const Key('toast-Pitch labels')), findsNothing);
-    expect(find.textContaining('Tuning: Just 7-limit'), findsOneWidget);
-    expect(ctl.tuningName, 'Just 7-limit');
-    // cents mode, and the slow poll picks up a change made behind the app's back
+    final just = ctl.boardTunings.firstWhere((t) => t.$1 == 8).$2;
+    expect(find.textContaining('Tuning: $just'), findsOneWidget);
+    expect(ctl.tuningName, just);
+    // cents mode, and the slow poll picks up a fine tune made behind the app's back (the
+    // firmware's fine dial moves in 3.125 ¢ steps: 10 down is A = 432.1 Hz)
     ctl.setNames(Names.cents);
-    ctl.demoBoard!.fineTune(-31.77);
+    await waitFor(tester, () => ctl.dials != null);
+    final fine = ctl.dials!.firstWhere((d) => d.name == 'fine');
+    expect(await run(tester, ctl.client!.setDial(fine.id, -31.25)), -31.25);
     await waitFor(tester, () => (ctl.tuning?.offsetCents ?? 0) < -30);
-    await settle(tester, 300);
-    expect(tester.widget<Text>(find.byKey(const Key('reference-chip'))).data, 'A = 432.0 Hz (−32 ¢)');
+    await settle(tester, ms: 300);
+    expect(tester.widget<Text>(find.byKey(const Key('reference-chip'))).data, 'A = 432.1 Hz (−31 ¢)');
     // labels are notated relative to that reference: D4 reads exact
     expect(ctl.qtLabel(25).qt, closeTo(0.207, 0.001)); // just D is +10.4 cents, fine tune taken out
     expect(tester.takeException(), isNull);
     await finish(tester, ctl);
   });
 
-  testWidgets('settings overlay without a board: switch and voice keys do nothing, and say so; the demo acts on the mock', (tester) async {
-    final ctl = await boot(tester);
+  testWidgets('settings overlay without a board: switch and voice keys do nothing, and say so; Virtual acts on the firmware', skip: skip, (tester) async {
+    final ctl = await bootApp(tester);
     ctl.setTab(AppTab.setup);
     ctl.setSetupMode(SetupMode.settings);
-    await settle(tester, 300);
+    await settle(tester, ms: 300);
     expect(ctl.canSend, isFalse);
     final pulse = ctl.ledPulseT;
-    // a tuning key, a MIDI key, a settings preset, a voice key
-    for (final id in [36, 4, 37, mockSettingsLayout.keys.entries.firstWhere((e) => e.value.engine != null).key]) {
+    // a tuning key, a MIDI key, a settings preset, a voice key (as the firmware has them)
+    for (final id in [36, 4, 37, 24]) {
       expect(ctl.settingsClick(id), isTrue, reason: 'the click is taken (and nothing else happens)');
       expect(ctl.settingsSelected, -1, reason: 'no selection ring on key $id');
     }
     expect(ctl.ledPulseT, pulse, reason: 'no pulse');
-    expect(await pumpUntil(tester, ctl.pressSettingsKey(36)), isFalse);
-    await settle(tester, 300);
+    expect(await run(tester, ctl.pressSettingsKey(36)), isFalse);
+    await settle(tester, ms: 300);
     expect(ctl.toasts.value, isEmpty, reason: 'no toast pretending something happened');
     // hovering says why
     ctl.hover = 36;
     ctl.stats.ping();
-    await settle(tester, 200);
+    await settle(tester, ms: 200);
     // the layout is the board's (StcX): without one there is none to show
     expect(ctl.settingsLayout.isEmpty, isTrue);
     expect(tester.widget<Text>(find.byKey(const Key('hover-readout'))).data, startsWith('Connect to see what each key does'));
     expect(ctl.settingsClick(19), isTrue);
     expect(ctl.settingsSelected, -1);
 
-    // the demo: the same keys act on the mock board, labelled as the demo
-    await startDemo(tester, ctl);
+    // Virtual: the same keys act on the firmware, labelled as Virtual
+    await tapPlayVirtual(tester, ctl);
     await waitFor(tester, () => ctl.tuningSupported == true);
     expect(ctl.canSend, isTrue);
     expect(ctl.settingsLayout[36]!.title, startsWith('Tuning 1'), reason: 'the layout the board listed');
     ctl.hover = 36;
     ctl.stats.ping();
-    await settle(tester, 200);
-    expect(tester.widget<Text>(find.byKey(const Key('hover-readout'))).data, endsWith('click to switch (on the demo board)'));
+    await settle(tester, ms: 200);
+    expect(tester.widget<Text>(find.byKey(const Key('hover-readout'))).data, endsWith('click to switch (on Virtual)'));
     expect(ctl.settingsClick(36), isTrue);
-    await waitFor(tester, () => ctl.demoBoard!.tuning == 1);
+    await waitFor(tester, () => ctl.tuning?.index == 1);
+    expect((await run(tester, ctl.client!.getState()))!.tuning, 1, reason: 'the board switched');
     expect(ctl.settingsSelected, 36);
     expect(ctl.settingsClick(34), isTrue);
     await waitFor(tester, () => ctl.tuning?.index == 0);
     await finish(tester, ctl);
   });
 
-  testWidgets('settings overlay: switch keys press the board (K), dials do not; presets re-read settings', (tester) async {
-    final ctl = await boot(tester);
-    await startDemo(tester, ctl);
+  testWidgets('settings overlay: switch keys press the board (K), dials do not; presets re-read settings', skip: skip, (tester) async {
+    final ctl = await bootApp(tester);
+    await tapPlayVirtual(tester, ctl);
     await waitFor(tester, () => ctl.tuningSupported == true);
-    final board = ctl.demoBoard!;
+    Future<BoardState> state() async => (await run<BoardState?>(tester, ctl.client!.getState()))!;
+    Future<double> touch(String name) async => (await run(tester, ctl.client!.getParams(2)))!.params.firstWhere((p) => p.name == name).value;
     ctl.setTab(AppTab.setup);
     ctl.setSetupMode(SetupMode.settings);
-    await settle(tester, 300);
+    await settle(tester, ms: 300);
     // a tuning key: the board switches, the tuning is read again and named in the overlay
-    expect(ctl.settingsClick(36), isTrue);
+    expect(ctl.settingsClick(tuningKey(ctl, 1)), isTrue);
     await waitFor(tester, () => ctl.tuning?.index == 1);
-    expect(board.tuning, 1);
-    expect(ctl.tuningShort, '31TET');
-    expect(ctl.settingsSelected, 36);
+    expect((await state()).tuning, 1);
+    expect(ctl.tuningShort, ctl.settingsLayout[tuningKey(ctl, 1)]!.short);
+    expect(ctl.settingsSelected, tuningKey(ctl, 1));
     // the led pulse was asked for
     expect(clockMs() - ctl.ledPulseT, lessThan(60000));
     // a dial key only selects
-    final pressure = board.touch[0];
-    expect(ctl.settingsClick(19), isTrue);
-    await settle(tester, 500);
-    expect(board.touch[0], pressure);
-    expect(ctl.settingsSelected, 19);
-    // a settings preset: the touch settings are read back, with a toast
+    final dialKey = ctl.settingsLayout.keys.entries.firstWhere((e) => e.value.kind == 'dial').key;
+    final pressure = await touch('pressure');
+    expect(ctl.settingsClick(dialKey), isTrue);
+    await settle(tester, ms: 500);
+    expect(await touch('pressure'), pressure);
+    expect(ctl.settingsSelected, dialKey);
+    // a settings preset (1: on a new flash the others leave the touch settings as they are): the touch
+    // settings are read back, with a toast
     final p = ctl.findParam(2, 'pressure')!;
     ctl.onEdit(2, p, 2.5, 'begin');
     ctl.onEdit(2, p, 2.5, 'end');
-    await runFor(tester, 100); // the write reaches the board before the preset key
-    expect(board.touch[0], 2.5);
-    expect(ctl.settingsClick(37), isTrue);
-    await waitFor(tester, () => board.settingsPreset == 2);
-    await waitFor(tester, () => ctl.findParam(2, 'pressure')!.value == 1.0);
-    await settle(tester, 300);
-    expect(find.textContaining('Loaded settings preset 2'), findsOneWidget);
+    await settle(tester, ms: 200); // the write reaches the board before the preset key
+    expect(await touch('pressure'), closeTo(2.5, 1e-6));
+    final preset = ctl.settingsLayout.keys.entries.firstWhere((e) => e.value.group == SettingsGroup.preset && e.value.title == 'Load settings preset 1');
+    expect(ctl.settingsClick(preset.key), isTrue);
+    await waitFor(tester, () => (ctl.findParam(2, 'pressure')!.value - 2.5).abs() > 1e-6);
+    await settle(tester, ms: 300);
+    expect(ctl.findParam(2, 'pressure')!.value, closeTo(await touch('pressure'), 1e-6), reason: 'the preset as the board loaded it');
+    expect(find.textContaining(preset.value.title.replaceFirst('Load ', 'Loaded ')), findsOneWidget);
     // MIDI mode and panic answer ok; the refused keys are not switchable at all
-    expect(await pumpUntil(tester, ctl.pressSettingsKey(4)), isTrue);
-    expect(board.midiMode, 'midimono');
-    expect(await pumpUntil(tester, ctl.pressSettingsKey(63)), isTrue);
-    expect(await pumpUntil(tester, ctl.pressSettingsKey(67)), isFalse);
-    expect(await pumpUntil(tester, ctl.pressSettingsKey(17)), isFalse);
+    final mono = ctl.settingsLayout.keys.entries.firstWhere((e) => e.value.group == SettingsGroup.midi && e.value.short == 'Mono').key;
+    expect(await run(tester, ctl.pressSettingsKey(mono)), isTrue);
+    expect((await state()).midi, 'midimono');
+    expect(await run(tester, ctl.pressSettingsKey(63)), isTrue);
+    expect(await run(tester, ctl.pressSettingsKey(67)), isFalse);
+    expect(await run(tester, ctl.pressSettingsKey(dialKey)), isFalse);
     // back to 12-TET
-    expect(ctl.settingsClick(34), isTrue);
+    expect(ctl.settingsClick(tuningKey(ctl, 0)), isTrue);
     await waitFor(tester, () => ctl.tuning?.index == 0);
     expect(tester.takeException(), isNull);
     await finish(tester, ctl);
   });
 
-  testWidgets('colour modes: the legend follows the mode, chord tones while a chord is held', (tester) async {
-    final ctl = await boot(tester);
-    await startDemo(tester, ctl);
+  testWidgets('colour modes: the legend follows the mode, chord tones while a chord is held', skip: skip, (tester) async {
+    final ctl = await bootApp(tester);
+    await tapPlayVirtual(tester, ctl);
     ctl.setKey(root: 0, scale: 'major');
     expect(find.byKey(const Key('colour-legend')), findsNothing);
     ctl.setColour(KeyColour.degree);
-    await settle(tester, 300);
+    await settle(tester, ms: 300);
     expect(find.byKey(const Key('colour-legend')), findsOneWidget);
     for (final d in ['1', '2', '3', '4', '5', '6', '7']) {
       expect(find.descendant(of: find.byKey(const Key('colour-legend')), matching: find.text(d)), findsOneWidget);
     }
     ctl.setColour(KeyColour.function);
-    await settle(tester, 300);
+    await settle(tester, ms: 300);
     for (final f in ['T', 'S', 'D']) {
       expect(find.descendant(of: find.byKey(const Key('colour-legend')), matching: find.text(f)), findsOneWidget);
     }
-    // the demo stops playing (its notes let go of)
-    final b = ctl.demoBoard!..autoplay = false;
-    await runFor(tester, 300);
     ctl.setColour(KeyColour.chord);
-    await settle(tester, 300);
+    await settle(tester, ms: 300);
     // nothing held: the degree legend
     expect(find.descendant(of: find.byKey(const Key('colour-legend')), matching: find.text('7')), findsOneWidget);
     expect(find.descendant(of: find.byKey(const Key('colour-legend')), matching: find.text('R')), findsNothing);
-    // G7 held: root, third, fifth, seventh
-    for (final id in [41, 45, 25, 22]) {
-      b.press(id, pres: 0.5, strike: 0.3);
-    }
+    // G7 held on the instrument: root, third, fifth, seventh
+    const g7 = [41, 45, 25, 22];
+    press(ctl, g7, strike: 0.3);
     await waitFor(tester, () => ctl.harmony.shown?.name == 'G7');
-    await settle(tester, 300);
+    await settle(tester, ms: 300);
     for (final r in ['R', '3', '5', '7', '+']) {
       expect(find.descendant(of: find.byKey(const Key('colour-legend')), matching: find.text(r)), findsOneWidget);
     }
     expect(chordRole(ctl.harmony.shown!, 11), ChordRole.third); // B
     expect(chordRole(ctl.harmony.shown!, 5), ChordRole.seventh); // F
-    for (final id in [41, 45, 25, 22]) {
-      b.release(id);
-    }
-    await runFor(tester, 200);
+    release(ctl, g7);
+    await settle(tester, ms: 200);
     expect(tester.takeException(), isNull);
     await finish(tester, ctl);
   });
 
-  testWidgets('pitch labels: letter, accidental and octave never overlap, at every key and size', (tester) async {
-    final ctl = await boot(tester);
-    await startDemo(tester, ctl);
+  testWidgets('pitch labels: letter, accidental and octave never overlap, at every key and size, in every tuning of the board', skip: skip, (tester) async {
+    final ctl = await bootApp(tester);
+    await tapPlayVirtual(tester, ctl);
     await waitFor(tester, () => ctl.tuningSupported == true);
-    for (final n in [1, 8, 5, 4]) {
-      ctl.demoTuning(n);
+    expect(ctl.boardTunings, isNotEmpty);
+    for (final (n, name) in ctl.boardTunings) {
+      ctl.loadTuning(n);
       await waitFor(tester, () => ctl.tuning?.index == n);
       for (final size in [11.0, 16.0, 24.0, 31.0]) {
         final small = (size * 0.55).roundToDouble();
         for (final id in keyIds) {
           final l = ctl.qtLabel(id);
           final run = qtLabelLayout(l, size, small: small);
-          final why = 'tuning $n key $id ${l.letter} qt ${l.qt.toStringAsFixed(2)} at $size px';
+          final why = 'tuning $n ($name) key $id ${l.letter} qt ${l.qt.toStringAsFixed(2)} at $size px';
           if (run.glyph.width > 0) {
             expect(run.letter.right, lessThanOrEqualTo(run.glyph.left + 1e-6), reason: why);
             expect(run.glyph.right + 0.1 * size, lessThanOrEqualTo(run.digit.left + 1e-6), reason: why);

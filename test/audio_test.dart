@@ -1,7 +1,8 @@
-// Through PC in the app, against the fake audio backend (no audio device, no window): it plays
-// only while the Striso is connected (the session's route), the choices survive a restart through
-// settings.json, the header toggle and pip, Setup › Audio, recording with its time and Show in
-// folder, and the header at the narrowest window.
+// Through PC in the app, against the fake audio backend (no audio device), the Striso on USB
+// being the virtual board (the real firmware): it plays only while the Striso is connected (the
+// session's route), the choices survive a restart through settings.json, the header toggle and
+// pip, Setup › Audio, recording with its time and Show in folder, and the header at the narrowest
+// window.
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -11,17 +12,19 @@ import 'package:striso_live/main.dart';
 import 'package:striso_live/src/controller.dart';
 import 'package:striso_live/src/store.dart';
 import 'package:striso_live/src/theme.dart';
+import 'package:striso_virtual/striso_virtual.dart';
 
-import 'controller_test.dart' show FakeUsb;
+import 'support/virtual.dart';
 
-Future<AppController> boot(WidgetTester tester, FakeAudioBackend? fake, {Store? store, Size size = const Size(1600, 1500)}) async {
+/// The app with [fake] audio, its Striso on USB the virtual board [b].
+Future<AppController> boot(WidgetTester tester, VirtualBoard b, FakeAudioBackend? fake, {Store? store, Size size = const Size(1600, 1500)}) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   final ctl = AppController(
     options: const AppOptions(),
     store: store ?? Store.memory(),
-    usb: FakeUsb(),
+    usb: VirtualUsb(b),
     audioBackend: fake,
     backupDir: '${Directory.systemTemp.path}/striso_live_test_backups',
   );
@@ -30,28 +33,10 @@ Future<AppController> boot(WidgetTester tester, FakeAudioBackend? fake, {Store? 
   return ctl;
 }
 
-/// Connects the Striso (the fake USB's demo board) and waits for the lists.
+/// Connects the Striso (the virtual board) and waits for the lists.
 Future<void> connect(WidgetTester tester, AppController ctl) async {
-  var done = false;
-  ctl.userConnect().then((_) => done = true);
-  for (var i = 0; i < 300 && !(done && !ctl.listsLoading); i++) {
-    await tester.pump(const Duration(milliseconds: 20));
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 2)));
-  }
-  expect(ctl.state, isA<Live>());
-}
-
-/// Ends the session and lets its timers run out.
-Future<void> end(WidgetTester tester, AppController ctl) async {
-  var done = false;
-  ctl.endSession().then((_) => done = true);
-  for (var i = 0; i < 200 && !done; i++) {
-    await tester.pump(const Duration(milliseconds: 20));
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
-  }
-  for (var t = 0; t < 7000; t += 50) {
-    await tester.pump(const Duration(milliseconds: 50));
-  }
+  await run(tester, ctl.userConnect());
+  await waitFor(tester, () => ctl.state is Live && !ctl.listsLoading);
 }
 
 /// Ticks Through PC like its timer would, then lets the widgets catch up.
@@ -122,9 +107,10 @@ void main() {
     b.dispose();
   });
 
-  testWidgets('header: the Through PC toggle plays the Striso, the pip follows the level', (tester) async {
+  testWidgets('header: the Through PC toggle plays the Striso, the pip follows the level', skip: virtualSkip != null, (tester) async {
     final fake = FakeAudioBackend();
-    final ctl = await boot(tester, fake);
+    final b = await startBoard(tester);
+    final ctl = await boot(tester, b, fake);
     expect(find.text('Through PC'), findsNothing, reason: 'only in Striso mode');
     await connect(tester, ctl);
     expect(find.text('Through PC'), findsOneWidget);
@@ -144,13 +130,14 @@ void main() {
     fake.unplug();
     await ticks(tester, ctl, 2);
     expect(tester.widget<Pip>(pip).color, Pal.error, reason: 'the input is gone');
-    await end(tester, ctl);
-    ctl.dispose();
+    await finish(tester, ctl);
+    await disposeBoard(tester, b);
   });
 
-  testWidgets('Setup › Audio: devices, buffer, latency, status, Record and Show in folder', (tester) async {
+  testWidgets('Setup › Audio: devices, buffer, latency, status, Record and Show in folder', skip: virtualSkip != null, (tester) async {
     final fake = FakeAudioBackend();
-    final ctl = await boot(tester, fake);
+    final b = await startBoard(tester);
+    final ctl = await boot(tester, b, fake);
     await connect(tester, ctl);
     ctl.setTab(AppTab.setup);
     await tester.pump(const Duration(milliseconds: 300));
@@ -204,13 +191,14 @@ void main() {
     expect(find.byKey(const Key('rec-indicator')), findsNothing);
     expect(find.byKey(const Key('audio-reveal')), findsOneWidget);
     expect(find.textContaining('.wav'), findsOneWidget);
-    await end(tester, ctl);
-    ctl.dispose();
+    await finish(tester, ctl);
+    await disposeBoard(tester, b);
   });
 
-  testWidgets('a Bluetooth output: a one-line note under the output', (tester) async {
+  testWidgets('a Bluetooth output: a one-line note under the output', skip: virtualSkip != null, (tester) async {
     final fake = FakeAudioBackend(outputs: [const AudioDevice('Speakers (EDIFIER MR5)', id: 'bt', transport: AudioTransport.bluetooth, isDefault: true)]);
-    final ctl = await boot(tester, fake);
+    final b = await startBoard(tester);
+    final ctl = await boot(tester, b, fake);
     await connect(tester, ctl);
     ctl.setTab(AppTab.setup);
     await tester.pump(const Duration(milliseconds: 300));
@@ -218,24 +206,26 @@ void main() {
     await ticks(tester, ctl);
     expect(find.text('Bluetooth adds ~150–250 ms. Use a wired output for playing.'), findsOneWidget);
     expect(fake.last.exclusiveOutput, isFalse);
-    await end(tester, ctl);
-    ctl.dispose();
+    await finish(tester, ctl);
+    await disposeBoard(tester, b);
   });
 
-  testWidgets('no audio library: the toggle is there but disabled, Setup says why', (tester) async {
-    final ctl = await boot(tester, null);
+  testWidgets('no audio library: the toggle is there but disabled, Setup says why', skip: virtualSkip != null, (tester) async {
+    final b = await startBoard(tester);
+    final ctl = await boot(tester, b, null);
     await connect(tester, ctl);
     ctl.setTab(AppTab.setup);
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.byKey(const Key('through-toggle')), findsOneWidget);
     expect(find.textContaining('missing from this build'), findsWidgets);
-    await end(tester, ctl);
-    ctl.dispose();
+    await finish(tester, ctl);
+    await disposeBoard(tester, b);
   });
 
-  testWidgets('narrowest window, connected and recording: the header fits', (tester) async {
+  testWidgets('narrowest window, connected and recording: the header fits', skip: virtualSkip != null, (tester) async {
     final fake = FakeAudioBackend();
-    final ctl = await boot(tester, fake, size: const Size(1000, 760));
+    final b = await startBoard(tester);
+    final ctl = await boot(tester, b, fake, size: const Size(1000, 760));
     fake.documents = tmp.path;
     await connect(tester, ctl);
     ctl.audio.setThrough(true);
@@ -252,8 +242,7 @@ void main() {
     expect(find.byKey(const Key('rec-indicator')), findsOneWidget);
     ctl.audio.stopRecording();
     await ticks(tester, ctl);
-    await end(tester, ctl);
-    await tester.pumpWidget(const SizedBox());
-    ctl.dispose();
+    await finish(tester, ctl);
+    await disposeBoard(tester, b);
   });
 }
