@@ -1343,6 +1343,9 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     boardState = st;
     final t = st.transpose;
     if (t != null) live.setTranspose(t.round());
+    // shown now, not after the rest of the read-back (_readBoard's lists and values: a switch on
+    // the board, mono, showed its old state that long)
+    if (!_disposed) notifyListeners();
   }
 
   /// One round of the state poll: the counter moved, so the state, the voice and the values are

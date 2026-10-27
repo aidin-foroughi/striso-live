@@ -58,20 +58,33 @@ Future<void> disposeBoard(WidgetTester tester, VirtualBoard b) async {
   await tester.runAsync(() async => b.dispose());
 }
 
-/// Pumps until [cond]: [step] of fake time per pump, a little real time for the board between.
+/// Fake time that never runs ahead of real time: a pump of up to [step] ms, as much as the real
+/// time since [sw] started leaves (0 while fake time is ahead), then a little real time for the
+/// board. The app's timers, its requests' reply timeouts among them, run on fake time and the
+/// board on the wall clock: at 20 fake ms a pump with nothing else to do (a test without widgets
+/// pumps in about 1 ms), fake time ran 3 to 4 times faster, and on a loaded machine a 600 ms reply
+/// timeout passed before the board had answered. Returns the fake milliseconds pumped.
+Future<int> _pumpBehindReal(WidgetTester tester, Stopwatch sw, int pumped, int step, int realMs) async {
+  final d = (sw.elapsedMilliseconds - pumped).clamp(0, step);
+  await tester.pump(Duration(milliseconds: d));
+  await tester.runAsync(() => Future<void>.delayed(Duration(milliseconds: realMs)));
+  return d;
+}
+
+/// Pumps until [cond], for [ms] of fake time (at most [step] a pump, never ahead of real time).
 Future<void> waitFor(WidgetTester tester, bool Function() cond, {int ms = 10000, int step = 20}) async {
-  for (var t = 0; t < ms && !cond(); t += step) {
-    await tester.pump(Duration(milliseconds: step));
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
+  final sw = Stopwatch()..start();
+  for (var t = 0; t < ms && !cond();) {
+    t += await _pumpBehindReal(tester, sw, t, step, 5);
   }
   expect(cond(), isTrue, reason: 'condition not met in $ms ms');
 }
 
-/// Lets the app's timers and the board run a while.
+/// Lets the app's timers and the board run [ms] of fake time (never ahead of real time).
 Future<void> settle(WidgetTester tester, {int ms = 200}) async {
-  for (var t = 0; t < ms; t += 10) {
-    await tester.pump(const Duration(milliseconds: 10));
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 2)));
+  final sw = Stopwatch()..start();
+  for (var t = 0; t < ms;) {
+    t += await _pumpBehindReal(tester, sw, t, ms - t < 10 ? ms - t : 10, 2);
   }
 }
 

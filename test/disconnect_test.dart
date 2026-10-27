@@ -5,6 +5,7 @@
 // (the real firmware); fake audio, fake MIDI, fake time for the app, real time for the board
 // between the app's steps ([pass]).
 import 'dart:io' show sleep;
+import 'dart:math' show min;
 
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -49,15 +50,21 @@ class Rig {
   Rig({bool through = true, bool disconnected = true})
     : this._(VirtualBoard(libPath: virtualLib)..startRealtime(), through: through, disconnected: disconnected);
 
-  /// [ms] of the app's fake time, a quarter of it in real time for the boards (the client's
-  /// timeouts are on the fake clock, generous for the board's answers). Virtual's board, while the
-  /// output holds its clock, is rendered as the output's callback would: [step] of it each step.
+  /// [ms] of the app's fake time, never ahead of real time (at most [step] a step): the client's
+  /// reply timeouts are on the fake clock and the boards answer on the wall clock. (At a quarter of
+  /// it in real time, a loaded machine let a timeout pass before the board had answered.) Virtual's
+  /// board, while the output holds its clock, is rendered as the output's callback would: as much
+  /// of it as fake time moves.
   void pass(FakeAsync async, int ms, {int step = 20}) {
-    for (var t = 0; t < ms; t += step) {
+    final real = Stopwatch()..start();
+    for (var t = 0; t < ms;) {
       sleep(Duration(milliseconds: step ~/ 4));
+      final d = min(step, min(ms - t, real.elapsedMilliseconds - t));
+      if (d <= 0) continue;
       final v = ctl.virtual.instrument?.board;
-      if (v != null && !v.disposed && !v.realtime) v.render(48 * step);
-      async.elapse(Duration(milliseconds: step));
+      if (v != null && !v.disposed && !v.realtime) v.render(48 * d);
+      async.elapse(Duration(milliseconds: d));
+      t += d;
     }
   }
 
