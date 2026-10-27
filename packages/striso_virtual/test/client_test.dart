@@ -14,6 +14,26 @@ import 'support/board.dart';
 
 void main() {
   group('the client on the virtual board', skip: libraryMissing, () {
+    test('the parameters\' words (Stcw): an icon, a label and a hover text for every parameter, in Stcp\'s order', () async {
+      final (b, c) = await boot();
+      final voices = await c.listVoices();
+      final va = voices.firstWhere((x) => x.name.startsWith('va:'));
+      expect((await c.selectVoice(va.index))?.ok, isTrue);
+      final ps = (await c.getParams(Target.voice))!;
+      final w = await c.getWords();
+      if (w == null) return markTestSkipped('this firmware has no Stcw');
+      expect(w.name, ps.name);
+      expect(w.words.length, ps.params.length);
+      applyWords(ps.params, w.words);
+      for (final p in ps.params) {
+        expect(p.icon, isNotEmpty, reason: p.name);
+        expect(p.label, isNotEmpty, reason: p.name);
+        expect(p.hover, isNotEmpty, reason: p.name);
+      }
+      expect(ps.params.first.icon, 'level');
+      b.dispose();
+    });
+
     test('version, voices, params, voice switch and parameter writes while streaming', () async {
       final (b, c) = await boot();
       var keys = 0, motions = 0;
