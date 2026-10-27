@@ -141,7 +141,7 @@ void main() {
     await connect(tester, ctl);
     ctl.setTab(AppTab.setup);
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.textContaining('hear the Striso on this computer (its USB audio) while it plays'), findsOneWidget);
+    expect(find.byKey(const Key('audio-through')), findsOneWidget, reason: 'the Through PC toggle (its sentence is a tooltip)');
     await ticks(tester, ctl);
     expect(fake.enumerations, greaterThan(0), reason: 'the pickers ask for the devices');
     expect(find.text('Automatic: Striso Synth (Striso Synth)'), findsOneWidget);
@@ -196,7 +196,9 @@ void main() {
   });
 
   testWidgets('a Bluetooth output: a one-line note under the output, and under the header while it plays', skip: virtualSkip != null, (tester) async {
-    final fake = FakeAudioBackend(outputs: [const AudioDevice('Speakers (EDIFIER MR5)', id: 'bt', transport: AudioTransport.bluetooth, isDefault: true)]);
+    final fake = FakeAudioBackend(
+      outputs: [const AudioDevice('Speakers (EDIFIER MR5)', id: 'bt', transport: AudioTransport.bluetooth, isDefault: true)],
+    );
     final b = await startBoard(tester);
     final ctl = await boot(tester, b, fake);
     await connect(tester, ctl);

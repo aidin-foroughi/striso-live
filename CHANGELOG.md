@@ -17,6 +17,17 @@ StcW, so with an older firmware voice changes don't go through. There is no fall
   `--mock-demo` and the demo labels are gone. `--demo` is now `--virtual`. The tuning menu lists
   the board's own tunings (StcX) for any board that plays.
 
+- **A quieter UI.** The explanatory sentences under Audio, MIDI out, the key equalizer's meter,
+  the preset dialogs and the save dialog are gone or became tooltips; a firmware without a
+  preset store shows no ON THE STRISO section. Buttons and toggles are in the Tab order (Enter or
+  Space presses them, with the design's focus ring); selects light up under the pointer. At 1000
+  to 1279 px the engine row keeps nine engines on one line, the toolbar's right end shows the
+  sound name (the hover readout while a key is under the pointer), and the harmony strip's
+  middle keeps its numeral and never overflows; the Sound tab's name no longer shares its room
+  with a spacer. A voice row left waiting for a board that went away is no longer pending for
+  ever; the hover readout is blank without a board. `test/sizes_test.dart` walks every tab, mode
+  and overlay at 1000x700, 1280x800 and 1600x1000, then unplugs the board and plugs it back.
+
 - **Shared audio output by default.** Exclusive output was the default, and it played at full
   level whatever the Windows volume said. The output is now shared; Exclusive output is an
   opt-in, with a one-time warning, and it applies the Windows volume itself. Settings from before

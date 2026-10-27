@@ -100,143 +100,149 @@ class HarmonyStrip extends StatelessWidget {
         final a = h.shown;
         final key = ctl.currentKey;
         final dim = h.released ? 0.42 : 1.0;
-        final chord = SizedBox(
-          width: compact ? 200 : 280,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              AnimatedSwitcher(
-                duration: Timing.quick,
-                child: Opacity(
-                  key: ValueKey(a?.name),
-                  opacity: dim,
-                  child: Tooltip(
-                    message: a?.alt != null ? 'also written ${a!.alt}' : '',
-                    child: Text(
-                      a?.name ?? ' ',
-                      key: const Key('h-name'),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: ui(TypeSize.chord, weight: FontWeight.w500),
+        return LayoutBuilder(
+          builder: (context, c) {
+            // the chord and key boxes (280 and 300 in the design) leave the middle at least 240 px
+            final compact = this.compact || c.maxWidth < 280 + 300 + 2 * Space.column + 2 * Space.gutter + 240;
+            final chord = SizedBox(
+              width: compact ? 200 : 280,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  AnimatedSwitcher(
+                    duration: Timing.quick,
+                    child: Opacity(
+                      key: ValueKey(a?.name),
+                      opacity: dim,
+                      child: Tooltip(
+                        message: a?.alt != null ? 'also written ${a!.alt}' : '',
+                        child: Text(
+                          a?.name ?? ' ',
+                          key: const Key('h-name'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: ui(TypeSize.chord, weight: FontWeight.w500),
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
-              Text(
-                chordSub(a, key),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: ui(TypeSize.small, color: Pal.text2),
-              ),
-            ],
-          ),
-        );
-        final roman = Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            if (a?.roman != null) ...[
-              Flexible(
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Opacity(opacity: dim, child: RomanText(a!.roman!)),
-                ),
-              ),
-              const SizedBox(width: Space.s),
-              Flexible(
-                child: Text(
-                  a.funcLabel?.toLowerCase() ?? _functionWord[a.func] ?? '',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: ui(TypeSize.small, color: Pal.text2),
-                ),
-              ),
-              const SizedBox(width: Space.l),
-            ] else if (a?.kind == HarmonyKind.note && key != null) ...[
-              Opacity(
-                opacity: dim,
-                child: Text(a!.degree ?? '', style: serif(TypeSize.roman, color: Pal.accent)),
-              ),
-              const SizedBox(width: Space.l),
-            ] else if (a?.kind == HarmonyKind.chord && key == null) ...[
-              Flexible(
-                child: Text(
-                  'Pick a key for roman numerals',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: ui(TypeSize.small, color: Pal.text3),
-                ),
-              ),
-              const SizedBox(width: Space.l),
-            ],
-            Expanded(child: Progression(ctl)),
-          ],
-        );
-        final sug = h.suggestion;
-        final bh = barryHarrisText(key);
-        final keyBox = SizedBox(
-          width: compact ? 220 : 300,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(key?.name ?? 'No key', style: ui(TypeSize.body, color: key == null ? Pal.text3 : Pal.text1)),
-              if (ctl.nonTwelve)
-                Tooltip(
-                  message: 'Chords, scales and roman numerals are named by the keys’ spelling, as in 12-TET; the board plays ${ctl.tuningName}.',
-                  child: Text(
-                    'chords by spelling · board in ${ctl.tuningName}',
-                    key: const Key('tuning-note'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: ui(TypeSize.small, color: Pal.text3),
-                  ),
-                ),
-              if (bh != null)
-                Tooltip(
-                  message:
-                      'Barry Harris: alternate scale tones belong to the chord and to the diminished seventh chord.\n'
-                      'On the board the chord tones have solid rims, the diminished tones dashed rims.',
-                  child: Text(
-                    bh,
-                    key: const Key('bh-text'),
+                  Text(
+                    chordSub(a, key),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: ui(TypeSize.small, color: Pal.text2),
                   ),
-                ),
-              if (sug != null)
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
+                ],
+              ),
+            );
+            // the middle: the numeral keeps its size; the function word goes when the middle is
+            // narrow; the progression takes the rest and scrolls
+            final narrowMiddle = c.maxWidth < 900;
+            final roman = Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                if (a?.roman != null) ...[
+                  Opacity(opacity: dim, child: RomanText(a!.roman!)),
+                  if (!narrowMiddle) ...[
+                    const SizedBox(width: Space.s),
                     Flexible(
                       child: Text(
-                        'Sounds like ${sug.name}',
+                        a.funcLabel?.toLowerCase() ?? _functionWord[a.func] ?? '',
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: ui(TypeSize.small, color: Pal.text2),
                       ),
                     ),
-                    const SizedBox(width: Space.xs),
-                    _LinkButton('Use', onTap: ctl.useSuggestedKey),
+                  ],
+                  const SizedBox(width: Space.l),
+                ] else if (a?.kind == HarmonyKind.note && key != null) ...[
+                  Opacity(
+                    opacity: dim,
+                    child: Text(a!.degree ?? '', style: serif(TypeSize.roman, color: Pal.accent)),
+                  ),
+                  const SizedBox(width: Space.l),
+                ] else if (a?.kind == HarmonyKind.chord && key == null) ...[
+                  Flexible(
+                    child: Text(
+                      'Pick a key for roman numerals',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: ui(TypeSize.small, color: Pal.text3),
+                    ),
+                  ),
+                  const SizedBox(width: Space.l),
+                ],
+                Expanded(child: Progression(ctl)),
+              ],
+            );
+            final sug = h.suggestion;
+            final bh = barryHarrisText(key);
+            final keyBox = SizedBox(
+              width: compact ? 220 : 300,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(key?.name ?? 'No key', style: ui(TypeSize.body, color: key == null ? Pal.text3 : Pal.text1)),
+                  if (ctl.nonTwelve)
+                    Tooltip(
+                      message: 'Chords, scales and roman numerals are named by the keys’ spelling, as in 12-TET; the board plays ${ctl.tuningName}.',
+                      child: Text(
+                        'chords by spelling · board in ${ctl.tuningName}',
+                        key: const Key('tuning-note'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: ui(TypeSize.small, color: Pal.text3),
+                      ),
+                    ),
+                  if (bh != null)
+                    Tooltip(
+                      message:
+                          'Barry Harris: alternate scale tones belong to the chord and to the diminished seventh chord.\n'
+                          'On the board the chord tones have solid rims, the diminished tones dashed rims.',
+                      child: Text(
+                        bh,
+                        key: const Key('bh-text'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: ui(TypeSize.small, color: Pal.text2),
+                      ),
+                    ),
+                  if (sug != null)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            'Sounds like ${sug.name}',
+                            overflow: TextOverflow.ellipsis,
+                            style: ui(TypeSize.small, color: Pal.text2),
+                          ),
+                        ),
+                        const SizedBox(width: Space.xs),
+                        _LinkButton('Use', onTap: ctl.useSuggestedKey),
+                      ],
+                    ),
+                ],
+              ),
+            );
+            return SizedBox(
+              height: Sizes.harmony,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: Space.gutter),
+                child: Row(
+                  children: [
+                    chord,
+                    const SizedBox(width: Space.column),
+                    Expanded(child: roman),
+                    const SizedBox(width: Space.column),
+                    keyBox,
                   ],
                 ),
-            ],
-          ),
-        );
-        return SizedBox(
-          height: Sizes.harmony,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: Space.gutter),
-            child: Row(
-              children: [
-                chord,
-                const SizedBox(width: Space.column),
-                Expanded(child: roman),
-                const SizedBox(width: Space.column),
-                keyBox,
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         );
       },
     );
@@ -275,24 +281,19 @@ class Progression extends StatelessWidget {
         final shown = h.shown;
         final held = !h.released && shown != null && h.prog.isNotEmpty && h.prog.last.a.name == shown.name;
         final prog = held ? h.prog.sublist(0, h.prog.length - 1) : h.prog;
-        return Row(
-          children: [
-            Expanded(
-              child: ClipRect(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  reverse: true,
-                  child: Row(
-                    children: [
-                      if (h.prog.isEmpty) Text('Chords you play line up here.', style: ui(TypeSize.small, color: Pal.text3)),
-                      for (final e in prog) _Chip(e),
-                    ],
-                  ),
-                ),
-              ),
+        // Clear rides at the end of the scrolling row, so a narrow strip never overflows
+        return ClipRect(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            reverse: true,
+            child: Row(
+              children: [
+                if (h.prog.isEmpty) Text('Chords you play line up here.', style: ui(TypeSize.small, color: Pal.text3)),
+                for (final e in prog) _Chip(e),
+                if (h.prog.isNotEmpty) Btn('Clear', kind: BtnKind.ghost, onPressed: ctl.harmony.clearProgression),
+              ],
             ),
-            if (h.prog.isNotEmpty) Btn('Clear', kind: BtnKind.ghost, onPressed: ctl.harmony.clearProgression),
-          ],
+          ),
         );
       },
     );
@@ -369,6 +370,8 @@ class HoverReadout extends StatelessWidget {
               : hc == 3
               ? 'Settings: hold it and press a key'
               : (settingsControls[hc] ?? 'Glissando');
+        } else if (!ctl.connected) {
+          // the pointer over a board that is not there: nothing to read
         } else if (id >= 0) {
           final n = ctl.keyLayout!.noteName(id, live.transpose, live.transposeFifths);
           final f = ctl.tab == AppTab.setup ? ctl.keyParam(id)?.value : null;
@@ -447,8 +450,7 @@ class _SettingsInfoState extends State<SettingsInfo> {
                   child: Text(t, style: ui(TypeSize.body, color: Pal.text2)),
                 ),
               Text(
-                'From the firmware (synth_control.cpp config_but). Keys marked ? depend on the board’s stored settings. '
-                'Click a voice key to switch voice; click it again for its next preset.',
+                'Keys marked ? depend on the board’s stored settings. Click a voice key to switch voice; click it again for its next preset.',
                 style: ui(TypeSize.small, color: Pal.text3),
               ),
               const SizedBox(height: Space.s),
@@ -482,10 +484,7 @@ class _SettingsInfoState extends State<SettingsInfo> {
               else if ((f.engine != null || f.switchable) && ctl.caps?.tag != null)
                 Padding(
                   padding: const EdgeInsets.only(top: Space.xs),
-                  child: Text(
-                    'Acts on ${ctl.caps!.name}.',
-                    style: ui(TypeSize.small, color: Pal.demo),
-                  ),
+                  child: Text('Acts on ${ctl.caps!.name}.', style: ui(TypeSize.small, color: Pal.demo)),
                 ),
               if (v != null) ...[
                 const SizedBox(height: Space.m),

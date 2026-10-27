@@ -88,7 +88,10 @@ class SoundTopRow extends StatelessWidget {
           height: Sizes.header,
           child: Row(
             children: [
-              Flexible(child: SoundName(ctl)),
+              // the name takes what the buttons leave (a Spacer would split it with the name)
+              Expanded(
+                child: Align(alignment: Alignment.centerLeft, child: SoundName(ctl)),
+              ),
               const SizedBox(width: Space.xl),
               IconBtn(Icons.undo, key: const Key('btn-undo'), tooltip: 'Undo (Ctrl+Z)', onPressed: ctl.history.canUndo ? ctl.undo : null),
               IconBtn(Icons.redo, key: const Key('btn-redo'), tooltip: 'Redo (Ctrl+Y)', onPressed: ctl.history.canRedo ? ctl.redo : null),
@@ -117,7 +120,7 @@ class SoundTopRow extends StatelessWidget {
                 tooltip: 'Save the sound under a name (Ctrl+S)',
                 onPressed: any ? () => saveSoundAs(context, ctl) : null,
               ),
-              const Spacer(),
+              const SizedBox(width: Space.s),
               PopupMenuButton<void>(
                 tooltip: 'More',
                 icon: const Icon(Icons.more_horiz, size: 18, color: Pal.text2),
@@ -384,8 +387,8 @@ class _MySoundsState extends State<MySounds> {
                   value: all,
                   onChanged: (v) => setState(() => all = v),
                   items: [
-                    (true, 'all', 'Every saved sound'),
-                    (false, engine.isEmpty ? 'engine' : engineInfo(engine).label.toLowerCase(), 'This engine only'),
+                    (true, 'All', 'Every saved sound'),
+                    (false, engine.isEmpty ? 'This engine' : engineInfo(engine).label, 'This engine only'),
                   ],
                 ),
               ],

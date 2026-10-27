@@ -27,10 +27,11 @@ class BoardPresetsSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final list = ctl.boardPresets;
-    if (list == null) return const SizedBox.shrink(); // a firmware without presets lists nothing
+    // a firmware without presets, or without a store for the user's own, lists nothing here (its
+    // factory presets are the rows above)
+    if (list == null || !list.storeOn) return const SizedBox.shrink();
     final mine = ctl.userPresetsOf(engine);
     final open = ctl.lastOpen;
-    final others = list.user.length - mine.length;
     return Column(
       key: const Key('board-presets'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -38,48 +39,36 @@ class BoardPresetsSection extends StatelessWidget {
         const SizedBox(height: Space.xl),
         const Micro('On the Striso'),
         const SizedBox(height: Space.xs),
-        if (!list.storeOn)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: Space.xs),
-            child: Text('This firmware keeps no presets of your own: its factory presets are above.', style: ui(TypeSize.body, color: Pal.text2)),
-          )
-        else ...[
-          if (mine.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: Space.xs),
-              child: Text('Presets you save on the Striso appear here.', style: ui(TypeSize.body, color: Pal.text2)),
-            ),
-          for (final p in mine)
-            ListRow(
-              key: Key('board-preset-${p.id}'),
-              label: p.title.isEmpty ? '(untitled)' : p.title,
-              current: ctl.openPreset?.id == p.id,
-              pending: ctl.presetBusy && open?.preset.id == p.id,
-              dot: dot,
-              tooltip: [p.title, ?p.description, if (p.version != null) 'saved with ${p.version}'].join('\n'),
-              onTap: () => ctl.openBoardPreset(p),
-              menu: (context) => boardPresetMenu(context, ctl, p),
-            ),
-          if (others > 0)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: Space.xs),
-              child: Text('$others more for other engines', style: ui(TypeSize.small, color: Pal.text3)),
-            ),
-          ListRow(
-            key: const Key('preset-save-as'),
-            label: '+ Save as…',
-            ghost: true,
-            tooltip: 'Save the sound as it is now on the Striso, with a title and a description',
-            onTap: () => saveBoardPresetAs(context, ctl),
+        if (mine.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: Space.xs),
+            child: EmptyNote('Presets you save on the Striso appear here.'),
           ),
+        for (final p in mine)
           ListRow(
-            key: const Key('preset-install'),
-            label: 'Install…',
-            ghost: true,
-            tooltip: 'Install preset files (.json) on the Striso; or drop them on the window',
-            onTap: () => installPresetFiles(ctl),
+            key: Key('board-preset-${p.id}'),
+            label: p.title.isEmpty ? '(untitled)' : p.title,
+            current: ctl.openPreset?.id == p.id,
+            pending: ctl.presetBusy && open?.preset.id == p.id,
+            dot: dot,
+            tooltip: [p.title, ?p.description, if (p.version != null) 'saved with ${p.version}'].join('\n'),
+            onTap: () => ctl.openBoardPreset(p),
+            menu: (context) => boardPresetMenu(context, ctl, p),
           ),
-        ],
+        ListRow(
+          key: const Key('preset-save-as'),
+          label: '+ Save as…',
+          ghost: true,
+          tooltip: 'Save the sound as it is now on the Striso, with a title and a description',
+          onTap: () => saveBoardPresetAs(context, ctl),
+        ),
+        ListRow(
+          key: const Key('preset-install'),
+          label: 'Install…',
+          ghost: true,
+          tooltip: 'Install preset files (.json) on the Striso; or drop them on the window',
+          onTap: () => installPresetFiles(ctl),
+        ),
       ],
     );
   }
@@ -180,11 +169,14 @@ Future<void> saveBoardPresetAs(BuildContext context, AppController ctl) async {
                 maxLength: presetMaxDescription,
                 onChanged: (_) => check(),
               ),
-              const SizedBox(height: Space.s),
-              Text(
-                problem ?? 'The board saves ${engineInfo(ctl.currentEngine).label} as it sounds now, every parameter by name.',
-                style: ui(TypeSize.small, color: problem != null ? Pal.error : Pal.text3),
-              ),
+              if (problem != null) ...[
+                const SizedBox(height: Space.s),
+                Text(
+                  problem!,
+                  key: const Key('preset-problem'),
+                  style: ui(TypeSize.small, color: Pal.error),
+                ),
+              ],
             ],
           ),
           actions: [

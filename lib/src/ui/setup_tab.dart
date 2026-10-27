@@ -254,7 +254,7 @@ class _TouchRowState extends State<_TouchRow> {
                   child: changed
                       ? IconBtn(
                           Icons.replay,
-                          tooltip: 'Back to ${info.def}',
+                          tooltip: 'Back to ${fmt(info.def)}',
                           onPressed: () {
                             set(info.def, 'begin', 'Reset ${info.label.toLowerCase()}');
                             set(info.def, 'end');
@@ -345,15 +345,15 @@ class KeyEqualizer extends StatelessWidget {
             SizedBox(width: 300, height: 60, child: KeyMeter(ctl)),
             const SizedBox(height: Space.xs),
             _MeterText(ctl),
-            const SizedBox(height: Space.m),
-            Text(
-              !has
-                  ? ''
-                  : ms.isNotEmpty
-                  ? '${ms.length} key${ms.length == 1 ? '' : 's'} measured${med != null ? ', middle peak ${med.toStringAsFixed(2)}' : ''}.'
-                  : 'Press keys one after another with the same feel.',
-              style: ui(TypeSize.small, color: Pal.text2),
-            ),
+            if (has) ...[
+              const SizedBox(height: Space.m),
+              Text(
+                ms.isNotEmpty
+                    ? '${ms.length} key${ms.length == 1 ? '' : 's'} measured${med != null ? ', middle peak ${med.toStringAsFixed(2)}' : ''}.'
+                    : 'Press keys one after another with the same feel.',
+                style: ui(TypeSize.small, color: Pal.text2),
+              ),
+            ],
             const SizedBox(height: Space.s),
             Wrap(
               spacing: Space.xs,
@@ -425,7 +425,7 @@ class _MeterText extends StatelessWidget {
       builder: (context, _) {
         final id = ctl.eqSelected;
         final p = id >= 0 ? ctl.keyParam(id) : null;
-        if (p == null) return Text('The selected key’s pressure shows here while you hold it.', style: ui(TypeSize.small, color: Pal.text3));
+        if (p == null) return const SizedBox(height: 16);
         final live = ctl.live;
         final down = live.down[id] == 1;
         final value = down ? live.raw[id].toDouble() : 0.0, hold = down ? live.peak[id].toDouble() : 0.0, last = ctl.lastPeakOf(id);
@@ -688,7 +688,10 @@ class MidiOutSection extends StatelessWidget {
         const Micro('MIDI out'),
         const SizedBox(height: Space.xs),
         if (st == null || modes.isEmpty)
-          Text(ctl.connected ? 'This firmware does not report its MIDI settings.' : 'Connect to see the board\'s MIDI settings.', style: ui(TypeSize.body, color: Pal.text2))
+          Text(
+            ctl.connected ? 'This firmware does not report its MIDI settings.' : 'Connect to see the board\'s MIDI settings.',
+            style: ui(TypeSize.body, color: Pal.text2),
+          )
         else ...[
           Seg<int>(
             items: [for (final e in modes) (e.key, e.value.short, e.value.title)],
@@ -701,12 +704,19 @@ class MidiOutSection extends StatelessWidget {
             for (final d in ctl.dials!) _DialRow(ctl, d),
           ] else if (channels != null && channels.isNotEmpty) ...[
             const SizedBox(height: Space.xs),
-            Text('${modes.where((e) => e.key == current).map((e) => e.value.short).firstOrNull ?? mode} · $channels', key: const Key('midi-out-channels'), style: ui(TypeSize.body)),
+            Text(
+              '${modes.where((e) => e.key == current).map((e) => e.value.short).firstOrNull ?? mode} · $channels',
+              key: const Key('midi-out-channels'),
+              style: ui(TypeSize.body),
+            ),
           ],
-          if (ctl.dials == null || ctl.dials!.isEmpty) ...[
-            if (rest != null && rest.isNotEmpty) Text(rest, key: const Key('midi-out-rest'), style: ui(TypeSize.body, color: Pal.text2)),
-            Text('The channels, bend range, volume and rate are dials: Settings + tilt on the instrument.', style: ui(TypeSize.small, color: Pal.text3)),
-          ],
+          // without StcT the dials are set on the instrument (Settings + tilt): the values only
+          if ((ctl.dials == null || ctl.dials!.isEmpty) && rest != null && rest.isNotEmpty)
+            Text(
+              rest,
+              key: const Key('midi-out-rest'),
+              style: ui(TypeSize.body, color: Pal.text2),
+            ),
         ],
       ],
     );
@@ -725,7 +735,15 @@ class _DialRow extends StatefulWidget {
 }
 
 /// How the dials read (the board names them by their StcY fields).
-const _dialLabels = {'ch': 'Channel', 'voices': 'MPE voices', 'bend': 'Bend range', 'vol': 'Volume', 'sustain': 'Sustain', 'rate': 'Rate', 'fine': 'Fine tune'};
+const _dialLabels = {
+  'ch': 'Channel',
+  'voices': 'MPE voices',
+  'bend': 'Bend range',
+  'vol': 'Volume',
+  'sustain': 'Sustain',
+  'rate': 'Rate',
+  'fine': 'Fine tune',
+};
 const _dialUnits = {'bend': ' st', 'rate': ' ms', 'fine': ' ¢'};
 
 class _DialRowState extends State<_DialRow> {
@@ -766,7 +784,12 @@ class _DialRowState extends State<_DialRow> {
           ),
           SizedBox(
             width: 64,
-            child: Text(text, key: Key('dial-${d.name}-value'), textAlign: TextAlign.right, style: ui(TypeSize.body, color: _drag != null ? Pal.text3 : Pal.text1)),
+            child: Text(
+              text,
+              key: Key('dial-${d.name}-value'),
+              textAlign: TextAlign.right,
+              style: ui(TypeSize.body, color: _drag != null ? Pal.text3 : Pal.text1),
+            ),
           ),
         ],
       ),

@@ -242,30 +242,28 @@ class _AudioSectionState extends State<AudioSection> {
               children: [
                 const Micro('Audio'),
                 const Spacer(),
-                if (!virtual) Toggle(key: const Key('audio-through'), value: p.through, onChanged: a.setThrough, label: 'Through PC'),
+                if (!virtual)
+                  Tooltip(
+                    message: 'Hear the Striso on this computer (its USB audio) while it plays. Its jack keeps working.',
+                    child: Toggle(key: const Key('audio-through'), value: p.through, onChanged: a.setThrough, label: 'Through PC'),
+                  ),
               ],
             ),
-            const SizedBox(height: Space.xs),
-            Text(
-              virtual
-                  ? 'Virtual plays to this output. Through PC is the Striso’s: it is not here.'
-                  : 'Through PC: hear the Striso on this computer (its USB audio) while it plays. Its jack keeps working.',
-              style: ui(TypeSize.small, color: Pal.text3),
-            ),
             const SizedBox(height: Space.s),
-            if (!virtual) _row(
-              'Input',
-              LayoutBuilder(
-                builder: (context, box) => SmallSelect<String>(
-                  key: const Key('audio-input'),
-                  value: p.input ?? '',
-                  items: inputs,
-                  onChanged: rec ? null : (v) => a.setInput(v.isEmpty ? null : v),
-                  width: box.maxWidth,
+            if (!virtual)
+              _row(
+                'Input',
+                LayoutBuilder(
+                  builder: (context, box) => SmallSelect<String>(
+                    key: const Key('audio-input'),
+                    value: p.input ?? '',
+                    items: inputs,
+                    onChanged: rec ? null : (v) => a.setInput(v.isEmpty ? null : v),
+                    width: box.maxWidth,
+                  ),
                 ),
+                tip: rec ? 'Stop the recording to change the input' : 'Automatic finds the Striso by its USB IDs or its name',
               ),
-              tip: rec ? 'Stop the recording to change the input' : 'Automatic finds the Striso by its USB IDs or its name',
-            ),
             _row(
               'Output',
               LayoutBuilder(
@@ -277,6 +275,7 @@ class _AudioSectionState extends State<AudioSection> {
                   width: box.maxWidth,
                 ),
               ),
+              tip: virtual ? 'Virtual plays to this output' : 'Through PC plays to this output',
             ),
             if (a.outputHint != null) _Hint(a.outputHint!, warn: a.outputBluetooth),
             _row(
@@ -287,7 +286,9 @@ class _AudioSectionState extends State<AudioSection> {
                 child: Seg<int>(
                   value: p.period,
                   onChanged: rec ? (_) {} : a.setPeriod,
-                  keys: {for (final f in [AudioPrefs.auto, ...AudioPrefs.periods]) f: Key('audio-buffer-$f')},
+                  keys: {
+                    for (final f in [AudioPrefs.auto, ...AudioPrefs.periods]) f: Key('audio-buffer-$f'),
+                  },
                   items: [
                     (
                       AudioPrefs.auto,
@@ -310,7 +311,12 @@ class _AudioSectionState extends State<AudioSection> {
                 listenable: widget.ctl.audioLevels,
                 builder: (context, _) {
                   final g = widget.ctl.audio.grantedLine;
-                  return Text(g.isEmpty ? '–' : g, key: const Key('audio-granted'), style: ui(TypeSize.small, color: Pal.text2), overflow: TextOverflow.ellipsis);
+                  return Text(
+                    g.isEmpty ? '–' : g,
+                    key: const Key('audio-granted'),
+                    style: ui(TypeSize.small, color: Pal.text2),
+                    overflow: TextOverflow.ellipsis,
+                  );
                 },
               ),
               tip: 'What the system granted for the input and the output, whatever the toggles ask',
@@ -325,7 +331,9 @@ class _AudioSectionState extends State<AudioSection> {
                   child: Seg<int>(
                     value: p.boardBuffer,
                     onChanged: a.setBoardBuffer,
-                    keys: {for (final f in [AudioPrefs.auto, ...AudioPrefs.boardBuffers]) f: Key('audio-board-$f')},
+                    keys: {
+                      for (final f in [AudioPrefs.auto, ...AudioPrefs.boardBuffers]) f: Key('audio-board-$f'),
+                    },
                     items: [
                       (AudioPrefs.auto, 'Auto', 'The smallest that keeps the Striso at no underruns (its own counters, every 2 s)'),
                       for (final f in AudioPrefs.boardBuffers)
@@ -394,7 +402,11 @@ class _Hint extends StatelessWidget {
         Padding(padding: const EdgeInsets.only(top: 5), child: Pip(warn ? Pal.accent : Pal.text3, size: 6)),
         const SizedBox(width: Space.s),
         Expanded(
-          child: Text(text, key: const Key('audio-output-hint'), style: ui(TypeSize.small, color: warn ? Pal.text1 : Pal.text2)),
+          child: Text(
+            text,
+            key: const Key('audio-output-hint'),
+            style: ui(TypeSize.small, color: warn ? Pal.text1 : Pal.text2),
+          ),
         ),
       ],
     ),
@@ -466,7 +478,8 @@ class _Latency extends StatelessWidget {
       final on = a.playing && st.latencyMs > 0;
       final b = a.breakdown;
       final inRate = st.captureRate > 0 ? st.captureRate : 48000, outRate = st.playbackRate > 0 ? st.playbackRate : 48000;
-      String per(int min, int def, int rate) => min > 0 ? '${_ms(min / rate * 1000)} ms minimum, ${_ms(def / rate * 1000)} ms default' : 'not reported';
+      String per(int min, int def, int rate) =>
+          min > 0 ? '${_ms(min / rate * 1000)} ms minimum, ${_ms(def / rate * 1000)} ms default' : 'not reported';
       final tip = on
           ? [
               'Through the computer, ${_ms(b.total)} ms:',
@@ -528,7 +541,11 @@ class _Dropouts extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('$n in the last minute', key: const Key('audio-dropouts'), style: ui(TypeSize.body, color: n > 0 ? Pal.text1 : Pal.text2)),
+            Text(
+              '$n in the last minute',
+              key: const Key('audio-dropouts'),
+              style: ui(TypeSize.body, color: n > 0 ? Pal.text1 : Pal.text2),
+            ),
             const SizedBox(height: 2),
             Text(
               'board ${m[DropSide.board]} · input ${m[DropSide.input]} · output ${m[DropSide.output]}'.toUpperCase(),
@@ -613,7 +630,9 @@ class _BarsPainter extends CustomPainter {
     for (final (i, v) in [l, r].indexed) {
       final y = i == 0 ? 2.0 : s.height - 2 - h;
       g.drawRRect(RRect.fromLTRBR(0, y, s.width - 28, y + h, const Radius.circular(2)), Paint()..color = Pal.bg3);
-      if (v > 0) g.drawRRect(RRect.fromLTRBR(0, y, (s.width - 28) * v, y + h, const Radius.circular(2)), Paint()..color = clip ? Pal.error : Pal.accent);
+      if (v > 0) {
+        g.drawRRect(RRect.fromLTRBR(0, y, (s.width - 28) * v, y + h, const Radius.circular(2)), Paint()..color = clip ? Pal.error : Pal.accent);
+      }
     }
   }
 
@@ -636,7 +655,11 @@ class _StatusLine extends StatelessWidget {
             Padding(padding: const EdgeInsets.only(top: 5), child: Pip(toneColor(a.tone))),
             const SizedBox(width: Space.s),
             Expanded(
-              child: Text(a.message, key: const Key('audio-status'), style: ui(TypeSize.small, color: a.tone == Tone.problem ? Pal.text1 : Pal.text2)),
+              child: Text(
+                a.message,
+                key: const Key('audio-status'),
+                style: ui(TypeSize.small, color: a.tone == Tone.problem ? Pal.text1 : Pal.text2),
+              ),
             ),
           ],
         ),
@@ -713,7 +736,12 @@ class _RecordRow extends StatelessWidget {
                 Expanded(
                   child: Tooltip(
                     message: last,
-                    child: Text(_base(last), maxLines: 1, overflow: TextOverflow.ellipsis, style: ui(TypeSize.small, color: Pal.text2)),
+                    child: Text(
+                      _base(last),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: ui(TypeSize.small, color: Pal.text2),
+                    ),
                   ),
                 ),
                 Btn('Show in folder', key: const Key('audio-reveal'), kind: BtnKind.ghost, onPressed: () => revealFile(last)),

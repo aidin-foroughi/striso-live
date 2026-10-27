@@ -30,7 +30,14 @@ class StageView extends StatelessWidget {
               children: [
                 StatusDot(ctl.dot, lost: ctl.lost || ctl.problem != null),
                 const SizedBox(width: Space.s),
-                Text(ctl.voiceName.isEmpty ? 'Nothing playing' : ctl.soundTitle, style: ui(TypeSize.body, weight: FontWeight.w500)),
+                Flexible(
+                  child: Text(
+                    ctl.voiceName.isEmpty ? 'Nothing playing' : ctl.soundTitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: ui(TypeSize.body, weight: FontWeight.w500),
+                  ),
+                ),
                 const Spacer(),
                 if (ctl.connected) CpuIndicator(ctl),
                 const SizedBox(width: Space.m),
@@ -67,18 +74,22 @@ class _StageChord extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: Space.xl),
           child: Row(
             children: [
-              Opacity(
-                opacity: ctl.harmony.released ? 0.42 : 1,
-                child: Text(
-                  a?.name ?? '',
-                  key: const Key('stage-chord'),
-                  style: ui(TypeSize.stage, weight: FontWeight.w500),
+              Flexible(
+                child: Opacity(
+                  opacity: ctl.harmony.released ? 0.42 : 1,
+                  child: Text(
+                    a?.name ?? '',
+                    key: const Key('stage-chord'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: ui(TypeSize.stage, weight: FontWeight.w500),
+                  ),
                 ),
               ),
               const SizedBox(width: Space.xl),
               if (a?.roman != null) RomanText(a!.roman!, size: 40),
               const Spacer(),
-              Text(ctl.currentKey?.name ?? '', style: ui(TypeSize.sound, color: Pal.text2)),
+              Text(ctl.currentKey?.name ?? '', maxLines: 1, style: ui(TypeSize.sound, color: Pal.text2)),
             ],
           ),
         );

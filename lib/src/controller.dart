@@ -221,14 +221,7 @@ class AppOptions {
   /// Virtual: a firmware build's striso_virtual (--virtual-lib=PATH, else STRISO_VIRTUAL_LIB or
   /// the one found).
   final String? virtualLib;
-  const AppOptions({
-    this.virtual = false,
-    this.noUsb = false,
-    this.noAudio = false,
-    this.fakeSave,
-    this.reducedMotion = false,
-    this.virtualLib,
-  });
+  const AppOptions({this.virtual = false, this.noUsb = false, this.noAudio = false, this.fakeSave, this.reducedMotion = false, this.virtualLib});
 
   static AppOptions parse(List<String> args) {
     String? fake, vlib;
@@ -321,6 +314,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
       unawaited(readBack(sound.pendingTargets));
     });
   }
+
   late final harmony = HarmonyTracker(live);
   late final morph = MorphModel(this);
 
@@ -714,17 +708,12 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
       Idle(why: IdleWhy.lost, :final note) => Invite('Connection lost', note ?? '', const [Fix.connectStriso, Fix.playVirtual]),
       Idle(why: IdleWhy.modeSwitch) => const Invite('', '', [], busy: 'Switching…'),
       Idle() when boardPresent => const Invite('Striso found', '', [], busy: 'Connecting…'),
-      Idle() => const Invite(
-        'Plug in your Striso',
-        'It connects by itself. Or play Virtual: the Striso firmware on this computer.',
-        [Fix.playVirtual],
-      ),
-      Waiting(:final why) when why.startsWith('Board busy') => const Invite(
-        'Your Striso is busy',
-        'Another program holds it: trying again.',
-        [Fix.playVirtual],
-        busy: 'Trying again…',
-      ),
+      Idle() => const Invite('Plug in your Striso', 'It connects by itself. Or play Virtual: the Striso firmware on this computer.', [
+        Fix.playVirtual,
+      ]),
+      Waiting(:final why) when why.startsWith('Board busy') => const Invite('Your Striso is busy', 'Another program holds it: trying again.', [
+        Fix.playVirtual,
+      ], busy: 'Trying again…'),
       Waiting() => Invite('Striso found', '', const [Fix.connectNow, Fix.playVirtual], busy: 'Connecting in ${reconnectDelay.inSeconds} s…'),
       Connecting(mode: Mode.striso) => const Invite('', '', [], busy: 'Connecting to your Striso…'),
       Connecting(mode: Mode.virtual) => const Invite('', '', [], busy: 'Starting Virtual…'),
@@ -748,11 +737,10 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
         }
         return const Problem('No Striso on USB', 'Plug it in and switch it on; it connects by itself.', [Fix.playVirtual]);
       case FailKind.busy:
-        return const Problem(
-          'Your Striso is busy',
-          'Another program holds it: striso.py, the web app, a flash tool. Close it, then connect.',
-          [Fix.connectStriso, Fix.playVirtual],
-        );
+        return const Problem('Your Striso is busy', 'Another program holds it: striso.py, the web app, a flash tool. Close it, then connect.', [
+          Fix.connectStriso,
+          Fix.playVirtual,
+        ]);
       case FailKind.noDriver:
         return Problem(
           'No driver for the Striso',
@@ -1455,8 +1443,12 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     pendingVoice = n;
     lastOpen = null; // a voice chosen: no longer the preset
     notifyListeners();
-    final r = await c.selectVoice(n);
-    pendingVoice = -1;
+    final ({bool ok, int index, String? name})? r;
+    try {
+      r = await c.selectVoice(n);
+    } finally {
+      pendingVoice = -1; // (a board that left meanwhile: the row is not pending for ever)
+    }
     if (!identical(c, client)) return;
     if (r == null || !r.ok) {
       toast(r != null ? 'The board has no voice $n' : 'The board did not confirm the voice change', 'error');
@@ -1931,7 +1923,9 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     for (final k in l.keys) {
       final peak = lastPeakOf(k.id);
       final p = peak > 0 ? keyParam(k.id) : null;
-      if (p != null) out.add(Measured(n: k.n, id: k.id, peak: peak, factor: p.value, name: l.noteName(k.id, live.transpose, live.transposeFifths).full));
+      if (p != null) {
+        out.add(Measured(n: k.n, id: k.id, peak: peak, factor: p.value, name: l.noteName(k.id, live.transpose, live.transposeFifths).full));
+      }
     }
     return out;
   }
@@ -2179,7 +2173,11 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     if (now == null) {
       toast('Key $key: no voice');
     } else if (was != null && was != now) {
-      toastAction('${engineInfo(now).label} on key $key, in place of ${engineInfo(was).label}. Save to keep it.', 'Undo', () => unawaited(undoVoiceKey()));
+      toastAction(
+        '${engineInfo(now).label} on key $key, in place of ${engineInfo(was).label}. Save to keep it.',
+        'Undo',
+        () => unawaited(undoVoiceKey()),
+      );
     } else {
       toast('${engineInfo(now).label} on key $key. Save to keep it.');
     }
@@ -2451,9 +2449,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     ];
   }
 
-  List<Param> _heroParams(int t, List<String> names) => [
-    for (final n in names) ?findParam(t, n),
-  ];
+  List<Param> _heroParams(int t, List<String> names) => [for (final n in names) ?findParam(t, n)];
 
   Future<void> _readHeroes(StrisoClient c) async {
     final h = await c.getHeroes();
@@ -2844,7 +2840,10 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
       }
       log('> StcW $n');
       final r = await cl.selectVoice(n);
-      log(r == null ? '(no reply)' : (r.ok ? 'voice ${r.index} ${r.name ?? ''}' : 'no voice ${r.index}'), r == null || !r.ok ? LogKind.err : LogKind.out);
+      log(
+        r == null ? '(no reply)' : (r.ok ? 'voice ${r.index} ${r.name ?? ''}' : 'no voice ${r.index}'),
+        r == null || !r.ok ? LogKind.err : LogKind.out,
+      );
       if (identical(client, cl)) await syncVoice();
       return;
     }

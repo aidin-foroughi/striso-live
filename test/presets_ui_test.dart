@@ -107,7 +107,7 @@ void main() {
     });
   });
 
-  testWidgets('a firmware without a preset store: factory presets only, said once', skip: virtualSkip != null, (tester) async {
+  testWidgets('a firmware without a preset store: factory presets only, nothing under them', skip: virtualSkip != null, (tester) async {
     final b = await startBoard(tester);
     final usb = CannedUsb(b, {
       'J': ['J store off', 'J end 0'],
@@ -117,7 +117,7 @@ void main() {
     await waitFor(tester, () => ctl.dot == Dot.on && !ctl.listsLoading);
     await settle(tester, ms: 200);
     expect(ctl.boardPresets!.storeOn, isFalse);
-    expect(find.textContaining('keeps no presets of your own'), findsOneWidget);
+    expect(find.byKey(const Key('board-presets')), findsNothing, reason: 'no On the Striso section: the factory presets are the rows above');
     expect(find.byKey(const Key('preset-save-as')), findsNothing);
     await finish(tester, ctl);
     await disposeBoard(tester, b);

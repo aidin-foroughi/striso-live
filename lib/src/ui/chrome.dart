@@ -123,7 +123,11 @@ class BannerBar extends StatelessWidget {
                           spacing: Space.m,
                           runSpacing: Space.xs,
                           children: [
-                            Text(p.title, key: const Key('problem-title'), style: ui(TypeSize.body, weight: FontWeight.w500)),
+                            Text(
+                              p.title,
+                              key: const Key('problem-title'),
+                              style: ui(TypeSize.body, weight: FontWeight.w500),
+                            ),
                             if (p.detail.isNotEmpty) SelectableText(p.detail, style: ui(TypeSize.body, color: Pal.text2)),
                           ],
                         ),
@@ -145,7 +149,9 @@ class BannerBar extends StatelessWidget {
                           children: [
                             const Pip(Pal.accent, size: 6),
                             const SizedBox(width: Space.s),
-                            Expanded(child: Text(notice, maxLines: 1, overflow: TextOverflow.ellipsis, style: ui(TypeSize.body))),
+                            Expanded(
+                              child: Text(notice, maxLines: 1, overflow: TextOverflow.ellipsis, style: ui(TypeSize.body)),
+                            ),
                           ],
                         ),
                       ))
@@ -270,12 +276,20 @@ class InviteCard extends StatelessWidget {
                   ),
                 if (inv.body.isNotEmpty) ...[
                   const SizedBox(height: Space.s),
-                  Text(inv.body, textAlign: TextAlign.center, style: ui(TypeSize.body, color: Pal.text2)),
+                  Text(
+                    inv.body,
+                    textAlign: TextAlign.center,
+                    style: ui(TypeSize.body, color: Pal.text2),
+                  ),
                 ],
                 if (inv.actions.isNotEmpty) ...[const SizedBox(height: Space.l), FixButtons(ctl, inv.actions)],
                 if (inv.busy != null) ...[
                   const SizedBox(height: Space.m),
-                  Text(inv.busy!, key: const Key('invite-busy'), style: ui(TypeSize.small, color: Pal.accent)),
+                  Text(
+                    inv.busy!,
+                    key: const Key('invite-busy'),
+                    style: ui(TypeSize.small, color: Pal.accent),
+                  ),
                 ],
               ],
             ),
@@ -333,8 +347,7 @@ Future<bool> confirmSave(BuildContext context) async {
     builder: (ctx) => StrisoDialog(
       title: 'Save touch settings to the Striso?',
       body: Text(
-        'The app lets go of the board, the settings are written to it and it restarts (about 15 seconds), then the app '
-        'reconnects and reads them back. The previous settings are backed up on this computer first.',
+        'The Striso restarts with them (about 15 seconds). Its previous settings are backed up on this computer first.',
         style: ui(TypeSize.body, color: Pal.text2),
       ),
       actions: [
@@ -377,8 +390,6 @@ Future<void> showCode(BuildContext context, AppController ctl, Preset p) async {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Arrays in parameter index order with names, for the firmware preset tables.', style: ui(TypeSize.body, color: Pal.text2)),
-          const SizedBox(height: Space.m),
           Container(
             height: 360,
             decoration: BoxDecoration(color: Pal.bg0, borderRadius: BorderRadius.circular(Radii.small)),

@@ -181,15 +181,18 @@ class EnginePanel extends StatelessWidget {
               child: Row(
                 children: [
                   Expanded(
-                    // the eight voice keys in one row: the gap gives way first (down to 4 px),
-                    // then the buttons (down to 18 px)
+                    // the voice keys in one row (nine with an engine from a slot): the gap gives
+                    // way first (down to 2 px), then the buttons (down to 16 px)
                     child: LayoutBuilder(
                       builder: (context, box) {
                         final n = engines.length.clamp(1, 99);
                         final want = buttonSize < 24 ? Space.xs : Space.s - 2;
+                        const minGap = Space.xxs;
                         var size = buttonSize;
-                        if (n * size + (n - 1) * Space.xs > box.maxWidth) size = ((box.maxWidth - (n - 1) * Space.xs) / n).floorToDouble().clamp(18.0, buttonSize);
-                        final gap = n > 1 ? ((box.maxWidth - n * size) / (n - 1)).clamp(Space.xs, want) : want;
+                        if (n * size + (n - 1) * minGap > box.maxWidth) {
+                          size = ((box.maxWidth - (n - 1) * minGap) / n).floorToDouble().clamp(16.0, buttonSize);
+                        }
+                        final gap = n > 1 ? ((box.maxWidth - n * size) / (n - 1)).clamp(minGap, want) : want;
                         return Wrap(
                           spacing: gap.floorToDouble(),
                           runSpacing: Space.xs,
@@ -274,7 +277,16 @@ class EngineDot extends StatefulWidget {
   /// The voice keys it is on (Stca), and "Put on key…" (a right click), null: none.
   final List<int> keys;
   final void Function(Offset position)? onMenu;
-  const EngineDot({super.key, required this.e, required this.on, required this.onTap, this.size = 24, this.number, this.keys = const [], this.onMenu});
+  const EngineDot({
+    super.key,
+    required this.e,
+    required this.on,
+    required this.onTap,
+    this.size = 24,
+    this.number,
+    this.keys = const [],
+    this.onMenu,
+  });
   @override
   State<EngineDot> createState() => _EngineDotState();
 }
@@ -284,7 +296,7 @@ class _EngineDotState extends State<EngineDot> {
   @override
   Widget build(BuildContext context) {
     final e = widget.e;
-    final col = engineColor(e.engine);
+    final col = engineColor(e.engine, e.color);
     final has = e.count > 0;
     final info = engineInfo(e.engine);
     return Tooltip(
@@ -527,12 +539,7 @@ class PlayToolbar extends StatelessWidget {
                       'Colour the keys by tonal function (rims only): each scale degree its own hue; tonic, '
                       'subdominant and dominant families; or the tones of the chord you hold',
                   waitDuration: const Duration(milliseconds: 900),
-                  child: SmallSelect<KeyColour>(
-                    key: const Key('colour'),
-                    value: ctl.colour,
-                    items: colours,
-                    onChanged: ctl.setColour,
-                  ),
+                  child: SmallSelect<KeyColour>(key: const Key('colour'), value: ctl.colour, items: colours, onChanged: ctl.setColour),
                 ),
                 if (ctl.colour != KeyColour.off && wide) ...[const SizedBox(width: Space.s), ColourLegend(ctl)],
                 const SizedBox(width: Space.s),
@@ -551,25 +558,31 @@ class PlayToolbar extends StatelessWidget {
                 ],
               ],
             );
+            // the right end: the hover readout while a key is under the pointer, else (in the
+            // strip layout) the sound name; the controls take their own width up to the rest
+            final rightMin = showSound ? 160.0 : 120.0;
             return SizedBox(
               height: Sizes.toolbar,
               child: Row(
                 children: [
-                  // the controls take their own width, up to all but 200 px; the readout the rest
                   ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: (c.maxWidth - 200).clamp(120.0, c.maxWidth)),
+                    constraints: BoxConstraints(maxWidth: (c.maxWidth - rightMin - Space.l).clamp(120.0, c.maxWidth)),
                     child: ClipRect(
                       child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: controls),
                     ),
                   ),
                   const SizedBox(width: Space.l),
                   Expanded(
-                    child: Align(alignment: Alignment.centerRight, child: HoverReadout(ctl)),
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: ListenableBuilder(
+                        listenable: ctl.stats,
+                        builder: (context, _) => showSound && ctl.voiceName.isNotEmpty && ctl.hover < 0 && ctl.hoverControl < 0
+                            ? SoundName(ctl, size: TypeSize.title)
+                            : HoverReadout(ctl),
+                      ),
+                    ),
                   ),
-                  if (showSound && ctl.voiceName.isNotEmpty) ...[
-                    const SizedBox(width: Space.l),
-                    Flexible(child: SoundName(ctl, size: TypeSize.title)),
-                  ],
                 ],
               ),
             );
@@ -599,9 +612,10 @@ class ColourLegend extends StatelessWidget {
       KeyColour.function =>
         'Tonic family: 1 3 6 · Subdominant: 2 4 and a lowered 7 · Dominant: 5 and the leading tone 7.\n'
             'Non-scale keys stay neutral. In other tunings the colouring follows the spelled degrees.',
-      KeyColour.chord => chord
-          ? 'Root, third, fifth, seventh and extensions of the chord you hold, on every key that carries them'
-          : 'Hold a chord to colour its tones across the board; until then the scale degrees',
+      KeyColour.chord =>
+        chord
+            ? 'Root, third, fifth, seventh and extensions of the chord you hold, on every key that carries them'
+            : 'Hold a chord to colour its tones across the board; until then the scale degrees',
       _ => 'One hue per scale degree (by letter step: ♭3 and 3 share one); the root is the accent',
     };
     return Tooltip(
@@ -620,7 +634,10 @@ class ColourLegend extends StatelessWidget {
                   Container(
                     width: 10,
                     height: 10,
-                    decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: col, width: 1.5)),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: col, width: 1.5),
+                    ),
                   ),
                   const SizedBox(width: 3),
                   Text(label, style: microStyle(color: Pal.text2)),
@@ -690,10 +707,18 @@ class TuningChip extends StatelessWidget {
     final face = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(name, key: const Key('tuning-chip'), style: ui(TypeSize.small, color: supported ? Pal.text1 : Pal.text3, weight: FontWeight.w500)),
+        Text(
+          name,
+          key: const Key('tuning-chip'),
+          style: ui(TypeSize.small, color: supported ? Pal.text1 : Pal.text3, weight: FontWeight.w500),
+        ),
         if (ref != null) ...[
           const SizedBox(width: Space.s),
-          Text(ref, key: const Key('reference-chip'), style: ui(TypeSize.small, color: Pal.text2)),
+          Text(
+            ref,
+            key: const Key('reference-chip'),
+            style: ui(TypeSize.small, color: Pal.text2),
+          ),
         ],
       ],
     );
@@ -710,7 +735,11 @@ class TuningChip extends StatelessWidget {
           if (v.startsWith('tuning:')) ctl.loadTuning(int.parse(v.substring(7)));
         },
         itemBuilder: (_) => [
-          PopupMenuItem(enabled: false, height: Sizes.row, child: Text('Pitch labels relative to', style: microStyle())),
+          PopupMenuItem(
+            enabled: false,
+            height: Sizes.row,
+            child: Text('Pitch labels relative to', style: microStyle()),
+          ),
           for (final (v, l, r) in [('abs', 'A = 440 Hz (the board’s D)', PitchRef.absolute), ('root', 'the key’s root', PitchRef.root)])
             PopupMenuItem(
               value: v,
@@ -719,7 +748,11 @@ class TuningChip extends StatelessWidget {
             ),
           if (ctl.canSend && ctl.boardTunings.isNotEmpty) ...[
             const PopupMenuDivider(),
-            PopupMenuItem(enabled: false, height: Sizes.row, child: Text('The board\u2019s tuning', style: microStyle())),
+            PopupMenuItem(
+              enabled: false,
+              height: Sizes.row,
+              child: Text('The board\u2019s tuning', style: microStyle()),
+            ),
             for (final (n, l) in ctl.boardTunings)
               PopupMenuItem(
                 value: 'tuning:$n',
@@ -731,7 +764,10 @@ class TuningChip extends StatelessWidget {
         child: Container(
           height: Sizes.control,
           padding: const EdgeInsets.symmetric(horizontal: Space.s + 2),
-          decoration: BoxDecoration(borderRadius: BorderRadius.circular(Radii.small), color: supported || ctl.playable ? Pal.bg2 : Colors.transparent),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(Radii.small),
+            color: supported || ctl.playable ? Pal.bg2 : Colors.transparent,
+          ),
           alignment: Alignment.center,
           child: face,
         ),
@@ -789,7 +825,12 @@ class SoundName extends StatelessWidget {
             children: [
               if (engine.isNotEmpty)
                 Flexible(
-                  child: Text(engineInfo(engine).label.toLowerCase(), maxLines: 1, overflow: TextOverflow.ellipsis, style: ui(TypeSize.small, color: engineColor(engine))),
+                  child: Text(
+                    engineInfo(engine).label.toLowerCase(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: ui(TypeSize.small, color: engineColor(engine)),
+                  ),
                 ),
               if (ctl.caps?.tag case final tag?) ...[
                 const SizedBox(width: Space.s),
@@ -804,41 +845,42 @@ class SoundName extends StatelessWidget {
         ],
       );
     }
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.baseline,
-      textBaseline: TextBaseline.alphabetic,
-      children: [
-        Flexible(
-          child: Text(
-            ctl.soundTitle,
-            key: const Key('now-preset'),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: ui(size, weight: FontWeight.w500, color: ctl.voiceName.isEmpty ? Pal.text3 : Pal.text1),
-          ),
-        ),
-        if (engine.isNotEmpty) ...[
-          const SizedBox(width: Space.s),
-          Flexible(
-            child: Text(engineInfo(engine).label.toLowerCase(), maxLines: 1, overflow: TextOverflow.ellipsis, style: ui(TypeSize.small, color: engineColor(engine))),
-          ),
-        ],
-        if (ctl.caps?.tag case final tag?) ...[
-          const SizedBox(width: Space.s),
-          // a narrow toolbar cuts it rather than overflow
-          Flexible(
-            child: Text(
-              tag,
-              key: const Key('board-tag'),
-              maxLines: 1,
-              softWrap: false,
-              overflow: TextOverflow.clip,
-              style: microStyle(color: Pal.demo),
+    // short of room (a toolbar at 1000 px) the name alone, whole, beats three cut words
+    return LayoutBuilder(
+      builder: (context, c) {
+        final tight = c.maxWidth < 240;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Flexible(
+              child: Text(
+                ctl.soundTitle,
+                key: const Key('now-preset'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: ui(size, weight: FontWeight.w500, color: ctl.voiceName.isEmpty ? Pal.text3 : Pal.text1),
+              ),
             ),
-          ),
-        ],
-      ],
+            if (engine.isNotEmpty && !tight) ...[
+              const SizedBox(width: Space.s),
+              Text(engineInfo(engine).label.toLowerCase(), maxLines: 1, softWrap: false, style: ui(TypeSize.small, color: engineColor(engine))),
+            ],
+            if (!tight)
+              if (ctl.caps?.tag case final tag?) ...[
+                const SizedBox(width: Space.s),
+                Text(
+                  tag,
+                  key: const Key('board-tag'),
+                  maxLines: 1,
+                  softWrap: false,
+                  style: microStyle(color: Pal.demo),
+                ),
+              ],
+          ],
+        );
+      },
     );
   }
 }

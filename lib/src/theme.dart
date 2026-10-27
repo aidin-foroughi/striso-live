@@ -4,6 +4,7 @@
 // widgets and painters lives here.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:striso_core/striso_core.dart' show ChordRole, TonalFunction;
 
 // ---------------------------------------------------------------------------------------------
@@ -48,7 +49,9 @@ const Map<String, Color> engineColors = {
   'trumpet': Color(0xFF2BB7C9), // cyan, L* 68.5: dE >= 31 from modal, 54 from wind, 70 from the accent (also protan/deutan)
 };
 
-Color engineColor(String engine) => engineColors[engine] ?? Pal.text2;
+/// The design's colour of an engine; an engine outside the eight (one from a slot) gets
+/// [fallback], its voice key's led colour as the board reports it (0xRRGGBB), else text2.
+Color engineColor(String engine, [int? fallback]) => engineColors[engine] ?? (fallback != null ? Color(0xFF000000 | fallback) : Pal.text2);
 
 /// The board: plate, keys, heat ramp, rings and overlays.
 class BoardPal {
@@ -176,9 +179,7 @@ class Timing {
   static const stage = Duration(milliseconds: 320);
   static const strike = Duration(milliseconds: 450);
   static const toastIn = Duration(milliseconds: 180);
-  static const toastOut = Duration(milliseconds: 240);
   static const toast = Duration(milliseconds: 2600);
-  static const toastLong = Duration(milliseconds: 6000);
   static const pulse = Duration(milliseconds: 1000);
   static const sweep = Duration(milliseconds: 600);
   static const reduced = Duration(milliseconds: 80);
@@ -276,7 +277,8 @@ class _RingThumb extends SliderComponentShape {
 
 enum BtnKind { primary, secondary, ghost, danger }
 
-/// 28 px, radius 4, body 500. Disabled: 35% opacity, the reason in the tooltip.
+/// 28 px, radius 4, body 500. Disabled: 35% opacity, the reason in the tooltip. In the Tab order
+/// (Enter or Space presses it) with the focus ring: 1 px accent, 2 px outside.
 class Btn extends StatefulWidget {
   final String label;
   final VoidCallback? onPressed;
@@ -284,29 +286,23 @@ class Btn extends StatefulWidget {
   final bool pressed;
   final String? tooltip;
   final IconData? icon;
-  // legacy sizing knobs, ignored by the spec's fixed 28 px
-  final bool small;
-  final double? fontSize;
-  final EdgeInsets? padding;
-  const Btn(
-    this.label, {
-    super.key,
-    this.onPressed,
-    this.kind = BtnKind.secondary,
-    this.pressed = false,
-    this.tooltip,
-    this.icon,
-    this.small = false,
-    this.fontSize,
-    this.padding,
-  });
+  const Btn(this.label, {super.key, this.onPressed, this.kind = BtnKind.secondary, this.pressed = false, this.tooltip, this.icon});
 
   @override
   State<Btn> createState() => _BtnState();
 }
 
 class _BtnState extends State<Btn> {
-  bool _hover = false;
+  bool _hover = false, _focus = false;
+
+  KeyEventResult _onKey(FocusNode n, KeyEvent e) {
+    if (e is! KeyDownEvent) return KeyEventResult.ignored;
+    if (e.logicalKey != LogicalKeyboardKey.enter && e.logicalKey != LogicalKeyboardKey.space && e.logicalKey != LogicalKeyboardKey.numpadEnter) {
+      return KeyEventResult.ignored;
+    }
+    widget.onPressed?.call();
+    return KeyEventResult.handled;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -322,34 +318,55 @@ class _BtnState extends State<Btn> {
       ),
       BtnKind.danger => (_hover && enabled ? Pal.bg2 : Colors.transparent, Pal.error),
     };
-    Widget w = MouseRegion(
-      cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        onTap: widget.onPressed,
-        child: AnimatedOpacity(
-          duration: Timing.quick,
-          opacity: enabled ? 1 : 0.35,
-          child: AnimatedContainer(
+    Widget w = Focus(
+      canRequestFocus: enabled,
+      onKeyEvent: _onKey,
+      onFocusChange: (f) => setState(() => _focus = f),
+      child: MouseRegion(
+        cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: GestureDetector(
+          onTap: widget.onPressed,
+          child: AnimatedOpacity(
             duration: Timing.quick,
-            height: Sizes.control,
-            padding: EdgeInsets.symmetric(horizontal: widget.label.isEmpty ? 0 : Space.m),
-            constraints: BoxConstraints(minWidth: widget.label.isEmpty ? Sizes.control : 0),
-            decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(Radii.small)),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (widget.icon != null) Icon(widget.icon, size: 16, color: fg),
-                if (widget.icon != null && widget.label.isNotEmpty) const SizedBox(width: Space.xs + 2),
-                if (widget.label.isNotEmpty)
-                  Text(
-                    widget.label,
-                    maxLines: 1,
-                    style: ui(TypeSize.body, color: fg, weight: FontWeight.w500),
-                  ),
-              ],
+            opacity: enabled ? 1 : 0.35,
+            child: AnimatedContainer(
+              duration: Timing.quick,
+              height: Sizes.control,
+              padding: EdgeInsets.symmetric(horizontal: widget.label.isEmpty ? 0 : Space.m),
+              constraints: BoxConstraints(minWidth: widget.label.isEmpty ? Sizes.control : 0),
+              decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(Radii.small)),
+              foregroundDecoration: _focus ? focusRing : null,
+              // the label is one text (it ellipsizes when squeezed, and needs no bounded width:
+              // a toolbar that scrolls, a FittedBox); with an icon, a row. Align with a
+              // widthFactor: as wide as the label, the 28 px tall, centred
+              child: Align(
+                widthFactor: 1,
+                child: widget.label.isEmpty
+                    ? Icon(widget.icon, size: 16, color: fg)
+                    : widget.icon == null
+                    ? Text(
+                        widget.label,
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.ellipsis,
+                        style: ui(TypeSize.body, color: fg, weight: FontWeight.w500),
+                      )
+                    : Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(widget.icon, size: 16, color: fg),
+                          const SizedBox(width: Space.xs + 2),
+                          Text(
+                            widget.label,
+                            maxLines: 1,
+                            softWrap: false,
+                            style: ui(TypeSize.body, color: fg, weight: FontWeight.w500),
+                          ),
+                        ],
+                      ),
+              ),
             ),
           ),
         ),
@@ -357,6 +374,28 @@ class _BtnState extends State<Btn> {
     );
     if (widget.tooltip != null && widget.tooltip!.isNotEmpty) w = Tooltip(message: widget.tooltip!, child: w);
     return Semantics(button: true, enabled: enabled, label: widget.label.isEmpty ? widget.tooltip : widget.label, child: w);
+  }
+}
+
+/// The focus ring (DESIGN.md: 1 px accent, 2 px outside), drawn over a control's box.
+final focusRing = _FocusRing();
+
+class _FocusRing extends Decoration {
+  @override
+  BoxPainter createBoxPainter([VoidCallback? onChanged]) => _FocusRingPainter();
+}
+
+class _FocusRingPainter extends BoxPainter {
+  @override
+  void paint(Canvas c, Offset o, ImageConfiguration cfg) {
+    final r = (o & (cfg.size ?? Size.zero)).inflate(2);
+    c.drawRRect(
+      RRect.fromRectAndRadius(r, const Radius.circular(Radii.small + 2)),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1
+        ..color = Pal.accent,
+    );
   }
 }
 
@@ -427,63 +466,37 @@ class SmallSelect<T> extends StatelessWidget {
   }
 }
 
-/// The closed look of a select.
-class SelectFace extends StatelessWidget {
+/// The closed look of a select: bg2, bg3 under the pointer (as a secondary button).
+class SelectFace extends StatefulWidget {
   final String label;
   final double? width;
   const SelectFace({super.key, required this.label, this.width});
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: width,
-      height: Sizes.control,
-      padding: const EdgeInsets.only(left: Space.s + 2, right: Space.xs + 2),
-      decoration: BoxDecoration(color: Pal.bg2, borderRadius: BorderRadius.circular(Radii.small)),
-      child: Row(
-        mainAxisSize: width == null ? MainAxisSize.min : MainAxisSize.max,
-        children: [
-          Flexible(
-            child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: ui(TypeSize.body)),
-          ),
-          const SizedBox(width: Space.xs),
-          const Icon(Icons.expand_more, size: 16, color: Pal.text3),
-        ],
-      ),
-    );
-  }
+  State<SelectFace> createState() => _SelectFaceState();
 }
 
-/// A 28x16 pill: bg3 off, accent on, a 12 px white knob; the label at the right.
-class Toggle extends StatelessWidget {
-  final bool value;
-  final ValueChanged<bool> onChanged;
-  final String? label;
-  const Toggle({super.key, required this.value, required this.onChanged, this.label});
-
+class _SelectFaceState extends State<SelectFace> {
+  bool _hover = false;
   @override
   Widget build(BuildContext context) {
+    final width = widget.width, label = widget.label;
     return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => onChanged(!value),
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: AnimatedContainer(
+        duration: Timing.quick,
+        width: width,
+        height: Sizes.control,
+        padding: const EdgeInsets.only(left: Space.s + 2, right: Space.xs + 2),
+        decoration: BoxDecoration(color: _hover ? Pal.bg3 : Pal.bg2, borderRadius: BorderRadius.circular(Radii.small)),
         child: Row(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisSize: width == null ? MainAxisSize.min : MainAxisSize.max,
           children: [
-            AnimatedContainer(
-              duration: Timing.quick,
-              width: 28,
-              height: 16,
-              padding: const EdgeInsets.all(2),
-              alignment: value ? Alignment.centerRight : Alignment.centerLeft,
-              decoration: BoxDecoration(color: value ? Pal.accent : Pal.bg3, borderRadius: BorderRadius.circular(Radii.full)),
-              child: Container(
-                width: 12,
-                height: 12,
-                decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-              ),
+            Flexible(
+              child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: ui(TypeSize.body)),
             ),
-            if (label != null) ...[const SizedBox(width: Space.s), Text(label!, style: ui(TypeSize.body, color: Pal.text2))],
+            const SizedBox(width: Space.xs),
+            const Icon(Icons.expand_more, size: 16, color: Pal.text3),
           ],
         ),
       ),
@@ -491,14 +504,64 @@ class Toggle extends StatelessWidget {
   }
 }
 
-/// A checkbox-like option, drawn as a toggle (kept for older call sites).
-class CheckLabel extends StatelessWidget {
-  final String label;
+/// A 28x16 pill: bg3 off, accent on, a 12 px white knob; the label at the right. In the Tab
+/// order (Enter or Space switches it).
+class Toggle extends StatefulWidget {
   final bool value;
   final ValueChanged<bool> onChanged;
-  const CheckLabel(this.label, {super.key, required this.value, required this.onChanged});
+  final String? label;
+  const Toggle({super.key, required this.value, required this.onChanged, this.label});
   @override
-  Widget build(BuildContext context) => Toggle(value: value, onChanged: onChanged, label: label);
+  State<Toggle> createState() => _ToggleState();
+}
+
+class _ToggleState extends State<Toggle> {
+  bool _focus = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = widget.value, label = widget.label;
+    return Focus(
+      onFocusChange: (f) => setState(() => _focus = f),
+      onKeyEvent: (n, e) {
+        if (e is! KeyDownEvent) return KeyEventResult.ignored;
+        final k = e.logicalKey;
+        if (k != LogicalKeyboardKey.enter && k != LogicalKeyboardKey.space && k != LogicalKeyboardKey.numpadEnter) return KeyEventResult.ignored;
+        widget.onChanged(!value);
+        return KeyEventResult.handled;
+      },
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => widget.onChanged(!value),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AnimatedContainer(
+                duration: Timing.quick,
+                width: 28,
+                height: 16,
+                padding: const EdgeInsets.all(2),
+                alignment: value ? Alignment.centerRight : Alignment.centerLeft,
+                decoration: BoxDecoration(color: value ? Pal.accent : Pal.bg3, borderRadius: BorderRadius.circular(Radii.full)),
+                foregroundDecoration: _focus ? focusRing : null,
+                child: Container(
+                  width: 12,
+                  height: 12,
+                  decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                ),
+              ),
+              if (label != null) ...[
+                const SizedBox(width: Space.s),
+                Text(label, maxLines: 1, softWrap: false, style: ui(TypeSize.body, color: Pal.text2)),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// A micro label: group names, column labels.
@@ -516,36 +579,6 @@ class EmptyNote extends StatelessWidget {
   const EmptyNote(this.text, {super.key});
   @override
   Widget build(BuildContext context) => Text(text, style: ui(TypeSize.body, color: Pal.text2));
-}
-
-/// A section title (title 600) with actions at the right.
-class AreaHeadRow extends StatelessWidget {
-  final String title;
-  final List<Widget> left, right;
-  const AreaHeadRow(this.title, {super.key, this.left = const [], this.right = const []});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: Sizes.toolbar,
-      child: Row(
-        children: [
-          if (title.isNotEmpty) Text(title, style: ui(TypeSize.title, weight: FontWeight.w600)),
-          for (final w in left)
-            Padding(
-              padding: const EdgeInsets.only(left: Space.s),
-              child: w,
-            ),
-          const Spacer(),
-          for (final w in right)
-            Padding(
-              padding: const EdgeInsets.only(left: Space.xs),
-              child: w,
-            ),
-        ],
-      ),
-    );
-  }
 }
 
 /// A filled circle of [size] in [color].
