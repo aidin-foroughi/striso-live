@@ -10,6 +10,7 @@ import 'layout.dart';
 import 'modules.dart';
 import 'presets.dart';
 import 'protocol.dart';
+import 'save_touch.dart' show parseConfigReply;
 import 'transport.dart';
 import 'tuning.dart';
 import 'usb_audio_stats.dart';
@@ -342,6 +343,21 @@ class StrisoClient {
     return parseKeyLayout(r.lines);
   }
 
+  /// The config Save to Striso writes, as the firmware builds it (Stcc): its user page with the
+  /// live touch settings, key factors and voice keys. Throws a ConfigError with the reason.
+  Future<Uint8List> getConfigUf2() async {
+    final r = await request(commandChar('c'), (l, s) {
+      if (s['head'] != true) {
+        if (l.startsWith('c err')) return Take.done;
+        if (!l.startsWith('c uf2 ')) return Take.no;
+        s['head'] = true;
+        return Take.more;
+      }
+      return l == 'c end' ? Take.done : Take.more;
+    }, timeout: const Duration(seconds: 5));
+    return parseConfigReply(r.lines);
+  }
+
   /// The board's state in one line (StcY); null without a reply.
   Future<BoardState?> getState({Duration timeout = const Duration(milliseconds: 500)}) async {
     final r = await request(commandChar('Y'), (l, s) {
@@ -379,7 +395,11 @@ class StrisoClient {
   /// ([onProgress]: bytes it has, of the package's) checked against what was sent (zlib crc32 at
   /// each line), then its slot or its reason. It waits as long as the progress lines keep coming
   /// ([stall] between two at most; the board takes about 64 KB/s, the slot's erase first).
-  Future<ModuleInstall> installModule(List<int> package, {void Function(int bytes, int total)? onProgress, Duration stall = const Duration(seconds: 20)}) async {
+  Future<ModuleInstall> installModule(
+    List<int> package, {
+    void Function(int bytes, int total)? onProgress,
+    Duration stall = const Duration(seconds: 20),
+  }) async {
     final total = package.length;
     String? mismatch;
     final r = await request(

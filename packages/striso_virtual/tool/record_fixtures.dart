@@ -1,7 +1,7 @@
 // Records the firmware's console replies that striso_core's parser tests read
-// (packages/striso_core/test/fixtures/): the key layout (StcG), the settings layout (StcX) and the
-// tuning reply (StcN) of every settings-card tuning, from a virtual board (the firmware's own
-// code, striso_virtual).
+// (packages/striso_core/test/fixtures/): the key layout (StcG), the settings layout (StcX), the
+// config Save to Striso writes (Stcc) and the tuning reply (StcN) of every settings-card tuning,
+// from a virtual board (the firmware's own code, striso_virtual).
 // Each file names the firmware it came from; run it again after a firmware change that changes
 // these replies:
 //
@@ -72,6 +72,11 @@ void main(List<String> args) {
     final x = commandChar('X');
     layout.section('X', x, ask(b, x));
     layout.write('$out/settings_layout.txt', fw);
+
+    final config = Fixture('The config Save to Striso writes (Stcc) of a board with the factory settings.');
+    final cc = commandChar('c');
+    config.section('c', cc, ask(b, cc));
+    config.write('$out/config_uf2.txt', fw);
 
     // the settings card's tuning keys, tuning 0..8 (their StcX titles say which is which)
     final tunings = Fixture('The tuning reply (StcN) for each settings-card tuning, chosen with its settings key (StcK); then 12-TET with the fine dial at -31.25 cents.');

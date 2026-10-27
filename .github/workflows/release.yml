@@ -89,7 +89,7 @@ jobs:
       - name: Build
         run: flutter build windows --release
 
-      - name: Smoke run (demo board, no USB, hidden window)
+      - name: Smoke run (Virtual, no USB, hidden window)
         shell: pwsh
         run: |
           $env:STRISO_LIVE_HOME = "$env:RUNNER_TEMP\striso-live-smoke"
@@ -197,7 +197,7 @@ jobs:
       - name: Package (striso_audio and libusb in the bundle, ad hoc signature, zip and dmg)
         run: sh tool/package_macos.sh "$RUNNER_TEMP/libusb/lib/libusb-1.0.0.dylib"
 
-      - name: Smoke run (demo board, no USB)
+      - name: Smoke run (Virtual, no USB)
         # not yet run on a macOS runner: does not block the release until it has proven itself
         continue-on-error: true
         run: |

@@ -2,7 +2,7 @@
 
 ## 1.4.0 (unreleased)
 
-Needs board firmware v2.2.4-338-93 or newer (next5 1532ce2: the key layout StcG, presets, StcW,
+Needs board firmware v2.2.4-338-93 or newer (next5 1532ce2: the key layout StcG, the config Stcc, presets, StcW,
 the dials StcT, the voice keys, the engine slots, Mono, midikey). Voices are selected only with
 StcW, so with an older firmware voice changes don't go through. There is no fallback for it.
 
@@ -10,6 +10,12 @@ StcW, so with an older firmware voice changes don't go through. There is no fall
   chord readout and the key equalizer take the keys from the firmware's key layout (StcG): which
   button each key is, its place and its name. The app keeps no copy of the firmware's tables; it
   remembers the last board's reply, so the board is drawn at the next start before one connects.
+- **Save to Striso writes the firmware's own config.** The board builds the config to save
+  (Stcc: its settings with the touch settings, key factors and voice keys it plays now); the app
+  only copies it to the update drive, after a backup. The app's own config writer is gone.
+- **No demo mode.** Virtual, the firmware on this computer, is the demo; the Dart mock board,
+  `--mock-demo` and the demo labels are gone. `--demo` is now `--virtual`. The tuning menu lists
+  the board's own tunings (StcX) for any board that plays.
 
 - **Shared audio output by default.** Exclusive output was the default, and it played at full
   level whatever the Windows volume said. The output is now shared; Exclusive output is an

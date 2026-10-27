@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Firmware source next to the app, for the cross-checks (optional)
-        # parameter names, settings map, config writer vs tools/striso.py; the tests look in
+        # parameter names, settings map; the tests look in
         # ../striso-control-firmware (or $STRISO_FW_DIR) and skip with a message without it
         continue-on-error: true
         run: git clone --quiet --depth 1 --branch main https://github.com/aidin-foroughi/striso-control-firmware.git ../striso-control-firmware
@@ -40,18 +40,6 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
-
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-
-      - name: Firmware tools venv for the config reference test (tools/striso.py imports pyusb)
-        run: |
-          t=../striso-control-firmware/tools
-          if [ ! -f "$t/requirements.txt" ]; then echo "no $t/requirements.txt: the config reference test will skip"; exit 0; fi
-          python -m venv "$t/.venv"
-          if [ -f "$t/.venv/Scripts/python.exe" ]; then PY="$t/.venv/Scripts/python.exe"; else PY="$t/.venv/bin/python"; fi
-          "$PY" -m pip install --quiet -r "$t/requirements.txt"
 
       - name: Get packages (the app's and each package's own; flutter analyze reads their tests too)
         run: |
@@ -99,7 +87,7 @@ jobs:
         if: runner.os == 'Windows'
         run: flutter build windows --release
 
-      - name: Smoke run (Windows, demo board, no USB, hidden window)
+      - name: Smoke run (Windows, Virtual, no USB, hidden window)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |

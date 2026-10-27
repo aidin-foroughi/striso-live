@@ -137,8 +137,7 @@ One line from the state and the resources, e.g.:
 - The hero knobs are the ones `StcH` names for the current voice (read on connect and when `Stcy`
   moves). A name its parameter list lacks is shown as an error, never replaced by a guess.
 - The settings overlay is drawn from `StcX` (kind, group, engine, LED colour, whether `K` takes
-  it). The Dart mock board (widget tests only) answers `X` with a recording of the firmware's
-  reply.
+  it).
 
 ## Save
 

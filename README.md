@@ -163,9 +163,11 @@ computer down before the first try.
 Writes the touch settings and key factors into the board's settings (preset 1, loaded at
 power-on). The app puts the board into its update mode, lets go of it, then: uses only a drive
 whose `INFO_UF2.TXT` names the Striso (and only when there is exactly one), backs up its
-`CONFIG.UF2`, writes `NEWCFG.UF2` whose blocks all lie inside the config area
-0x08020000-0x08040000 and read back as the intended records (the same bytes as
-`tools/striso.py save_touch`), waits for the restart, reconnects and reads the values back.
+`CONFIG.UF2`, writes the config the firmware built before it went (Stcc: its settings with the
+touch settings, key factors and voice keys it plays now; the same bytes `tools/striso.py
+save-touch` writes) as `NEWCFG.UF2`, after checking that its blocks all lie inside the config area
+0x08020000-0x08040000, waits for the restart, reconnects and reads the values back. The app builds
+no config itself.
 
 ### Layout
 
@@ -196,7 +198,7 @@ resets; Alt+click locks against Mutate.
 | `--virtual` | start Virtual |
 | `--virtual-lib=<path>` | the firmware build Virtual runs: a `striso_virtual.dll` / `.dylib` / `.so` built from any firmware branch (default: the one chosen in Setup, `$STRISO_VIRTUAL_LIB`, the newest in the firmware folder, or `../striso-control-firmware/build/host-virtual/virtual/`) |
 | `--no-usb` | never touch USB |
-| `--fake-save[=fail]` | Save to Striso runs every step except the drive (works in the demo) |
+| `--fake-save[=fail]` | Save to Striso runs every step except the drive |
 | `--hidden` | the window stays out of sight (Windows: minimized and off-screen; macOS: invisible, no Dock icon) |
 | `--smoke=<s>` | log a line and quit after s seconds (implies `--hidden`) |
 | `--no-audio` | no Through PC or Record (the audio library is not loaded) |
@@ -242,16 +244,14 @@ build\striso_audio\Release\striso_audio_check --capture 3 take.wav       # the S
 Run it from the build: `build\windows\x64\runner\Release\StrisoLive.exe` (Windows) or
 `open "build/macos/Build/Products/Release/Striso Live.app"`; `--virtual --no-usb` without a board.
 
-**Firmware cross-checks.** Some `striso_core` tests compare with the firmware source: the config
-writer byte for byte with the firmware's `tools/striso.py` (through its `tools/.venv`, see
-`tools/requirements.txt` there). They look for a
+**Firmware cross-checks.** Some `striso_core` tests compare with the firmware source (the hero
+knob names, the settings map). They look for a
 [striso-control-firmware](https://github.com/aidin-foroughi/striso-control-firmware) checkout in
 `$STRISO_FW_DIR`, else in `../striso-control-firmware` next to this repository, and skip with a
 message when there is none. Both firmware layouts work: the flat one (`voice_*.h`, `fx.h`,
 `synth_control.cpp` at the root) and the split one (`dsp/include/striso_dsp/`, `src/synth/`).
 An engine newer than the checkout (the trumpet before its merge) is skipped with a message; its
-voice key may be missing from the checkout's `synth_control.cpp`. `STRISO_PYTHON` overrides the
-Python for the config test.
+voice key may be missing from the checkout's `synth_control.cpp`.
 
 **CI.** `.github/workflows/striso-live-flutter.yml` runs the tests (with the audio engine's native
 self-test and package tests) and builds both platforms on
@@ -291,7 +291,7 @@ In Virtual the app talks to the firmware over the same console protocol as to th
 
 Latency, MIDI key to sound (estimates, not measured): the controller's USB frame (up to 1 ms), the MIDI driver (WinMM about 1–2 ms with a few ms of jitter on the legacy stack; CoreMIDI about 0.5–1 ms), the firmware's MIDI input in its next 32-frame block, the wait for the next output callback (up to one buffer) and the output itself (WASAPI exclusive at 3 ms: about two buffers): roughly 7–12 ms on Windows exclusive, 6–10 ms on Core Audio at a small buffer. A Striso as the controller sends 7-bit channel pressure and CC74 tilt, and 14-bit pitch bend that carries its tuning and the sideways tilt. The native key stream it uses over its console has 14 bits for all of them.
 
-Tests: `cd packages/striso_virtual && dart test` (the client on the virtual board, save, reset and reconnect, real audio, an engine-level render equal to its golden, loading and unloading libraries) and `flutter test test/virtual_board_test.dart` (the controller on it: as the USB Striso, as Virtual, its sound on the null output with Through PC off, a dead output, MIDI bytes reaching the firmware, a firmware switch, the board changed behind the app's back). They find the library through `$STRISO_VIRTUAL_LIB`, `$STRISO_FW_DIR` or `../striso-control-firmware` and skip without it; the sound tests also need `$STRISO_AUDIO_LIB` (a striso_audio build). For a whole `flutter test` run, point them at the library with `$STRISO_FW_DIR`, not `$STRISO_VIRTUAL_LIB`: under `flutter test`, Virtual is the Dart mock only while `$STRISO_VIRTUAL_LIB` is unset, so with it set the mock tests fail (`build-mock` not found). `test/disconnect_test.dart` checks with fake time that Disconnect leaves no transport, device, MIDI input or timer. CI: `.github/workflows/virtual-board.yml` takes the library from the firmware's release (`striso_virtual-<tag>-windows-x64.zip`, `striso_virtual-<tag>-macos-universal.zip`; the repository variable `FIRMWARE_TAG`, else the latest release), checks it against the release's `SHA256SUMS` and its C API version against `packages/striso_virtual`, and runs both on Windows and macOS. The app does not ship the virtual board: it is a firmware artifact, loaded at run time.
+Tests: `cd packages/striso_virtual && dart test` (the client on the virtual board, save, reset and reconnect, real audio, an engine-level render equal to its golden, loading and unloading libraries) and `flutter test test/virtual_board_test.dart` (the controller on it: as the USB Striso, as Virtual, its sound on the null output with Through PC off, a dead output, MIDI bytes reaching the firmware, a firmware switch, the board changed behind the app's back). They find the library through `$STRISO_VIRTUAL_LIB`, `$STRISO_FW_DIR` or `../striso-control-firmware` and skip without it; the sound tests also need `$STRISO_AUDIO_LIB` (a striso_audio build). There is no Dart simulation of the firmware: every app test that needs a board runs on this library (`test/support/virtual.dart`), as Virtual or as the USB Striso, and skips without it; for a whole `flutter test` run point them at it with `$STRISO_FW_DIR`. `test/disconnect_test.dart` checks with fake time that Disconnect leaves no transport, device, MIDI input or timer. CI: `.github/workflows/virtual-board.yml` takes the library from the firmware's release (`striso_virtual-<tag>-windows-x64.zip`, `striso_virtual-<tag>-macos-universal.zip`; the repository variable `FIRMWARE_TAG`, else the latest release), checks it against the release's `SHA256SUMS` and its C API version against `packages/striso_virtual`, and runs both on Windows and macOS. The app does not ship the virtual board: it is a firmware artifact, loaded at run time.
 
 ## Testing without the UI
 
@@ -354,11 +354,11 @@ over 3 minutes.
 ## Layout
 
 - `packages/striso_core`: pure Dart, no Flutter: protocol and stream parser, client (request
-  queue, coalesced parameter writes, stream watchdog), demo board, key layout, live key state,
+  queue, coalesced parameter writes, stream watchdog), the key layout (StcG), live key state,
   harmony analysis, parameters/presets/undo/morph/C export, key equalizer math, settings-mode
-  map, config UF2 writer and the save flow. `dart test`: ports of the web app's tests, the config
-  writer compared byte for byte with the firmware's `tools/striso.py`, the settings map against
-  the firmware source when it is checked out (see Firmware cross-checks).
+  map, and the save flow (the firmware's Stcc to the update drive). `dart test`: the parsers on
+  the firmware's own replies (`test/fixtures/`), the settings map against the firmware source when
+  it is checked out (see Firmware cross-checks).
 - `packages/striso_audio`: Through PC and Record. `native/`: the C library (miniaudio 0.11.25 with one local patch,
   vendored with its licence in `native/third_party/miniaudio`; the passthrough with its drift servo
   and resampler, the WAV writer, the self-test; `build_macos.sh`, `CMakeLists.txt`), `lib/`: its

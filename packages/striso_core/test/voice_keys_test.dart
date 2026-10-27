@@ -2,7 +2,6 @@
 // (striso-control-firmware virtual/tests/transcripts/voice_keys.txt) and the save that writes the
 // board's edits as they are. The client against the board's voice keys:
 // packages/striso_virtual/test/voice_keys_test.dart.
-import 'dart:typed_data';
 
 import 'package:striso_core/striso_core.dart';
 import 'package:test/test.dart';
@@ -69,30 +68,4 @@ void main() {
     expect(voiceKeyCommand(12, 0x1234), [0x53, 0x74, 0x63, 0x41, 12, 0x34, 0x12]);
     expect(() => voiceKeyCommand(12, 0x10000), throwsRangeError);
   });
-
-  test('the save writes the board\'s voice-key edits as they are, and only voice-key records', () {
-    final values = TouchValues(
-      [('pressure', 1.0), ('velocity', 1.0), ('tilt', 1.0), ('bend', 0.25), ('threshold', 0.0)],
-      [for (final n in keyNamesForTest()) (n, 1.0)],
-    );
-    final current = configUf2([('sGv13a', 'sax'), ('iGoct', '1')]);
-    final edits = parseVoiceKeys(firmwareStca)!.edits;
-    final built = buildConfig(current, values, voiceKeys: [...edits, const ConfigEdit('default', 'sGv13a')]);
-    final recs = {for (final (k, v) in configParse(built.data)) k.trim(): v.trim()};
-    expect(recs['sGv12a'], 'bowed');
-    expect(recs['sGv12p'], 'cello');
-    expect(recs.containsKey('sGv24a'), isTrue);
-    expect(recs['sGv24a'], '', reason: 'blank: cleared, not the default');
-    expect(recs.containsKey('sGv13a'), isFalse, reason: 'default: the record dropped');
-    expect(recs['iGoct'], '1', reason: 'the rest stays');
-    expect(() => buildConfig(current, values, voiceKeys: [const ConfigEdit('set', 'iGpreset', '3')]), throwsA(isA<ConfigError>()));
-    expect(() => buildConfig(current, values, voiceKeys: [const ConfigEdit('drop', 'sGv12a')]), throwsA(isA<ConfigError>()));
-    expect(built.data, isA<Uint8List>());
-  });
-}
-
-// the 61 key names (F_1 .. B_4) as the board lists its key factors
-List<String> keyNamesForTest() {
-  const notes = ['C_', 'Db', 'C#', 'D_', 'Eb', 'D#', 'E_', 'F_', 'Gb', 'F#', 'G_', 'Ab', 'G#', 'A_', 'Bb', 'A#', 'B_'];
-  return [for (var n = 0; n < 61; n++) '${notes[(n + 7) % 17]}${(n + 7) ~/ 17 + 1}'];
 }

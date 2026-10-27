@@ -57,22 +57,3 @@ String firmwareLayout() {
 String get firmwareMissing =>
     'firmware source not found at ${firmwarePath()}: set STRISO_FW_DIR to a striso-control-firmware '
     'checkout, or check it out next to striso-live';
-
-/// A Python that can import the firmware's tools/striso.py (pyusb, libusb_package): $STRISO_PYTHON,
-/// else the firmware's tools/.venv.
-String? firmwarePython() {
-  final fw = firmwareDir();
-  if (fw == null || !File('${fw.path}/tools/striso.py').existsSync()) return null;
-  final env = Platform.environment['STRISO_PYTHON'];
-  if (env != null && env.isNotEmpty) return env;
-  for (final p in ['${fw.path}/tools/.venv/Scripts/python.exe', '${fw.path}/tools/.venv/bin/python']) {
-    if (File(p).existsSync()) return p;
-  }
-  return null;
-}
-
-/// Skip reason for tests that need tools/striso.py and its Python.
-String get pythonMissing =>
-    'tools/striso.py with a Python not found: needs ${firmwarePath()}/tools/striso.py and its '
-    'tools/.venv (python -m venv tools/.venv && tools/.venv/.../pip install -r tools/requirements.txt), '
-    'or STRISO_PYTHON; set STRISO_FW_DIR for another firmware checkout';

@@ -221,7 +221,6 @@ the build chooser (under the Virtual control)
   manifest: platform, API, sha256), unpacks it into the firmware folder and plays it. A bare
   library file is copied in under its folder's name. **Open the firmware folder** shows where a
   build goes by hand.
-- In the Dart mock (widget tests, `--mock-demo`) the chooser offers "The Dart mock".
 
 Setup › Firmware shows the running firmware: the Striso's version, or Virtual's build title with
 its version, with a copy button. Nothing is chosen there.

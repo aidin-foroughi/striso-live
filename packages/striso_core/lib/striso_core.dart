@@ -4,7 +4,6 @@ library;
 
 export 'src/board_state.dart';
 export 'src/client.dart';
-export 'src/config_uf2.dart';
 export 'src/dials.dart';
 export 'src/harmony.dart';
 export 'src/layout.dart';

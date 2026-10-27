@@ -211,23 +211,25 @@ void main() {
   });
 
   group('save, reset, reconnect', skip: skip, () {
-    test('Save to Striso: StcB, the update drive, saveTouch, the restart, the values read back', () async {
+    test('Save to Striso: Stcc, StcB, the update drive, saveTouch, the restart, the values read back', () async {
       final b = VirtualBoard()..startRealtime();
       addTearDown(b.dispose);
       var c = await _connect(b);
       final touch = (await c.getParams(Target.touch))!.params;
       final keys = (await c.getParams(Target.keys))!.params;
-      final values = TouchValues(
-        [for (final p in touch) (p.name, p.name == 'pressure' ? 1.75 : p.value)],
-        [for (final p in keys) (p.name, p.name == 'D_3' ? 1.4 : p.value)],
-      );
+      c.setParam(Target.touch, touch.indexWhere((p) => p.name == 'pressure'), 1.75);
+      c.setParam(Target.keys, keys.indexWhere((p) => p.name == 'D_3'), 1.4);
+      await c.getParams(Target.keys); // the writes landed
+      // the firmware builds the config from what it plays now
+      final config = await c.getConfigUf2();
+      expect(config.length % 512, 0);
       await c.send(Cmd.bootloader());
       await c.disconnect();
       await _until(() => b.inBootloader);
       final drive = b.drivePath!;
       final backups = Directory.systemTemp.createTempSync('sv_backup');
       addTearDown(() => backups.deleteSync(recursive: true));
-      final res = await saveTouch(values, backupDir: backups.path, roots: () => [drive], driveTimeout: const Duration(seconds: 5));
+      final res = await saveTouch(config, backupDir: backups.path, roots: () => [drive], driveTimeout: const Duration(seconds: 5));
       expect(res.ok, isTrue, reason: res.message);
       await _until(() => b.attached);
       c = await _connect(b);
@@ -429,7 +431,7 @@ void main() {
 
   // The voice keys (Stca, StcA): an engine from a slot (a package of an engine the build doesn't
   // link in, the first of these the board takes) put on a free key, played from it, the board's
-  // edits saved through its drive with saveTouch, and the key still holds it after the restart; a
+  // config (Stcc) saved through its drive with saveTouch, and the key still holds it after the restart; a
   // board without the module shows the key missing.
   final candidates = [for (final id in ['reed', 'clarinet', 'flute', 'doublereed', 'sine']) ?_package(id)];
   test('voice keys: an engine from a slot on a key, kept by Save to Striso, missing without it', skip: skip ?? (candidates.isEmpty ? 'no package of an engine the build lacks (reed.awvapkg, clarinet.awvapkg, ... in \$STRISO_PACKAGE_DIR)' : null), () async {
@@ -496,13 +498,15 @@ void main() {
     // Save to Striso: the board's edits, through the drive; the restart; the key holds the engine
     final touch = (await c.getParams(Target.touch))!.params;
     final keys = (await c.getParams(Target.keys))!.params;
-    final values = TouchValues([for (final p in touch) (p.name, p.value)], [for (final p in keys) (p.name, p.value)]);
+    expect(touch, isNotEmpty);
+    expect(keys, isNotEmpty);
+    final config = await c.getConfigUf2(); // the voice keys' edits included, as the firmware keeps them
     await c.send(Cmd.bootloader());
     await c.disconnect();
     await _until(() => b.inBootloader);
     final backups = Directory.systemTemp.createTempSync('sv_backup');
     addTearDown(() => backups.deleteSync(recursive: true));
-    final res = await saveTouch(values, voiceKeys: vk.edits, backupDir: backups.path, roots: () => [b.drivePath!], driveTimeout: const Duration(seconds: 5));
+    final res = await saveTouch(config, backupDir: backups.path, roots: () => [b.drivePath!], driveTimeout: const Duration(seconds: 5));
     expect(res.ok, isTrue, reason: res.message);
     await _until(() => b.attached);
     c = await _connect(b);

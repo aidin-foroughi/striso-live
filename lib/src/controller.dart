@@ -2069,8 +2069,21 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     await refreshParams([2, 3]);
     // and the voice keys' edits as the board lists them now (Stca)
     if (voiceKeys.slots.isNotEmpty) voiceKeys = await c.getVoiceKeys() ?? voiceKeys;
-    final values = TouchValues([for (final p in params[2]!.params) (p.name, p.value)], [for (final p in params[3]!.params) (p.name, p.value)]);
-    final expect = {2: values.touch, 3: values.keys};
+    final expect = {
+      for (final t in [2, 3]) t: [for (final p in params[t]!.params) (p.name, p.value)],
+    };
+    // the config to write, as the firmware builds it from what it plays now (Stcc)
+    final Uint8List config;
+    try {
+      config = await c.getConfigUf2();
+    } on ConfigError catch (e) {
+      saving = false;
+      log('save: $e', LogKind.err);
+      _setSaveStatus('Not saved: $e', 'err');
+      return;
+    }
+    final keyEdits = voiceKeys.edits;
+    if (keyEdits.isNotEmpty) log('saving voice keys: ${keyEdits.join('; ')}');
     _setSaveStatus('Putting the Striso into update mode…');
     log('saving touch settings${options.fakeSave != null ? ' (fake save: ${options.fakeSave})' : ''}');
     // the board reboots into its bootloader: the write may fail as it goes
@@ -2080,11 +2093,8 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
       } catch (_) {}
     }
     await session.beginReboot('save');
-    final keyEdits = voiceKeys.edits;
-    if (keyEdits.isNotEmpty) log('saving voice keys: ${keyEdits.join('; ')}');
     final res = await saveTouch(
-      values,
-      voiceKeys: keyEdits,
+      config,
       backupDir: backupDir,
       progress: (t) => _setSaveStatus(t),
       fake: options.fakeSave,
