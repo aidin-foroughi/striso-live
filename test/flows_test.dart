@@ -35,7 +35,7 @@ Future<void> runFor(WidgetTester tester, int ms) async {
 }
 
 Future<void> untilLive(WidgetTester tester, AppController ctl) async {
-  for (var i = 0; i < 60 && (ctl.listsLoading || ctl.dot != Dot.demo); i++) {
+  for (var i = 0; i < 60 && (ctl.listsLoading || ctl.dot != Dot.virtual); i++) {
     await runFor(tester, 50);
   }
   expect(ctl.connected, isTrue);
@@ -106,7 +106,7 @@ void main() {
     expect(ctl.isVirtual, isTrue);
     expect(ctl.connectLabel, 'Stop');
     expect(find.widgetWithText(Btn, 'Stop'), findsOneWidget);
-    expect(find.byKey(const Key('demo-chip')), findsOneWidget);
+    expect(find.byKey(const Key('board-tag')), findsOneWidget);
     // the header names the build and reopens the chooser
     expect(tester.widget<Btn>(find.byKey(const Key('mode-virtual'))).label, 'Virtual · Dart mock ▾');
     expect(find.byKey(const Key('build-swap')), findsNothing, reason: 'no build played before this one');

@@ -19,8 +19,7 @@ abstract class UsbBackend {
   Future<void> dispose();
 }
 
-/// Where the virtual Striso comes from (the striso_virtual library, or the Dart mock in widget
-/// tests). It keeps one instrument across a reboot (Save, a reset) and lets it go on [stop].
+/// Where the virtual Striso comes from (the striso_virtual library). It keeps one instrument across a reboot (Save, a reset) and lets it go on [stop].
 abstract class VirtualRuntime {
   /// A Board for the instrument: the running one again (after a reboot), else a new one. Throws
   /// [VirtualError] when the library is missing or refused.
@@ -367,8 +366,8 @@ class Session {
     unawaited(_end());
     if (s is Rebooting) return; // expected
     final unplugged = reason.code == UsbErrorCode.unplugged;
-    final auto = b.mode == Mode.striso && intent == 'connected';
-    if (b.mode == Mode.striso) {
+    final auto = b.caps.usb && intent == 'connected';
+    if (b.caps.usb) {
       if (unplugged) lastPresent = false;
       machine.on(LostEv(unplugged: unplugged, note: reason.message));
       if (unplugged) {
@@ -378,7 +377,7 @@ class Session {
         if (auto) _wait('connection lost', reconnectDelay);
       }
     } else {
-      // the virtual board restarted (a reset): it comes back by itself
+      // a board on this computer restarted (a reset): it comes back by itself
       machine.on(const RebootEv('reset'));
       unawaited(_comeBackVirtual());
     }

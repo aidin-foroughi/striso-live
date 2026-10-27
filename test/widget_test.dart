@@ -40,7 +40,7 @@ Future<void> startDemo(WidgetTester tester, AppController ctl) async {
   }
   await tester.tap(find.byKey(const Key('build-mock')));
   // the demo answers over timers: connect, version, voices, the four lists
-  for (var i = 0; i < 60 && (ctl.listsLoading || ctl.dot != Dot.demo || ctl.params[3]!.params.isEmpty); i++) {
+  for (var i = 0; i < 60 && (ctl.listsLoading || ctl.dot != Dot.virtual || ctl.params[3]!.params.isEmpty); i++) {
     await runFor(tester, 50);
   }
   expect(ctl.connected, isTrue);
@@ -82,7 +82,7 @@ void main() {
     await startDemo(tester, ctl);
     await settle(tester);
     expect(find.text('Plug in your Striso'), findsNothing);
-    expect(find.byKey(const Key('demo-chip')), findsOneWidget);
+    expect(find.byKey(const Key('board-tag')), findsOneWidget);
     expect(find.byKey(const Key('now-preset')), findsOneWidget);
     expect(tester.widget<Text>(find.byKey(const Key('now-preset'))).data, 'classic');
     // the voice browser: the engine row and the current engine's presets

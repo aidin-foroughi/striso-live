@@ -234,7 +234,7 @@ class _AudioSectionState extends State<AudioSection> {
         ];
         final rec = a.recording;
         // Virtual: the output alone (its source is the virtual Striso); Through PC is the Striso's
-        final virtual = widget.ctl.isVirtual;
+        final virtual = widget.ctl.caps?.usb == false;
         final body = Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [

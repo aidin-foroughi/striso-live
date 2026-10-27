@@ -1,7 +1,7 @@
 // Striso Live: the desktop companion for the Striso board.
 //
 // Command line:
-//   --demo            start Virtual (the build chosen, or the Dart mock with --mock-demo)
+//   --virtual         start Virtual (the build chosen)
 //   --no-usb          never touch USB (smoke tests, screenshots)
 //   --fake-save[=fail] Save to Striso goes through every step except the drive
 //   --no-audio        no Through PC / Record (the audio library is not loaded)

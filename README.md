@@ -193,9 +193,8 @@ resets; Alt+click locks against Mutate.
 
 | flag | |
 |---|---|
-| `--demo` | start Virtual |
+| `--virtual` | start Virtual |
 | `--virtual-lib=<path>` | the firmware build Virtual runs: a `striso_virtual.dll` / `.dylib` / `.so` built from any firmware branch (default: the one chosen in Setup, `$STRISO_VIRTUAL_LIB`, the newest in the firmware folder, or `../striso-control-firmware/build/host-virtual/virtual/`) |
-| `--mock-demo` | Virtual on the Dart mock board instead (no native library) |
 | `--no-usb` | never touch USB |
 | `--fake-save[=fail]` | Save to Striso runs every step except the drive (works in the demo) |
 | `--hidden` | the window stays out of sight (Windows: minimized and off-screen; macOS: invisible, no Dock icon) |
@@ -241,7 +240,7 @@ build\striso_audio\Release\striso_audio_check --capture 3 take.wav       # the S
 ```
 
 Run it from the build: `build\windows\x64\runner\Release\StrisoLive.exe` (Windows) or
-`open "build/macos/Build/Products/Release/Striso Live.app"`; `--demo --no-usb` without a board.
+`open "build/macos/Build/Products/Release/Striso Live.app"`; `--virtual --no-usb` without a board.
 
 **Firmware cross-checks.** Some `striso_core` tests compare with the firmware source: the config
 writer byte for byte with the firmware's `tools/striso.py` (through its `tools/.venv`, see

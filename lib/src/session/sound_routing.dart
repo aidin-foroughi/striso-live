@@ -68,8 +68,7 @@ class SoundRouting {
     if (r != AudioRoute.source) v = null;
     if (!identical(v, _v)) _swap(v);
     audio.setRoute(r);
-    // MIDI inputs open while Virtual is live (into the board's own USB-MIDI input; the Dart mock
-    // of the widget tests has none: the inputs still open, their bytes go nowhere)
+    // MIDI inputs open while Virtual is live (into the board's own USB-MIDI input)
     final midiWanted = r == AudioRoute.source && s is Live;
     if (midiWanted != _midiOn) {
       _midiOn = midiWanted;

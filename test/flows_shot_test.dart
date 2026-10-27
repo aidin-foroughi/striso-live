@@ -118,7 +118,7 @@ void main() {
     await run(6);
     await save('chooser');
     await tester.tap(find.byKey(const Key('build-mock')));
-    for (var i = 0; i < 60 && (ctl.listsLoading || ctl.dot != Dot.demo); i++) {
+    for (var i = 0; i < 60 && (ctl.listsLoading || ctl.dot != Dot.virtual); i++) {
       await run(2);
     }
     await save('virtual');

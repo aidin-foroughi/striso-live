@@ -326,7 +326,7 @@ class ModeControl extends StatelessWidget {
                 kind: BtnKind.ghost,
                 pressed: playing == Mode.virtual,
                 tooltip: playing == Mode.virtual
-                    ? 'Virtual plays ${ctl.virtual.isMock ? 'the Dart mock' : (ctl.virtual.buildTitle ?? 'a build')}: pick another build'
+                    ? 'Virtual plays ${ctl.virtual.buildTitle ?? 'a build'}: pick another build'
                     : 'Virtual: the Striso firmware on this computer, played from MIDI controllers (your Striso too) and the on-screen board. Pick the build to play.',
                 onPressed: () => showBuildChooser(ctx, ctl),
               ),

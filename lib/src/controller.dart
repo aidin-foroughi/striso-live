@@ -40,7 +40,7 @@ class Pulse extends ChangeNotifier {
   void ping() => notifyListeners();
 }
 
-enum Dot { off, on, demo, busy }
+enum Dot { off, on, virtual, busy }
 
 /// A fix the user can click on a problem or the start screen (docs/flows.md 7).
 enum Fix { connectStriso, connectNow, playVirtual, pickBuild, installBuild, openFolder, copyVersion, getRuntime, clearQuarantine }
@@ -213,22 +213,20 @@ class SettingsVoice {
 }
 
 class AppOptions {
-  final bool demo, noUsb, noAudio;
+  final bool virtual, noUsb, noAudio;
   final String? fakeSave; // null, 'ok' or 'fail'
   final bool reducedMotion;
 
   /// Virtual: a firmware build's striso_virtual (--virtual-lib=PATH, else STRISO_VIRTUAL_LIB or
-  /// the one found); --mock-demo: the Dart mock instead.
+  /// the one found).
   final String? virtualLib;
-  final bool mockDemo;
   const AppOptions({
-    this.demo = false,
+    this.virtual = false,
     this.noUsb = false,
     this.noAudio = false,
     this.fakeSave,
     this.reducedMotion = false,
     this.virtualLib,
-    this.mockDemo = false,
   });
 
   static AppOptions parse(List<String> args) {
@@ -239,13 +237,12 @@ class AppOptions {
       if (a.startsWith('--virtual-lib=')) vlib = a.substring(14);
     }
     return AppOptions(
-      demo: args.contains('--demo'),
+      virtual: args.contains('--virtual'),
       noUsb: args.contains('--no-usb'),
       noAudio: args.contains('--no-audio'),
       fakeSave: fake,
       reducedMotion: args.contains('--reduced-motion'),
       virtualLib: vlib,
-      mockDemo: args.contains('--mock-demo'),
     );
   }
 }
@@ -339,7 +336,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   /// MIDI inputs for the virtual Striso (null without the native library).
   MidiInputs? midi;
 
-  /// The virtual Striso (the striso_virtual library chosen, or the Dart mock in widget tests).
+  /// The virtual Striso (the striso_virtual library chosen).
   late final VirtualStrisoRuntime virtual;
 
   bool saving = false, listsLoading = false;
@@ -412,7 +409,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     audio = ThroughPc(
       backend: audioBackend,
       prefs: AudioPrefs.fromJson(audioJson),
-      boardOnUsb: () => (client != null && mode == Mode.striso) || session.lastPresent == true,
+      boardOnUsb: () => session.board?.caps.usb == true || session.lastPresent == true,
       onPrefs: (p) => store.set('audio', p.toJson()),
       log: (s) => log(s),
       warn: (s) => toast(s, 'warn'),
@@ -441,7 +438,6 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     virtual = VirtualStrisoRuntime(
       libPath: libPath,
       title: libPath == null ? null : buildOf(libPath).title,
-      mockOnly: options.mockDemo,
       flashFile: virtualDir == null ? null : '$virtualDir${Platform.pathSeparator}flash.bin',
       moduleStore: virtualDir == null ? null : '$virtualDir${Platform.pathSeparator}module_store.bin',
       log: (s) => log(s),
@@ -473,7 +469,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
       keyRoot = (k['root'] as num?)?.toInt() ?? 0;
       keyScale = (k['scale'] as String?) ?? 'off';
       if (!scales.containsKey(keyScale)) keyScale = 'off';
-    } else if (options.demo) {
+    } else if (options.virtual) {
       keyScale = 'major';
     }
     currentKey = makeKey(keyRoot, keyScale);
@@ -500,7 +496,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   /// At start: what the user left on (the Striso connected, or Virtual), else nothing.
   Future<void> start() async {
     audio.start();
-    await session.start(virtualFirst: options.demo);
+    await session.start(virtualFirst: options.virtual);
   }
 
   @override
@@ -584,7 +580,9 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
 
   /// The mode of the session (connecting, live, rebooting, failed), or null when idle.
   Mode? get mode => session.mode;
-  bool get isVirtual => mode == Mode.virtual;
+
+  /// What the board that plays can do (null: none plays).
+  BoardCapabilities? get caps => session.board?.caps;
 
   /// The instrument that plays (or is starting, or restarts): what the header's control fills.
   /// Null when nothing does, a failed one included.
@@ -623,7 +621,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
 
   /// The status dot, from the state.
   Dot get dot => switch (state) {
-    Live(mode: Mode.virtual) => Dot.demo,
+    Live(mode: Mode.virtual) => Dot.virtual,
     Live() => Dot.on,
     Connecting() || Waiting() || Rebooting() => Dot.busy,
     Failed(kind: FailKind.busy) => Dot.busy,
@@ -861,11 +859,8 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   /// Ends the session (tests, the window closing).
   Future<void> endSession() => session.disconnect();
 
-  /// The Dart mock behind Virtual (widget tests).
-  MockBoard? get demoBoard => virtual.mock;
-
   /// The board the board view plays by hand (Virtual).
-  PlayableBoard? get playBoard => isVirtual && connected ? session.board?.hand : null;
+  PlayableBoard? get playBoard => connected ? session.board?.hand : null;
 
   void _route() {
     if (_disposed) return;
@@ -970,9 +965,10 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   Future<bool> _play(String path, {String? voice, String? firstOf}) async {
     if (saving) return false;
     final b = buildOf(path);
-    final key = isVirtual && canSend ? settingsLayout.voiceKeyOf(currentEngine) : null;
+    final onVirtual = virtual.instrument != null && canSend;
+    final key = onVirtual ? settingsLayout.voiceKeyOf(currentEngine) : null;
     final was = _playedSetup ?? (virtual.lib != null && virtual.libPath != null ? VirtualSetup(virtual.libPath!) : null);
-    final wasNow = was == null ? null : VirtualSetup(was.build, voice: isVirtual && voiceName.isNotEmpty ? voiceName : null);
+    final wasNow = was == null ? null : VirtualSetup(was.build, voice: onVirtual && voiceName.isNotEmpty ? voiceName : null);
     if (state.mode != null) await session.disconnect(why: IdleWhy.modeSwitch);
     final f = virtual.selectLibrary(b.path, title: b.title);
     if (f != null) log('virtual firmware: ${b.title} refused: ${f.message}', LogKind.err);
@@ -1039,7 +1035,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   bool get modulesBusy => moduleUpload.value != null || _erasing;
 
   /// The board that plays in words, for the engine slots.
-  String get slotTarget => isVirtual ? 'Virtual' : 'the Striso';
+  String get slotTarget => caps?.name ?? 'the Striso';
 
   Future<void> _readSlots(StrisoClient c) async {
     final s = await c.listModuleSlots();
@@ -1115,14 +1111,15 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     }
     final d = r.done!;
     if (r.error != null) log('engines: ${r.error}', LogKind.err);
-    if (isVirtual && restart && identical(c, client)) {
-      _moduleSay('${d.id} ${d.version} is in slot ${d.slot}; Virtual started again with it');
+    final restarts = caps?.restarts == true;
+    if (restarts && restart && identical(c, client)) {
+      _moduleSay('${d.id} ${d.version} is in slot ${d.slot}; $slotTarget started again with it');
       return _restartVirtual(firstOf: d.id);
     }
     _moduleSay(
-      isVirtual
+      restarts
           ? '${d.id} ${d.version} is in slot ${d.slot}'
-          : '${d.id} ${d.version} is in slot ${d.slot}: it plays once the Striso starts again (unplug it and plug it back in)',
+          : '${d.id} ${d.version} is in slot ${d.slot}: it plays once $slotTarget starts again (unplug it and plug it back in)',
     );
     notifyListeners();
     return true;
@@ -1149,26 +1146,22 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
       notifyListeners();
       return false;
     }
-    if (isVirtual && identical(c, client)) {
-      _moduleSay('Slot $slot erased ($what); Virtual started again without it');
+    if (caps?.restarts == true && identical(c, client)) {
+      _moduleSay('Slot $slot erased ($what); $slotTarget started again without it');
       return _restartVirtual();
     }
-    _moduleSay('Slot $slot erased: $what is gone once the Striso starts again');
+    _moduleSay('Slot $slot erased: $what is gone once $slotTarget starts again');
     notifyListeners();
     return true;
   }
 
-  /// Virtual again on the build it plays (the Dart mock: a fresh one on the same slots), so its
-  /// firmware loads the slots as they are now; then [firstOf]'s first voice, else the voice it
-  /// was on.
+  /// Virtual again on the build it plays, so its firmware loads the slots as they are now; then
+  /// [firstOf]'s first voice, else the voice it was on.
   Future<bool> _restartVirtual({String? firstOf}) async {
     final voice = voiceName.isNotEmpty ? voiceName : null;
     final b = virtual.libPath;
-    if (!virtual.mockOnly && b != null) return _play(b, voice: voice, firstOf: firstOf);
-    await session.disconnect(why: IdleWhy.modeSwitch);
-    if (!await session.connect(Mode.virtual)) return false;
-    await _goTo(voice: voice, firstOf: firstOf);
-    return true;
+    if (b == null) return false;
+    return _play(b, voice: voice, firstOf: firstOf);
   }
 
   /// Installs a build (a release zip, or a library) into the firmware folder, then plays it.
@@ -1216,7 +1209,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   @override
   Future<FailEv?> boardUp(Board b, bool Function() current) async {
     final c = b.client;
-    final usbBoard = b.mode == Mode.striso;
+    final usbBoard = b.caps.usb;
     if (usbBoard) {
       if (_traceClock == null || _traceClock!.elapsedMilliseconds > 60000) _trace('connect', start: true);
       c.trace = (l) => _trace(l);
@@ -1252,7 +1245,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     final hero = count == null ? null : await c.getHeroes();
     if (!current()) return null;
     if (layout == null || count == null || hero == null) {
-      return FailEv(FailKind.needsUpdate, b.mode == Mode.virtual ? 'This build is too old for Striso Live (found ${v.fw}).' : 'This Striso needs a firmware update to work with Striso Live (found ${v.fw}).');
+      return FailEv(FailKind.needsUpdate, '${b.caps.outdated} (found ${v.fw}).');
     }
     settingsLayout = layout;
     heroes = hero;
@@ -1273,7 +1266,8 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   @override
   void boardLive(Board b) {
     final c = b.client;
-    if (b.mode == Mode.striso) _trace('live');
+    final usbBoard = b.caps.usb;
+    if (usbBoard) _trace('live');
     waveT = clockMs();
     // the parameter lists load behind the live view (the pollers wait their turn)
     listsLoading = true;
@@ -1281,7 +1275,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     bool same() => identical(client, c);
     listsReady = refreshParams(allTargets, voiceChanged: true)
         .then((_) async {
-          if (b.mode == Mode.striso && same()) _trace('all lists');
+          if (usbBoard && same()) _trace('all lists');
           if (same()) _offerRestore();
           if (same()) await refreshTuning();
           // the board's presets after the lists (a firmware without them answers nothing)
@@ -1299,11 +1293,12 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     // the board's change counter: anything that changed on the instrument (Settings + a key, the
     // octave buttons) or anywhere else is read again from the board
     session.every(Res.statePoll, const Duration(milliseconds: 250), () => _pollState(c), what: 'Stcy every 250 ms');
-    if (b.mode == Mode.striso) unawaited(_pollUsbAudio(c));
+    if (usbBoard) unawaited(_pollUsbAudio(c));
     _scheduleTuningPoll();
-    // the first time Virtual plays: every MIDI input there is plays it (the picker changes that)
+    // the first time a board with a MIDI input plays: every MIDI input there is plays it (the
+    // picker changes that)
     final m = midi;
-    if (b.mode == Mode.virtual && m != null && store.raw('midi') == null) {
+    if (b.caps.midiIn && m != null && store.raw('midi') == null) {
       for (final d in m.devices) {
         if (d.present && !d.isVirtual) m.select(d.id, true);
       }
@@ -1853,18 +1848,16 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     return quarterToneLabel(labelPitch(id), n.letter, nominalMidi: n.midi);
   }
 
-  /// Demo: load one of the settings card's tunings on the simulated board, and the fine tune.
-  void demoTuning(int n, {double? fineCents}) {
-    final b = playBoard;
-    if (b is! MockBoard) {
-      // the virtual board: the settings card's tuning keys (12-TET, tunings 1..8)
-      final key = settingsLayout.keys.entries.where((e) => e.value.tuningIndex == n).firstOrNull?.key;
-      if (b != null && key != null) unawaited(pressSettingsKey(key));
-      return;
-    }
-    b.loadTuning(n);
-    if (fineCents != null) b.fineTune(fineCents);
-    refreshTuning();
+  /// The settings card's tunings as the board lists them (StcX): index and name.
+  List<(int, String)> get boardTunings => [
+    for (final k in settingsLayout.keys.values)
+      if (k.tuningIndex >= 0) (k.tuningIndex, k.title.contains(': ') ? k.title.substring(k.title.indexOf(': ') + 2) : k.title),
+  ];
+
+  /// Loads one of the settings card's tunings: its settings key, pressed on the board.
+  void loadTuning(int n) {
+    final key = settingsLayout.keys.entries.where((e) => e.value.tuningIndex == n).firstOrNull?.key;
+    if (canSend && key != null) unawaited(pressSettingsKey(key));
   }
 
   void setKey({int? root, String? scale}) {
@@ -2021,9 +2014,8 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
 
   /// null when a save may start (the UI then asks for confirmation), else why not.
   String? canSave() {
-    final mockOnly = isVirtual && virtual.isMock;
-    if (!canSend || (mockOnly && options.fakeSave == null)) {
-      toast(mockOnly ? 'The demo keeps its settings until you restart it' : 'Connect the Striso first', 'warn');
+    if (!canSend) {
+      toast('Connect the Striso first', 'warn');
       return 'not connected';
     }
     if (params[2]!.params.isEmpty && params[3]!.params.isEmpty) {
@@ -2041,7 +2033,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     if (c == null || b == null || state is! Live) return;
     saving = true;
     notifyListeners();
-    final virtualSave = b.mode == Mode.virtual && !virtual.isMock;
+    final keptHere = b.caps.keptHere;
     // the values as the board lists them right now
     await refreshParams([2, 3]);
     // and the voice keys' edits as the board lists them now (Stca)
@@ -2065,13 +2057,13 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
       backupDir: backupDir,
       progress: (t) => _setSaveStatus(t),
       fake: options.fakeSave,
-      roots: virtualSave ? () => b.saveRoots ?? const [] : null,
+      roots: keptHere ? () => b.saveRoots ?? const [] : null,
     );
     saving = false;
     log('save: ${res.ok ? 'ok' : 'failed'}: ${res.message}', res.ok ? LogKind.info : LogKind.err);
     _setSaveStatus(res.ok ? 'Saved. Reconnecting…' : 'Saving failed. Reconnecting…', res.ok ? '' : 'err');
     final back = await session.comeBack();
-    if (virtualSave && back) virtual.keepFlash(); // its settings, kept on this computer
+    if (keptHere && back) virtual.keepFlash(); // its settings, kept on this computer
     if (!res.ok) {
       final msg = 'Saving failed: ${res.message}${res.backupPath != null ? '. The previous settings are backed up in ${res.backupPath}.' : ''}';
       _setSaveStatus(msg, 'err');
@@ -2330,7 +2322,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   bool get monoSwitchable => canSend && settingsLayout[monoKey]?.switchable == true;
   Future<bool> toggleMono() => pressSettingsKey(monoKey);
 
-  /// A click on a key on the board (not in demo play).
+  /// A click on a key on the board (not played by hand).
   bool boardSelect(int id, {bool overlays = true}) {
     if (overlays && settingsClick(id)) return true;
     eqSelect(id);
@@ -2842,7 +2834,7 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
     if (identical(client, cl) && ch >= 0x80) await syncVoice();
   }
 
-  // demo play -------------------------------------------------------------------------------------
+  // played by hand ------------------------------------------------------------------------------
 
   bool get playable => playBoard != null;
 }

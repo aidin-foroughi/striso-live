@@ -32,7 +32,7 @@ class _BrandPainter extends CustomPainter {
 }
 
 /// The connection dot: hollow text3 when disconnected, ok when connected, accent pulsing while
-/// looking or connecting, error when lost, demo blue in the demo.
+/// looking or connecting, error when lost, demo blue while Virtual plays.
 class StatusDot extends StatefulWidget {
   final Dot dot;
   final bool lost;
@@ -77,7 +77,7 @@ class _StatusDotState extends State<StatusDot> with SingleTickerProviderStateMix
         ? Pal.error
         : switch (widget.dot) {
             Dot.on => Pal.ok,
-            Dot.demo => Pal.demo,
+            Dot.virtual => Pal.demo,
             Dot.busy => Pal.accent,
             Dot.off => Pal.text3,
           };

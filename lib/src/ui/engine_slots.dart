@@ -164,9 +164,9 @@ class _SlotRow extends StatelessWidget {
       builder: (ctx) => StrisoDialog(
         title: 'Erase slot ${s.slot}?',
         body: Text(
-          ctl.isVirtual
-              ? 'Virtual forgets $what and starts again without it. The package stays in the engine library.'
-              : 'The Striso forgets $what; it is gone once the Striso starts again. The package stays in the engine library.',
+          ctl.caps?.restarts == true
+              ? '${_cap(ctl.slotTarget)} forgets $what and starts again without it. The package stays in the engine library.'
+              : '${_cap(ctl.slotTarget)} forgets $what; it is gone once ${ctl.slotTarget} starts again. The package stays in the engine library.',
           style: ui(TypeSize.body, color: Pal.text2),
         ),
         actions: [
@@ -178,3 +178,6 @@ class _SlotRow extends StatelessWidget {
     if (r == true) await ctl.eraseSlot(s.slot);
   }
 }
+
+/// [s] with its first letter upper case ("the Striso" -> "The Striso").
+String _cap(String s) => s.isEmpty ? s : '${s[0].toUpperCase()}${s.substring(1)}';

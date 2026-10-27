@@ -593,8 +593,6 @@ class SaveBox extends StatelessWidget {
     final st = ctl.saveStatus;
     final reason = !ctl.connected
         ? 'Nothing plays: connect the Striso or play Virtual first'
-        : (ctl.isVirtual && ctl.options.fakeSave == null && ctl.virtual.isMock)
-        ? 'The demo keeps its settings until you restart it'
         : (ctl.params[2]!.params.isEmpty && ctl.params[3]!.params.isEmpty)
         ? 'This firmware has no touch settings to save'
         : null;
@@ -602,13 +600,13 @@ class SaveBox extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Btn(
-          ctl.isVirtual ? 'Save to Virtual' : 'Save to Striso',
+          'Save to ${ctl.caps?.short ?? 'Striso'}',
           key: const Key('btn-save-board'),
           kind: BtnKind.primary,
           tooltip:
               reason ??
-              (ctl.isVirtual
-                  ? 'Writes the touch settings and key factors to the virtual board\u2019s settings, kept on this computer (it restarts)'
+              (ctl.caps?.keptHere == true
+                  ? 'Writes the touch settings and key factors to ${ctl.caps!.name}\u2019s settings, kept on this computer (it restarts)'
                   : 'Writes the touch settings and key factors to the board (it restarts, about 15 s)'),
           onPressed: ctl.saving || reason != null ? null : () => _save(context),
         ),
@@ -784,7 +782,7 @@ class FirmwareRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final v = ctl.version;
-    final virtual = ctl.isVirtual && ctl.connected;
+    final virtual = ctl.connected && ctl.virtual.instrument != null;
     final text = v == null
         ? (ctl.connected ? 'The board did not report its version.' : 'Nothing plays')
         : virtual

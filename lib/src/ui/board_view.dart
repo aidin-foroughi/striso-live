@@ -132,7 +132,7 @@ class _BoardViewState extends State<BoardView> with SingleTickerProviderStateMix
 
   bool get _reduced => ctl.options.reducedMotion || (mounted && MediaQuery.maybeDisableAnimationsOf(context) == true);
 
-  /// The pointer is on something a click does: a key in demo play or the key equalizer, a switch
+  /// The pointer is on something a click does: a key played by hand or the key equalizer, a switch
   /// key in the settings overlay (dial keys only show their information), a control button.
   bool get _clickable {
     if (ctl.hoverControl >= 0) return ctl.playable || widget.overlays;
@@ -445,7 +445,7 @@ class BoardPainter extends CustomPainter {
     drawText(c, '${n.octave}', Offset(left + w + 2, cy + big * 0.36), small, col, weight: FontWeight.w500, align: -1, vAlign: 1);
   }
 
-  // the key equalizer: per key the factor as a tint (warm > 1, demo blue < 1) and value, the last
+  // the key equalizer: per key the factor as a tint (warm > 1, Pal.demo blue < 1) and value, the last
   // press's peak as an arc against the median of the measured keys
   void _drawEq(Canvas c, _Geo g, double r) {
     final med = ctl.eqMedian;

@@ -199,7 +199,7 @@ void main() {
       backupDir: dir!.path,
     );
     await run(tester, ctl.playVirtual());
-    await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+    await waitFor(tester, () => ctl.dot == Dot.virtual && !ctl.listsLoading);
     expect(ctl.virtual.isMock, isFalse);
     expect(ctl.status, startsWith('Virtual ·'));
     expect(ctl.playable, isTrue);
@@ -256,7 +256,7 @@ void main() {
     await run(tester, ctl.start());
     expect(ctl.audio.through, isFalse);
     await run(tester, ctl.playVirtual());
-    await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+    await waitFor(tester, () => ctl.dot == Dot.virtual && !ctl.listsLoading);
     final b = ctl.virtual.instrument!.board;
     await waitFor(tester, () => ctl.routing.heard, ms: 4000);
     expect(b.realtime, isFalse, reason: 'clocked by the output');
@@ -313,7 +313,7 @@ void main() {
     final ctl = virtualApp(output: 'no such output');
     await run(tester, ctl.start());
     await run(tester, ctl.playVirtual());
-    await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+    await waitFor(tester, () => ctl.dot == Dot.virtual && !ctl.listsLoading);
     final b = ctl.virtual.instrument!.board;
     await settle(tester, ms: 600);
     expect(await framesIn(tester, b), greaterThan(4800), reason: 'the board runs on its own clock');
@@ -332,7 +332,7 @@ void main() {
     expect(ctl.midi, isNotNull, reason: 'the audio library has the MIDI inputs');
     await run(tester, ctl.start());
     await run(tester, ctl.playVirtual());
-    await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+    await waitFor(tester, () => ctl.dot == Dot.virtual && !ctl.listsLoading);
     expect(ctl.midi!.running, isTrue, reason: 'MIDI runs while Virtual is live');
     final seen = <List<int>>[];
     final c = ctl.client!;
@@ -395,10 +395,10 @@ void main() {
     final a = copy('2026-10-01 build a'), b = copy('2026-10-24 build b');
     final ctl = AppController(options: AppOptions(virtualLib: a, noUsb: true), store: Store.memory());
     await run(tester, ctl.playVirtual());
-    await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+    await waitFor(tester, () => ctl.dot == Dot.virtual && !ctl.listsLoading);
     expect(ctl.firmwarePath, File(a).absolute.path);
     expect(await run(tester, ctl.useBuild(b)), isTrue);
-    await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+    await waitFor(tester, () => ctl.dot == Dot.virtual && !ctl.listsLoading);
     expect(ctl.firmwarePath, File(b).absolute.path);
     expect(ctl.version!.line, startsWith(ctl.virtual.version!));
     expect(StrisoVirtualLib.isLoaded(a), isFalse, reason: 'the old build is unloaded');
@@ -419,7 +419,7 @@ void main() {
     expect(await run(tester, ctl.swapBuild()), isTrue);
     expect(ctl.firmwarePath, File(b).absolute.path);
     await run(tester, ctl.playVirtual());
-    await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+    await waitFor(tester, () => ctl.dot == Dot.virtual && !ctl.listsLoading);
     await finish(tester, ctl);
     await tester.runAsync(() async {
       try {
@@ -457,7 +457,7 @@ void main() {
     expect(ctl.buildList().map((b) => b.build.name), contains('test build'));
     expect(ctl.buildList().where((b) => b.build.name == 'test build').single.current, isTrue);
     await run(tester, ctl.playVirtual());
-    await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+    await waitFor(tester, () => ctl.dot == Dot.virtual && !ctl.listsLoading);
     await finish(tester, ctl);
     await tester.runAsync(() async {
       try {
@@ -504,7 +504,7 @@ void main() {
       final sep = Platform.pathSeparator;
       final ctl = AppController(options: AppOptions(noUsb: true, virtualLib: lib), store: Store('${dir!.path}${sep}settings.json'));
       await run(tester, ctl.playVirtual());
-      await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+      await waitFor(tester, () => ctl.dot == Dot.virtual && !ctl.listsLoading);
       if (ctl.moduleSlots == null) {
         markTestSkipped('this build has no engine slots (Stco)');
         await finish(tester, ctl);
@@ -513,7 +513,7 @@ void main() {
       expect(ctl.moduleSlots!.map((s) => s.state).toSet(), {SlotState.empty});
       final own = ctl.voices.length;
       expect(await run(tester, ctl.installAndAddEngine(pcPkg!), seconds: 120, step: 5), isTrue, reason: ctl.moduleNote?.text);
-      await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+      await waitFor(tester, () => ctl.dot == Dot.virtual && !ctl.listsLoading);
       final slot = ctl.moduleSlots!.where((s) => s.holdsEngine).single;
       expect(slot.state, SlotState.ok);
       expect(ctl.voices.length, greaterThan(own), reason: 'listed after the built-in engines');
@@ -526,7 +526,7 @@ void main() {
         expect(ctl.moduleNote!.text, startsWith('sine is not on Virtual: '));
       }
       expect(await run(tester, ctl.eraseSlot(slot.slot), seconds: 60, step: 5), isTrue, reason: ctl.moduleNote?.text);
-      await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+      await waitFor(tester, () => ctl.dot == Dot.virtual && !ctl.listsLoading);
       expect(ctl.voices.length, own);
       expect(ctl.moduleSlots!.where((s) => s.holdsEngine), isEmpty);
       await finish(tester, ctl);
@@ -547,7 +547,7 @@ void main() {
     final sep = Platform.pathSeparator;
     final ctl = AppController(options: AppOptions(noUsb: true, virtualLib: lib), store: Store('${dir!.path}${sep}settings.json'));
     await run(tester, ctl.playVirtual());
-    await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+    await waitFor(tester, () => ctl.dot == Dot.virtual && !ctl.listsLoading);
     await waitFor(tester, () => ctl.boardPresets != null, ms: 2000).catchError((_) {});
     if (ctl.boardPresets == null) {
       markTestSkipped('this build does not answer StcJ');
@@ -642,7 +642,7 @@ void main() {
     final ctl = virtualApp();
     await run(tester, ctl.start());
     await run(tester, ctl.playVirtual());
-    await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+    await waitFor(tester, () => ctl.dot == Dot.virtual && !ctl.listsLoading);
     await run(tester, ctl.setMidiMonitor(true));
     expect(ctl.midiMonitor, isTrue);
     expect(ctl.midi!.backend.inject('test controller', const [0x91, 60, 100, 0xB1, 74, 70, 0x81, 60, 30]), greaterThanOrEqualTo(0));
@@ -663,7 +663,7 @@ void main() {
   testWidgets('the dials on the real firmware: the board\'s list, values set, clamped and read back', skip: skip != null, (tester) async {
     final ctl = AppController(options: AppOptions(noUsb: true, virtualLib: lib), store: Store.memory());
     await run(tester, ctl.playVirtual());
-    await waitFor(tester, () => ctl.dot == Dot.demo && !ctl.listsLoading);
+    await waitFor(tester, () => ctl.dot == Dot.virtual && !ctl.listsLoading);
     await waitFor(tester, () => ctl.dials != null, ms: 2000).catchError((_) {});
     if (ctl.dials == null) {
       markTestSkipped('this build does not answer StcT');

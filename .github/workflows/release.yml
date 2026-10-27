@@ -93,7 +93,7 @@ jobs:
         shell: pwsh
         run: |
           $env:STRISO_LIVE_HOME = "$env:RUNNER_TEMP\striso-live-smoke"
-          $p = Start-Process -FilePath build\windows\x64\runner\Release\StrisoLive.exe -ArgumentList '--smoke=5','--no-usb','--demo' -PassThru
+          $p = Start-Process -FilePath build\windows\x64\runner\Release\StrisoLive.exe -ArgumentList '--smoke=5','--no-usb','--virtual' -PassThru
           if (-not $p.WaitForExit(60000)) { $p.Kill(); throw 'smoke run did not quit' }
           if ($p.ExitCode -ne 0) { throw "smoke run exit code $($p.ExitCode)" }
           if (-not (Select-String -Path "$env:STRISO_LIVE_HOME\logs\striso-live.log" -Pattern 'smoke: ok')) { throw 'no smoke line' }
@@ -202,7 +202,7 @@ jobs:
         continue-on-error: true
         run: |
           export STRISO_LIVE_HOME="$RUNNER_TEMP/striso-live-smoke"
-          "build/macos/Build/Products/Release/Striso Live.app/Contents/MacOS/Striso Live" --smoke=5 --no-usb --demo &
+          "build/macos/Build/Products/Release/Striso Live.app/Contents/MacOS/Striso Live" --smoke=5 --no-usb --virtual &
           pid=$!
           for _ in $(seq 60); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
           if kill -0 "$pid" 2>/dev/null; then kill "$pid"; echo "::error::smoke run did not quit"; exit 1; fi

@@ -3,7 +3,6 @@
 // with any board. Its console is a Board like the Striso's; its sound renders in the output's
 // callback (SoundRouting); MIDI controllers play it through its own USB-MIDI input
 // (sv_midi_write). Its config flash is kept on this computer and boots the next one.
-// Widget tests without a library run the Dart mock instead (labelled so).
 
 import 'dart:async';
 import 'dart:io';
@@ -80,6 +79,8 @@ class _VirtualBoardHandle extends Board {
   @override
   Mode get mode => Mode.virtual;
   @override
+  BoardCapabilities get caps => BoardCapabilities.virtual;
+  @override
   PlayableBoard? get hand => inst.player;
   @override
   List<String>? get saveRoots {
@@ -104,16 +105,8 @@ class VirtualStrisoRuntime implements VirtualRuntime {
   String? buildTitle;
 
   /// The file that keeps Virtual's engine-module slots (sv_options.module_store; null: a
-  /// temporary one per board, tests), and the Dart mock's slots, kept across its restarts.
+  /// temporary one per board, tests).
   final String? moduleStore;
-  final mockModules = MockModuleStore();
-
-  /// --mock-demo: the Dart mock whatever library there is.
-  final bool forceMock;
-
-  /// The Dart mock instead of a library: forced, or a widget test that names no library.
-  bool get mockOnly =>
-      forceMock || (libPath == null && Platform.environment['FLUTTER_TEST'] == 'true' && Platform.environment['STRISO_VIRTUAL_LIB'] == null);
 
   /// Where the instrument's config flash is kept (null: not kept, tests).
   final String? flashFile;
@@ -125,13 +118,11 @@ class VirtualStrisoRuntime implements VirtualRuntime {
   /// that failed is not tried again until it is chosen again.
   LoadFailure? failure;
   VirtualInstrument? instrument;
-  MockBoard? mock;
 
   /// The instrument changed (started, stopped): SoundRouting attaches or detaches it.
   final void Function()? onChanged;
 
-  VirtualStrisoRuntime({String? libPath, String? title, bool mockOnly = false, this.flashFile, this.moduleStore, required this.log, this.onChanged})
-    : forceMock = mockOnly {
+  VirtualStrisoRuntime({String? libPath, String? title, this.flashFile, this.moduleStore, required this.log, this.onChanged}) {
     selectLibrary(libPath, title: title);
   }
 
@@ -151,7 +142,7 @@ class VirtualStrisoRuntime implements VirtualRuntime {
     if (old != null) StrisoVirtualLib.unload(old.path);
     libPath = path;
     buildTitle = title;
-    if (path == null || mockOnly) return null;
+    if (path == null) return null;
     try {
       _lib = StrisoVirtualLib.load(explicit: path);
     } on LoadFailure catch (e) {
@@ -164,18 +155,13 @@ class VirtualStrisoRuntime implements VirtualRuntime {
 
   /// The firmware the library runs (sv_firmware_version: what StcV says first).
   String? get version => _lib?.firmwareVersion;
-  bool get isMock => instrument == null && mock != null;
   VirtualSound? get sound => instrument;
 
   /// For the status and the log: the build as the user knows it.
-  String get label => isMock ? 'Demo (mock)' : 'Virtual · ${buildTitle ?? (version != null ? shortVersion(version!) : 'no build')}';
+  String get label => 'Virtual · ${buildTitle ?? (version != null ? shortVersion(version!) : 'no build')}';
 
   @override
   Future<Board> open() async {
-    if (mockOnly) {
-      mock ??= MockBoard(modules: mockModules);
-      return TransportBoard(Mode.virtual, MockTransport(board: mock), label: 'Demo (mock)', hand: mock);
-    }
     final l = _lib;
     if (l == null) throw VirtualError(failure?.message ?? 'No firmware build is chosen for Virtual.');
     var inst = instrument;
@@ -197,7 +183,7 @@ class VirtualStrisoRuntime implements VirtualRuntime {
   @override
   Future<bool> waitBack() async {
     final b = instrument?.board;
-    if (b == null) return mock != null;
+    if (b == null) return false;
     final sw = Stopwatch()..start();
     while (!b.disposed && !b.attached && sw.elapsed < const Duration(seconds: 20)) {
       await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -207,7 +193,6 @@ class VirtualStrisoRuntime implements VirtualRuntime {
 
   @override
   Future<void> stop() async {
-    mock = null;
     final inst = instrument;
     if (inst == null) return;
     instrument = null;

@@ -29,24 +29,16 @@ Future<void> showBuildChooser(BuildContext anchor, AppController ctl) async {
   final rect = Rect.fromPoints(box.localToGlobal(Offset.zero, ancestor: overlay), box.localToGlobal(box.size.bottomRight(Offset.zero), ancestor: overlay));
   final position = RelativeRect.fromRect(Rect.fromLTWH(rect.left, rect.bottom + Space.xs, rect.width, 0), Offset.zero & overlay.size);
   final list = ctl.buildList();
-  final mock = ctl.virtual.mockOnly;
-  final current = mock ? _mock : ctl.virtual.libPath;
+  final current = ctl.virtual.libPath;
   final chosen = await showMenu<String>(
     context: anchor,
     position: position,
     color: Pal.bg1,
-    initialValue: list.any((b) => b.path == current && b.loadable) || (mock && current == _mock) ? current : null,
+    initialValue: list.any((b) => b.path == current && b.loadable) ? current : null,
     constraints: const BoxConstraints(minWidth: 360, maxWidth: 600, maxHeight: 640),
     items: [
       PopupMenuItem<String>(enabled: false, height: Sizes.row, child: Text('VIRTUAL · PLAY A BUILD', style: microStyle())),
-      if (mock)
-        PopupMenuItem<String>(
-          key: const Key('build-mock'),
-          value: _mock,
-          height: Sizes.row,
-          child: Text('The Dart mock', style: ui(TypeSize.body)),
-        ),
-      if (list.isEmpty && !mock)
+      if (list.isEmpty)
         PopupMenuItem<String>(
           enabled: false,
           height: Sizes.row,
@@ -113,20 +105,16 @@ Future<void> showBuildChooser(BuildContext anchor, AppController ctl) async {
   if (!anchor.mounted) return;
   if (chosen == _install) return installBuild(anchor, ctl);
   if (chosen == _folder) return openFirmwareFolder(ctl);
-  if (chosen == _mock) {
-    await ctl.playVirtual();
-    return;
-  }
   await ctl.useBuild(chosen);
 }
 
-const _install = '\u0000install', _folder = '\u0000folder', _mock = '\u0000mock';
+const _install = '\u0000install', _folder = '\u0000folder';
 
 /// The Virtual control's label while it plays: "Virtual · Sax v1 ▾" (a long folder name cut;
 /// [compact], a narrow window: "Virtual ▾", the title in the tooltip and the status).
 String virtualLabel(AppController ctl, {bool compact = false}) {
   if (ctl.playing != Mode.virtual || compact) return 'Virtual ▾';
-  var t = ctl.virtual.isMock ? 'Dart mock' : (ctl.virtual.buildTitle ?? '…');
+  var t = ctl.virtual.buildTitle ?? '…';
   if (t.length > 30) t = '${t.substring(0, 29)}…';
   return 'Virtual · $t ▾';
 }

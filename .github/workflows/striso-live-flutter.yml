@@ -104,7 +104,7 @@ jobs:
         shell: pwsh
         run: |
           $env:STRISO_LIVE_HOME = "$env:RUNNER_TEMP\striso-live-smoke"
-          $p = Start-Process -FilePath build\windows\x64\runner\Release\StrisoLive.exe -ArgumentList '--smoke=5','--no-usb','--demo' -PassThru
+          $p = Start-Process -FilePath build\windows\x64\runner\Release\StrisoLive.exe -ArgumentList '--smoke=5','--no-usb','--virtual' -PassThru
           if (-not $p.WaitForExit(60000)) { $p.Kill(); throw 'smoke run did not quit' }
           Get-Content "$env:STRISO_LIVE_HOME\logs\striso-live.log"
           if ($p.ExitCode -ne 0) { throw "smoke run exit code $($p.ExitCode)" }

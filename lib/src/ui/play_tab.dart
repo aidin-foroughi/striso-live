@@ -633,7 +633,7 @@ class ColourLegend extends StatelessWidget {
 
 /// The active tuning, named from the board's N reply ("31-TET", "custom: fifth 696.8 ¢"), and the
 /// fine tune as a reference pitch ("A = 432.0 Hz (−32 ¢)"). The menu holds the pitch reference
-/// and, in the demo, the simulated board's tunings.
+/// and the board's own tunings (StcX) to load.
 /// Mono, as the board reports it (StcY mono=): the toggle presses settings key 9 over
 /// USB (StcK) and the state is read back; nothing is kept in the app. Shown only when the firmware
 /// reports the field.
@@ -672,8 +672,6 @@ class TuningChip extends StatelessWidget {
   final AppController ctl;
   const TuningChip(this.ctl, {super.key});
 
-  static const demoTunings = [(0, '12-TET'), (1, '31-TET'), (2, '19-TET'), (3, 'Pythagorean'), (8, 'Just 7-limit')];
-
   @override
   Widget build(BuildContext context) {
     final t = ctl.tuning;
@@ -707,11 +705,7 @@ class TuningChip extends StatelessWidget {
         onSelected: (v) {
           if (v == 'abs') ctl.setPitchRef(PitchRef.absolute);
           if (v == 'root') ctl.setPitchRef(PitchRef.root);
-          if (v == 'fine:432') {
-            ctl.demoTuning(0, fineCents: -31.77);
-          } else if (v.startsWith('demo:')) {
-            ctl.demoTuning(int.parse(v.substring(5)), fineCents: 0);
-          }
+          if (v.startsWith('tuning:')) ctl.loadTuning(int.parse(v.substring(7)));
         },
         itemBuilder: (_) => [
           PopupMenuItem(enabled: false, height: Sizes.row, child: Text('Pitch labels relative to', style: microStyle())),
@@ -721,20 +715,15 @@ class TuningChip extends StatelessWidget {
               height: Sizes.row,
               child: Text(l, style: ui(TypeSize.body, color: ctl.pitchRef == r ? Pal.accent : Pal.text1)),
             ),
-          if (ctl.playable) ...[
+          if (ctl.canSend && ctl.boardTunings.isNotEmpty) ...[
             const PopupMenuDivider(),
-            PopupMenuItem(enabled: false, height: Sizes.row, child: Text(!ctl.virtual.isMock ? 'Virtual board tuning' : 'Demo board tuning', style: microStyle())),
-            for (final (n, l) in demoTunings)
+            PopupMenuItem(enabled: false, height: Sizes.row, child: Text('The board\u2019s tuning', style: microStyle())),
+            for (final (n, l) in ctl.boardTunings)
               PopupMenuItem(
-                value: 'demo:$n',
+                value: 'tuning:$n',
                 height: Sizes.row,
-                child: Text(l, style: ui(TypeSize.body, color: t?.index == n && (t?.offsetCents.abs() ?? 0) < 0.5 ? Pal.accent : Pal.text1)),
+                child: Text(l, style: ui(TypeSize.body, color: t?.index == n ? Pal.accent : Pal.text1)),
               ),
-            PopupMenuItem(
-              value: 'fine:432',
-              height: Sizes.row,
-              child: Text('12-TET at A = 432 Hz', style: ui(TypeSize.body, color: t?.index == 0 && (t?.offsetCents ?? 0) < -1 ? Pal.accent : Pal.text1)),
-            ),
           ],
         ],
         child: Container(
@@ -772,7 +761,7 @@ class KeyPicker extends StatelessWidget {
   );
 }
 
-/// The current sound: name in sound type, the engine in its colour, DEMO in the demo, an accent
+/// The current sound: name in sound type, the engine in its colour, the board's tag (VIRTUAL), an accent
 /// dot when edited.
 class SoundName extends StatelessWidget {
   final AppController ctl;
@@ -800,11 +789,11 @@ class SoundName extends StatelessWidget {
                 Flexible(
                   child: Text(engineInfo(engine).label.toLowerCase(), maxLines: 1, overflow: TextOverflow.ellipsis, style: ui(TypeSize.small, color: engineColor(engine))),
                 ),
-              if (ctl.isVirtual && ctl.connected) ...[
+              if (ctl.caps?.tag case final tag?) ...[
                 const SizedBox(width: Space.s),
                 Text(
-                  !ctl.virtual.isMock ? 'VIRTUAL' : 'DEMO',
-                  key: const Key('demo-chip'),
+                  tag,
+                  key: const Key('board-tag'),
                   style: microStyle(color: Pal.demo),
                 ),
               ],
@@ -833,11 +822,11 @@ class SoundName extends StatelessWidget {
             child: Text(engineInfo(engine).label.toLowerCase(), maxLines: 1, overflow: TextOverflow.ellipsis, style: ui(TypeSize.small, color: engineColor(engine))),
           ),
         ],
-        if (ctl.isVirtual && ctl.connected) ...[
+        if (ctl.caps?.tag case final tag?) ...[
           const SizedBox(width: Space.s),
           Text(
-            !ctl.virtual.isMock ? 'VIRTUAL' : 'DEMO',
-            key: const Key('demo-chip'),
+            tag,
+            key: const Key('board-tag'),
             style: microStyle(color: Pal.demo),
           ),
         ],
@@ -849,7 +838,7 @@ class SoundName extends StatelessWidget {
 // ---------------------------------------------------------------------------------------------
 // hero knobs
 
-/// The effect's on/off parameter (demo board: chorus, delay, reverb, trem), if it has one.
+/// The effect's on/off parameter (chorus, delay, reverb, trem), if it has one.
 Param? fxSwitch(AppController ctl, Param p) => ctl.params[1]!.params.where((q) => q.group == p.group && q.kind == Kind.onOff && q != p).firstOrNull;
 
 class HeroPanel extends StatelessWidget {

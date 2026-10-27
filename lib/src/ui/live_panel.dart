@@ -356,9 +356,9 @@ class HoverReadout extends StatelessWidget {
                   if ((f.engine != null || f.switchable) && !ctl.canSend)
                     ctl.sendHint
                   else if (f.engine != null)
-                    'click to select${ctl.isVirtual ? (!ctl.virtual.isMock ? ' (virtual)' : ' (demo)') : ''}'
+                    'click to select${ctl.caps?.tag != null ? ' (on ${ctl.caps!.name})' : ''}'
                   else if (f.switchable)
-                    'click to switch${ctl.isVirtual ? (!ctl.virtual.isMock ? ' (on the virtual board)' : ' (on the demo board)') : ''}'
+                    'click to switch${ctl.caps?.tag != null ? ' (on ${ctl.caps!.name})' : ''}'
                   else if (f.group == SettingsGroup.sens)
                     'set it under Sensitivity'
                   else if (!f.danger && f.knob != null)
@@ -479,11 +479,11 @@ class _SettingsInfoState extends State<SettingsInfo> {
                     style: ui(TypeSize.body, color: Pal.text3),
                   ),
                 )
-              else if ((f.engine != null || f.switchable) && ctl.isVirtual)
+              else if ((f.engine != null || f.switchable) && ctl.caps?.tag != null)
                 Padding(
                   padding: const EdgeInsets.only(top: Space.xs),
                   child: Text(
-                    !ctl.virtual.isMock ? 'Acts on the virtual board.' : 'Acts on the demo board.',
+                    'Acts on ${ctl.caps!.name}.',
                     style: ui(TypeSize.small, color: Pal.demo),
                   ),
                 ),
