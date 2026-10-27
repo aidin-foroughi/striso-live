@@ -584,6 +584,14 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
   /// What the board that plays can do (null: none plays).
   BoardCapabilities? get caps => session.board?.caps;
 
+  /// The line under the header while the computer's output plays to Bluetooth (Virtual, or the
+  /// Striso Through PC): null otherwise.
+  String? get outputNotice {
+    final c = caps;
+    if (state is! Live || c == null || !audio.outputBluetooth) return null;
+    return !c.usb || audio.through ? bluetoothNotice : null;
+  }
+
   /// The instrument that plays (or is starting, or restarts): what the header's control fills.
   /// Null when nothing does, a failed one included.
   Mode? get playing => switch (state) {

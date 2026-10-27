@@ -291,6 +291,9 @@ class Dropout {
   const Dropout(this.at, this.side, this.why);
 }
 
+/// The one line a Bluetooth output gets (Setup › Audio, and under the header while it plays).
+const bluetoothNotice = 'Bluetooth output adds ~200–300 ms; pick a wired output for playing';
+
 /// The latency through the computer, by part (ms).
 class Breakdown {
   final double input, ring, output, usb;
@@ -1102,7 +1105,7 @@ class ThroughPc {
       }
       final o = _prefs.output;
       if (o != null && _haveDevices && !outputs.any((d) => d.name == o)) out ??= '“$o” is not connected: playing to the default output.';
-      if (outputBluetooth) hint = 'Bluetooth adds ~150–250 ms. Use a wired output for playing.';
+      if (outputBluetooth) hint = bluetoothNotice;
       _finishDescribe(m, tn, out, hint);
       return;
     }
@@ -1161,7 +1164,7 @@ class ThroughPc {
           out ??= '“$o” is not connected: playing to the default output.';
         }
     }
-    if (_prefs.through && outputBluetooth) hint = 'Bluetooth adds ~150–250 ms. Use a wired output for playing.';
+    if (_prefs.through && outputBluetooth) hint = bluetoothNotice;
     _finishDescribe(m, tn, out, hint);
   }
 

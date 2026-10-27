@@ -134,7 +134,7 @@ headphone jack keeps working at the same time.
 - **Striso buffer** (firmware with `Stct`): the board's own buffer before USB: Auto (the smallest
   that keeps the board at 0 underruns, from 96 frames) or 72 / 96 / 120 / 144. The app sets it on
   every connection.
-- A Bluetooth output gets one line: "Bluetooth adds ~150–250 ms. Use a wired output for playing."
+- A Bluetooth output gets one line, in Setup › Audio and under the header while it plays: "Bluetooth output adds ~200–300 ms; pick a wired output for playing". The latency figure includes what the output device reports for its stream (WASAPI's stream latency; Core Audio's device and stream latency).
 - **Record** (Setup › Audio): the Striso's input to a WAV file, 48 kHz stereo, 24 bit when the
   Striso sends 24 (else 16, or 32-bit float), in `Documents\Striso Live Recordings` with a
   timestamped name (`Striso 2026-10-23 14.02.11.wav`). The header shows the time while it records

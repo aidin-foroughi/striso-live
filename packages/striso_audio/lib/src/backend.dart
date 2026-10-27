@@ -50,7 +50,8 @@ class AudioDevice {
     this.nativeChannels = 0,
   }) : id = id ?? name;
 
-  /// Bluetooth adds 150-250 ms: by the system's word, or by the name where it says nothing.
+  /// Bluetooth adds 200-300 ms: by the system's word (Windows: the endpoint's device under BTHENUM,
+  /// BTHLEDevice or BTHHFENUM; macOS: its transport type), or by the name where it says nothing.
   bool get isBluetooth =>
       transport == AudioTransport.bluetooth ||
       (transport == AudioTransport.unknown && RegExp(r'bluetooth|airpods|\bbt\b|hands-free|a2dp', caseSensitive: false).hasMatch(name)) ||

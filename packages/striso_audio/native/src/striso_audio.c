@@ -1178,8 +1178,10 @@ static void check_lost(void) {
  *           adding it (as before) counted the period twice. macOS: Core Audio's reported device +
  *           stream latency + safety offset.
  *   output  measured: from a callback to when its first frame plays, by the output's own clock
- *           (IAudioClock; Core Audio's presentation time + the reported device latency), + half the
- *           take (the mean frame); where no clock is there, the buffer model as before. */
+ *           (IAudioClock; Core Audio's presentation time), + half the take (the mean frame), + the
+ *           latency the device reports for its stream (WASAPI GetStreamLatency, which a Bluetooth
+ *           endpoint makes large; Core Audio's device + stream latency); where no clock is there,
+ *           the buffer model + that latency. */
 static double input_ms(double nominal_ms, double fs, int exclusive) {
 #if defined(_WIN32)
     (void)fs;
@@ -1193,11 +1195,9 @@ static double input_ms(double nominal_ms, double fs, int exclusive) {
 static double output_ms(double model_frames, double take, double rate) {
     float ahead = sa_ldf(&P.out_ahead);
     if (P.out_ahead_n > 4 && ahead > 0) {
-        double extra = 0;
-#if defined(__APPLE__)
-        extra = G.play_lat; /* after the presentation time: device + stream latency (reported) */
-#endif
-        return (ahead + take / 2 + extra) / rate * 1000;
+        /* after the clock's position: what the device reports for its stream (Core Audio: device +
+           stream latency; WASAPI: IAudioClient::GetStreamLatency, e.g. a Bluetooth endpoint's) */
+        return (ahead + take / 2 + G.play_lat) / rate * 1000;
     }
     return (model_frames + G.play_lat) / rate * 1000;
 }

@@ -99,10 +99,11 @@ class BannerBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: ctl,
+      listenable: Listenable.merge([ctl, ctl.audioState]),
       builder: (context, _) {
         final p = ctl.problem;
         final b = ctl.banner;
+        final notice = ctl.outputNotice;
         return AnimatedSize(
           duration: Timing.open,
           curve: Timing.curveOpen,
@@ -133,7 +134,21 @@ class BannerBar extends StatelessWidget {
                   ),
                 )
               : b == null
-              ? const SizedBox(width: double.infinity)
+              ? (notice == null
+                    ? const SizedBox(width: double.infinity)
+                    : Container(
+                        key: const Key('output-notice'),
+                        constraints: const BoxConstraints(minHeight: 32),
+                        color: Pal.bg2,
+                        padding: const EdgeInsets.symmetric(horizontal: Space.gutter, vertical: Space.xs + 2),
+                        child: Row(
+                          children: [
+                            const Pip(Pal.accent, size: 6),
+                            const SizedBox(width: Space.s),
+                            Expanded(child: Text(notice, maxLines: 1, overflow: TextOverflow.ellipsis, style: ui(TypeSize.body))),
+                          ],
+                        ),
+                      ))
               : Container(
                   key: const Key('banner'),
                   constraints: const BoxConstraints(minHeight: 32),

@@ -244,7 +244,7 @@ void main() {
       );
       r.play(1);
       expect(r.fake.last.exclusiveOutput, isFalse);
-      expect(r.pc.outputHint, 'Bluetooth adds ~150–250 ms. Use a wired output for playing.');
+      expect(r.pc.outputHint, bluetoothNotice);
       expect(const AudioDevice('Speakers', id: r'SWD\MMDEVAPI\x\BTHENUM\{0000110b}').isBluetooth, isTrue);
       expect(const AudioDevice('AirPods Pro').isBluetooth, isTrue);
       expect(const AudioDevice('Speakers (Realtek)').isBluetooth, isFalse);

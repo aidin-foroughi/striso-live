@@ -195,16 +195,19 @@ void main() {
     await disposeBoard(tester, b);
   });
 
-  testWidgets('a Bluetooth output: a one-line note under the output', skip: virtualSkip != null, (tester) async {
+  testWidgets('a Bluetooth output: a one-line note under the output, and under the header while it plays', skip: virtualSkip != null, (tester) async {
     final fake = FakeAudioBackend(outputs: [const AudioDevice('Speakers (EDIFIER MR5)', id: 'bt', transport: AudioTransport.bluetooth, isDefault: true)]);
     final b = await startBoard(tester);
     final ctl = await boot(tester, b, fake);
     await connect(tester, ctl);
     ctl.setTab(AppTab.setup);
     await tester.pump(const Duration(milliseconds: 300));
+    await ticks(tester, ctl);
+    expect(find.byKey(const Key('output-notice')), findsNothing, reason: 'the jack plays: nothing goes to Bluetooth');
     ctl.audio.setThrough(true);
     await ticks(tester, ctl);
-    expect(find.text('Bluetooth adds ~150–250 ms. Use a wired output for playing.'), findsOneWidget);
+    expect(tester.widget<Text>(find.byKey(const Key('audio-output-hint'))).data, bluetoothNotice);
+    expect(find.descendant(of: find.byKey(const Key('output-notice')), matching: find.text(bluetoothNotice)), findsOneWidget);
     expect(fake.last.exclusiveOutput, isFalse);
     await finish(tester, ctl);
     await disposeBoard(tester, b);
