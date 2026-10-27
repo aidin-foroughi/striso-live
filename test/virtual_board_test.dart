@@ -177,7 +177,9 @@ void main() {
 
   AppController virtualApp({bool through = false, String? output}) {
     final backend = NativeAudioBackend.tryLoad(explicit: audioLib, backend: backendNull);
-    final ctl = AppController(options: AppOptions(virtualLib: lib, noUsb: true), store: Store.memory(), audioBackend: backend);
+    // no MIDI input of this computer chosen: a real controller playing meanwhile stays out of the tests
+    final store = Store.memory()..set('midi', {'inputs': <Object>[]});
+    final ctl = AppController(options: AppOptions(virtualLib: lib, noUsb: true), store: store, audioBackend: backend);
     if (through) ctl.audio.setThrough(true);
     if (output != null) ctl.audio.setOutput(output);
     return ctl;
