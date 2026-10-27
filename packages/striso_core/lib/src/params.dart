@@ -1,6 +1,6 @@
 // Parameter model helpers: undo history, morph interpolation, mutation, user presets (JSON) and the
 // C export. Parameters are matched by name, so presets and morph snapshots survive firmware changes
-// that reorder or add parameters. Port of tools/app/js/params.js.
+// that reorder or add parameters.
 
 import 'dart:convert';
 import 'dart:math' as math;

@@ -1,4 +1,4 @@
-// Port of tools/app/test/harmony.test.mjs.
+// Harmony: scales, chord names, roman numerals and functions, key finding.
 import 'package:striso_core/striso_core.dart';
 import 'package:test/test.dart';
 

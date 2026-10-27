@@ -1,9 +1,12 @@
 // StcT, the settings dials from the console (doc/dials_console.md): the replies parsed as the
-// firmware writes them, and the client against the mock that answers them.
+// firmware writes them (its virtual/tests/transcripts/dials.txt), and a firmware without StcT. The
+// client against the board's dials: packages/striso_virtual/test/dials_test.dart.
 import 'dart:typed_data';
 
 import 'package:striso_core/striso_core.dart';
 import 'package:test/test.dart';
+
+import 'support/silent_transport.dart';
 
 void main() {
   test('the list: even steps, fixed values; a cut list is none', () {
@@ -34,23 +37,10 @@ void main() {
     expect(dialListCommand()[4], 255);
   });
 
-  test('the client on the mock: the list, a dial clamped and answered, StcY after; a refusal', () async {
-    final board = MockBoard(autoplay: false, idleFrames: 0);
-    final c = StrisoClient(MockTransport(board: board));
+  test('a firmware without StcT does not answer: no dials', () async {
+    final c = StrisoClient(SilentTransport());
     await c.connect();
-    final l = (await c.listDials())!;
-    expect(l, hasLength(7));
-    expect(await c.setDial(3, 100), 100);
-    expect((await c.getState())!.volume, 100);
-    expect(await c.setDial(2, 30), 24, reason: 'the bend range dial\'s nearest');
-    expect(await c.setDial(5, 99), 15);
-    expect(await c.setDial(7, 1), isNull, reason: 'no such dial');
-    expect(await c.setDial(3, double.nan), isNull);
+    expect(await c.listDials(), isNull);
     await c.disconnect();
-    // a firmware without StcT does not answer
-    final old = StrisoClient(MockTransport(board: MockBoard(autoplay: false, idleFrames: 0)..answersDials = false));
-    await old.connect();
-    expect(await old.listDials(), isNull);
-    await old.disconnect();
   });
 }

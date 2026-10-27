@@ -1,6 +1,5 @@
 // The config writer against tools/striso.py: the same bytes for the same inputs, round trips and
 // refusals; the save flow against fake drives. No board is involved.
-// Port of tools/app/test/desktop-config.test.mjs (the old web app in the Striso tooling repo).
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';

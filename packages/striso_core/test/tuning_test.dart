@@ -1,32 +1,29 @@
-// The tuning reply, its names, the quarter-tone notation and the mock's tunings; the settings-key
-// command (StcK) against the mock.
-import 'dart:async';
-import 'dart:typed_data';
-
+// The tuning reply (StcN) as the firmware writes it for its tunings (test/fixtures/tunings.txt),
+// their names from its settings layout (test/fixtures/settings_layout.txt), the quarter-tone
+// notation of what its keys play; the settings-key command (StcK); a firmware without N or K. The
+// client switching the board's tunings: packages/striso_virtual/test/tuning_test.dart.
 import 'package:striso_core/striso_core.dart';
 import 'package:test/test.dart';
 
+import 'support/fixtures.dart';
+import 'support/silent_transport.dart';
+
 String hx(double v) => floatToHex(v);
 
-/// The N reply the mock prints for a factory tuning (header + 61 keys).
-List<String> mockReply(int n, {double fineCents = 0}) {
-  final b = MockBoard(autoplay: false, motionEnabled: false, idleFrames: 0)
-    ..loadTuning(n)
-    ..fineTune(fineCents);
-  final out = <int>[];
-  b.attach(out.addAll);
-  b.receive(Cmd.tuning());
-  b.tick();
-  b.detach();
-  return String.fromCharCodes(out).split('\r\n').where((l) => l.isNotEmpty).toList();
-}
+final _tunings = readFixture('tunings.txt');
+
+/// The firmware's N reply for its tuning [n] (header + 61 keys).
+List<String> reply(int n) => _tunings['tuning $n'];
+
+/// The firmware's settings layout (StcX): it names the tunings.
+final layout = parseSettingsLayout(readFixture('settings_layout.txt')['X'])!;
 
 int buttonOf(int c0v, int c1v) => keyIds.firstWhere((id) => c0[id] == c0v && c1[id] == c1v);
 
 void main() {
   group('N reply parser', () {
     test('a full reply: generators, offset, colour, 61 keys', () {
-      final lines = mockReply(1);
+      final lines = reply(1);
       expect(lines.length, 62);
       expect(lines.first, startsWith('tuning 1 '));
       final t = parseTuningReply(lines)!;
@@ -38,13 +35,13 @@ void main() {
       expect(t.base, 62);
       expect(t.keyOffsets.length, 61);
       expect(t.keyOffsets.values.every((o) => o == 0), isTrue);
-      expect(lines.first, matches(RegExp(r'^tuning 1 [0-9a-f]{8} [0-9a-f]{8} [0-9a-f]{8} 005555 [0-9a-f]{8} 61$')));
-      expect(lines[1], matches(RegExp(r'^0 F_1 [0-9a-f]{8} [0-9a-f]{8}$')));
+      expect(lines.first, matches(RegExp(r'^tuning 1 [0-9A-F]{8} [0-9A-F]{8} [0-9A-F]{8} 005555 [0-9A-F]{8} 61$')));
+      expect(lines[1], matches(RegExp(r'^0 F_1 [0-9A-F]{8} [0-9A-F]{8}$')));
       expect(t.complete, isTrue);
       expect(t.notes.length, 61);
-      // D4 (button 25, key number 36) is the anchor: exactly 62
+      // D4 (button 25, key number 30: D_3 in the reply) is the anchor: exactly 62
       expect(t.pitchOfButton(25), closeTo(62, 1e-5));
-      expect(t.nameIn(mockSettingsLayout).name, '31-TET');
+      expect(t.nameIn(layout).name, '31-TET');
       expect(t.hasKeyOffsets, isFalse);
       expect(t.isPlain12, isFalse);
     });
@@ -60,7 +57,7 @@ void main() {
       expect(t.notes[30], 62.0);
       expect(t.notes[37], closeTo(67.032, 1e-9)); // cents
       expect(t.complete, isFalse);
-      expect(t.nameIn(mockSettingsLayout).name, 'custom: fifth 696.8 ¢');
+      expect(t.nameIn(layout).name, 'custom: fifth 696.8 ¢');
     });
 
     test('partial replies: header only, keys only, noise lines, duplicates, bad values', () {
@@ -84,7 +81,7 @@ void main() {
       ])!;
       expect(noisy.index, 2);
       expect(noisy.base, 74); // transposed an octave up
-      expect(noisy.nameIn(mockSettingsLayout).name, '19-TET');
+      expect(noisy.nameIn(layout).name, '19-TET');
       expect(noisy.notes, {5: closeTo(44.6, 1e-5)});
     });
 
@@ -94,17 +91,8 @@ void main() {
       expect(parseTuningReply(['tuning x y z w']), isNull);
     });
 
-    test('the client reads the mock N reply and sees nothing from a board without it', () async {
-      final board = MockBoard(autoplay: false, motionEnabled: false, idleFrames: 0)..loadTuning(3);
-      final c = StrisoClient(MockTransport(board: board));
-      await c.connect();
-      final t = await c.getTuning();
-      expect(t, isNotNull);
-      expect(t!.nameIn(mockSettingsLayout).name, 'Pythagorean');
-      expect(t.complete, isTrue);
-      await c.disconnect();
-      // a board that ignores N: the request times out, the parser returns null
-      final silent = StrisoClient(_SilentTransport());
+    test('a board without N: the request times out, the parser returns null', () async {
+      final silent = StrisoClient(SilentTransport());
       await silent.connect();
       final sw = Stopwatch()..start();
       expect(await silent.getTuning(), isNull);
@@ -117,20 +105,20 @@ void main() {
     test('a tuning is named as the board names it (its StcX key), a changed generator is custom', () {
       final expected = ['12-TET', '31-TET', '19-TET', 'Pythagorean', '5-TET', '7-TET', 'Bohlen-Pierce 1', 'Bohlen-Pierce 2', 'Just 7-limit'];
       for (var n = 0; n < 9; n++) {
-        final t = parseTuningReply(mockReply(n))!;
-        expect(t.nameIn(mockSettingsLayout).name, expected[n], reason: 'tuning $n');
+        final t = parseTuningReply(reply(n))!;
+        expect(t.nameIn(layout).name, expected[n], reason: 'tuning $n');
         expect(t.hasKeyOffsets, n == 8);
         if (n == 8) expect(t.keyOffsets[30]! * 100, closeTo(10.3616, 1e-3)); // D's just offset
         // the per-key offsets are also found from the pitches alone (a reply without them)
-        final bare = mockReply(n).map((l) => l.startsWith('tuning') ? l : l.split(' ').take(3).join(' ')).toList();
+        final bare = reply(n).map((l) => l.startsWith('tuning') ? l : l.split(' ').take(3).join(' ')).toList();
         expect(parseTuningReply(bare)!.keyOffsets, isEmpty);
         expect(parseTuningReply(bare)!.hasKeyOffsets, n == 8, reason: 'tuning $n from pitches');
       }
-      expect(parseTuningReply(mockReply(1))!.nameIn(mockSettingsLayout).short, '31TET');
-      final lines = mockReply(8).map((l) => l.startsWith('tuning 8 ') ? l.replaceFirst('tuning 8 ', 'tuning -1 ') : l).toList();
-      expect(parseTuningReply(lines)!.nameIn(mockSettingsLayout), (name: 'custom: per-key offsets', short: 'custom'));
-      expect(TuningInfo(index: -1, fifth: 7.03, octave: 12, offset: 0).nameIn(mockSettingsLayout).name, 'custom: fifth 703.0 ¢');
-      expect(TuningInfo(index: -1, fifth: 7, octave: 12.1, offset: 0).nameIn(mockSettingsLayout).name, 'custom: fifth 700.0 ¢, octave 1210.0 ¢');
+      expect(parseTuningReply(reply(1))!.nameIn(layout).short, '31TET');
+      final lines = reply(8).map((l) => l.startsWith('tuning 8 ') ? l.replaceFirst('tuning 8 ', 'tuning -1 ') : l).toList();
+      expect(parseTuningReply(lines)!.nameIn(layout), (name: 'custom: per-key offsets', short: 'custom'));
+      expect(TuningInfo(index: -1, fifth: 7.03, octave: 12, offset: 0).nameIn(layout).name, 'custom: fifth 703.0 ¢');
+      expect(TuningInfo(index: -1, fifth: 7, octave: 12.1, offset: 0).nameIn(layout).name, 'custom: fifth 700.0 ¢, octave 1210.0 ¢');
       expect(TuningInfo(index: 1, fifth: 6.967742, octave: 12, offset: 0).nameIn(SettingsLayout.empty).short, 'custom', reason: 'no layout, no name');
     });
 
@@ -200,7 +188,7 @@ void main() {
     });
 
     test('31-TET and just intonation keys, as the board plays them (D4 = 62 exact)', () {
-      final t31 = parseTuningReply(mockReply(1))!;
+      final t31 = parseTuningReply(reply(1))!;
       // C♯4: 7 fifths up, 3 octaves down from D4
       final cs = quarterToneLabel(t31.pitchOfButton(buttonOf(-3, 5))!, 'C', nominalMidi: 61);
       expect(cs.qt, closeTo(1.677, 0.001));
@@ -217,7 +205,7 @@ void main() {
       expect(quarterToneLabel(t31.pitchOfButton(buttonOf(1, -2))!, 'C').centsFrom12, closeTo(6.45, 0.01));
       expect(quarterToneLabel(t31.pitchOfButton(buttonOf(0, 1))!, 'A').centsFrom12, closeTo(-3.2, 0.05));
       // just 7-limit: E4 a 5/4 above C (-13.7 vs C) and C +6.45: -7.2 cents absolute
-      final just = parseTuningReply(mockReply(8))!;
+      final just = parseTuningReply(reply(8))!;
       final e = quarterToneLabel(just.pitchOfButton(buttonOf(-1, 2))!, 'E');
       expect(e.centsFrom12, closeTo(-7.2, 0.05));
       expect(e.qt, closeTo(-0.145, 0.001));
@@ -228,15 +216,16 @@ void main() {
       expect(asharp.nearest, 2);
       expect(asharp.frac, closeTo(-0.494, 0.001));
       // 7-TET: C♯ is C (both 28.6 cents above 12-TET C, a half-sharp), D♭ is D
-      final t7 = parseTuningReply(mockReply(5))!;
+      final t7 = parseTuningReply(reply(5))!;
       expect(t7.pitchOfButton(buttonOf(-3, 5)), closeTo(t7.pitchOfButton(buttonOf(1, -2))!, 1e-5));
       expect(quarterToneLabel(t7.pitchOfButton(buttonOf(-3, 5))!, 'C').nearest, 1);
       expect(quarterToneLabel(t7.pitchOfButton(buttonOf(4, -7))!, 'D').nearest, 0);
-      // 12-TET with a -32 cent fine tune: every key reads -0.64 qt absolute, exact once the offset is taken out
-      final low = parseTuningReply(mockReply(0, fineCents: -32))!;
-      expect(low.offsetCents, closeTo(-32, 1e-3));
+      // 12-TET with the fine dial at -31.25 cents: every key reads -0.625 qt absolute, exact once the
+      // offset is taken out
+      final low = parseTuningReply(_tunings['tuning 0 fine -31.25'])!;
+      expect(low.offsetCents, closeTo(-31.25, 1e-3));
       final a = low.pitchOfButton(buttonOf(0, 1))!;
-      expect(quarterToneLabel(a, 'A').qt, closeTo(-0.64, 1e-3));
+      expect(quarterToneLabel(a, 'A').qt, closeTo(-0.625, 1e-3));
       expect(quarterToneLabel(a - low.offset, 'A').qt, closeTo(0, 1e-3));
     });
 
@@ -254,27 +243,7 @@ void main() {
   });
 
   group('settings keys over USB (StcK)', () {
-    test('the mock switches tuning, MIDI mode, preset and voice; refuses dials and Reset', () async {
-      final board = MockBoard(autoplay: false, motionEnabled: false, idleFrames: 0);
-      final c = StrisoClient(MockTransport(board: board));
-      await c.connect();
-      expect(await c.pressSettingsKey(36), (ok: true, id: 36)); // tuning 1
-      expect(board.tuning, 1);
-      expect((await c.getTuning())!.nameIn(mockSettingsLayout).name, '31-TET');
-      expect(await c.pressSettingsKey(34), (ok: true, id: 34)); // back to 12-TET
-      expect(board.tuning, 0);
-      expect(await c.pressSettingsKey(4), (ok: true, id: 4));
-      expect(board.midiMode, 'midimono');
-      expect(await c.pressSettingsKey(37), (ok: true, id: 37));
-      expect(board.settingsPreset, 2);
-      expect(await c.pressSettingsKey(24), (ok: true, id: 24)); // bowed
-      expect(board.voiceName(board.voice), startsWith('bowed:'));
-      expect(await c.pressSettingsKey(63), (ok: true, id: 63)); // panic
-      expect(await c.pressSettingsKey(19), (ok: false, id: 19)); // pressure dial
-      expect(await c.pressSettingsKey(67), (ok: false, id: 67)); // reset
-      expect(await c.pressSettingsKey(1), (ok: false, id: 1)); // no function
-      await c.disconnect();
-      // the command bytes
+    test('the command and its replies', () {
       expect(settingsKeyCommand(36), [0x53, 0x74, 0x63, 0x4b, 36]);
       expect(parseSettingsKeyReply('K ok 36'), (ok: true, id: 36));
       expect(parseSettingsKeyReply('K err 67'), (ok: false, id: 67));
@@ -282,7 +251,7 @@ void main() {
     });
 
     test('a board without K answers nothing within the timeout', () async {
-      final c = StrisoClient(_SilentTransport());
+      final c = StrisoClient(SilentTransport());
       await c.connect();
       final sw = Stopwatch()..start();
       expect(await c.pressSettingsKey(36), isNull);
@@ -291,7 +260,7 @@ void main() {
     });
 
     test('the whitelist is the one the board lists (StcX k flags): switch keys yes, dials and reset no', () {
-      final l = mockSettingsLayout;
+      final l = layout;
       final sw = l.keys.entries.where((e) => e.value.switchable).map((e) => e.key).toSet();
       expect(sw, containsAll([0, 2, 4, 34, 36, 35, 63, ...l.voiceKeys.map((v) => v.$1)]));
       expect(sw, isNot(contains(67)));
@@ -301,21 +270,4 @@ void main() {
       }
     });
   });
-}
-
-/// A transport whose board never answers (old firmware for N and K).
-class _SilentTransport implements Transport {
-  final _data = StreamController<Uint8List>.broadcast();
-  @override
-  String get label => 'silent';
-  @override
-  Stream<Uint8List> get data => _data.stream;
-  @override
-  Future<UsbError> get lost => Completer<UsbError>().future;
-  @override
-  Future<void> open() async {}
-  @override
-  Future<void> write(Uint8List bytes) async {}
-  @override
-  Future<void> close() async {}
 }

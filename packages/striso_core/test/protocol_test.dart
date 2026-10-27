@@ -1,4 +1,4 @@
-// Port of tools/app/test/protocol.test.mjs.
+// The protocol: command encoding, the binary stream framing, the text replies.
 import 'dart:typed_data';
 
 import 'package:striso_core/striso_core.dart';

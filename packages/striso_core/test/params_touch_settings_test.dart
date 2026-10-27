@@ -1,4 +1,7 @@
-// Ports of tools/app/test/params.test.mjs, touch.test.mjs and settings.test.mjs.
+// Parameters (morph, mutate, undo, presets to JSON and C), the key equalizer math, and what the
+// board reports of its settings: StcX as the firmware writes it (test/fixtures/settings_layout.txt),
+// StcY, Stcy and StcH. The client against the board's lists, settings and hero knobs:
+// packages/striso_virtual/test/settings_test.dart.
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -7,8 +10,7 @@ import 'package:striso_core/striso_core.dart';
 import 'package:test/test.dart';
 
 import 'support/firmware.dart';
-
-Future<void> sleep(int ms) => Future<void>.delayed(Duration(milliseconds: ms));
+import 'support/fixtures.dart';
 
 List<Param> P() => [
   Param(index: 0, name: 'gain', group: 'level', min: 0, max: 4, kind: 0, value: 1),
@@ -21,6 +23,8 @@ Snapshot corner(Map<String, double> v) => Snapshot('va:pad', {0: v, 1: {}});
 File? firmwareSource() => firmwareDir() == null ? null : firmwareFile('synth_control.cpp');
 
 void main() {
+  final stcx = readFixture('settings_layout.txt')['X'];
+
   group('params', () {
     test('corner weights: exact at corners, bilinear inside, sum to one', () {
       const all = [true, true, true, true];
@@ -181,56 +185,6 @@ void main() {
       expect(live.lastPeak[30], greaterThan(1.09));
     });
 
-    test('touch and key lists through the client, writes and errors, the mock board responds', () async {
-      final t = MockTransport(board: MockBoard(autoplay: false, idleFrames: 0));
-      final c = StrisoClient(t);
-      await c.connect();
-      final touch = (await c.getParams(2))!;
-      expect(touch.params.map((p) => p.name), ['pressure', 'velocity', 'tilt', 'bend', 'threshold']);
-      expect(touch.params.map((p) => [p.min, p.max, p.value]), [
-        [toFloat32(0.1), 4, 1],
-        [toFloat32(0.1), 4, 1],
-        [-4, 4, 1],
-        [0, 8, 0.5],
-        [0, 0.5, 0],
-      ]);
-      final keys = (await c.getParams(3))!;
-      expect(keys.count, 61);
-      expect(keys.params[0].name, 'F_1');
-      expect(keys.params.every((p) => p.value == 1 && p.max == 10), isTrue);
-      final errs = <({int target, int index})>[];
-      c.qErrors.listen(errs.add);
-      c.setParam(2, 0, 2.5);
-      c.setParam(2, 4, 9);
-      c.setParam(3, 27, 1.25);
-      c.setParam(3, 28, 20);
-      c.setParam(3, 61, 1);
-      await sleep(80);
-      expect(t.board.touch[0], 2.5);
-      expect(t.board.touch[4], 0.5);
-      expect(t.board.keyFactors[27], 1.25);
-      expect(errs, [(target: 3, index: 28), (target: 3, index: 61)]);
-      final live = LiveState();
-      final clock = Stopwatch()..start();
-      c.onStream = (src, id, v, n) => live.apply(src, id, v, n, clock.elapsedMilliseconds.toDouble());
-      c.startStream();
-      final id = buttonNumberMap[27];
-      Future<double> press() async {
-        t.board.press(id, pres: 0.3, strike: 0);
-        await sleep(60);
-        t.board.release(id);
-        await sleep(60);
-        return live.lastPeak[id];
-      }
-
-      final p1 = await press();
-      c.setParam(3, 27, 2.5);
-      await sleep(40);
-      final p2 = await press();
-      expect(p2 / p1, closeTo(2.5 / 1.25, 0.01));
-      await c.disconnect();
-    });
-
     test('pressure trace keeps the last two seconds in order', () {
       final tr = PressureTrace(window: 2000, size: 8);
       for (var t = 0; t <= 3000; t += 250) {
@@ -246,8 +200,9 @@ void main() {
 
   group('settings layout (StcX) and state (StcY, Stcy): what the board reports', () {
     test('the StcX reply parses: kinds, groups, engines, led colours, what K takes', () {
-      final l = parseSettingsLayout(mockSettingsLayoutReply)!;
-      expect(l.keys.length, int.parse(mockSettingsLayoutReply.first.split(' ').last));
+      final l = parseSettingsLayout(stcx)!;
+      expect(stcx.first, 'X keys 43');
+      expect(l.keys.length, 43);
       for (final id in l.keys.keys) {
         expect(keyIds, contains(id), reason: 'key $id is a key on the board');
       }
@@ -266,7 +221,7 @@ void main() {
     });
 
     test('a reply cut short is no layout (the firmware must answer all of it)', () {
-      expect(parseSettingsLayout(mockSettingsLayoutReply.sublist(0, 5)), isNull);
+      expect(parseSettingsLayout(stcx.sublist(0, 5)), isNull);
       expect(parseSettingsLayout(const []), isNull);
     });
 
@@ -302,35 +257,6 @@ void main() {
       expect(parseHeroes('H 0 |')!.fx, isEmpty);
       expect(parseHeroes('H 1 cut_base res'), isNull, reason: 'no bar: not a reply');
       expect(parseHeroes('Y 1 voice=1'), isNull);
-    });
-
-    test('the mock replays the firmware\'s StcH for its voice', () async {
-      final board = MockBoard(autoplay: false, idleFrames: 0);
-      final c = StrisoClient(MockTransport(board: board));
-      await c.connect();
-      final voices = await c.listVoices();
-      for (final name in ['strisy', 'va:classic', 'va:pad', 'trumpet:cup mute']) {
-        final v = voices.firstWhere((x) => x.name == name);
-        await c.selectVoice(v.index);
-        final h = (await c.getHeroes())!;
-        expect(h.voice, v.index);
-        expect('${h.params.join(' ')} | ${h.fx.join(' ')}'.trim(), mockHeroReplies[name]!.trim(), reason: name);
-      }
-      await c.disconnect();
-    });
-
-    test('the mock answers X, Y and y; y goes up when its state changes, not between idle reads', () async {
-      final board = MockBoard(autoplay: false, idleFrames: 0);
-      final c = StrisoClient(MockTransport(board: board));
-      await c.connect();
-      expect((await c.getSettingsLayout())!.keys.length, greaterThan(30));
-      final n0 = (await c.getChangeCount())!;
-      expect(await c.getChangeCount(), n0);
-      expect((await c.pressSettingsKey(36))!.ok, isTrue); // tuning 1
-      final n1 = (await c.getChangeCount())!;
-      expect(n1, greaterThan(n0));
-      expect((await c.getState())!.tuning, 1);
-      await c.disconnect();
     });
   });
 }

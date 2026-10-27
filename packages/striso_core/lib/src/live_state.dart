@@ -1,6 +1,6 @@
 // Live instrument state from the key stream: per key pressure, velocity and tilt, strikes and
 // releases, peaks, control buttons, motion sensor and a best-effort transposition from the octave
-// buttons. Port of tools/app/js/live.js.
+// buttons.
 
 import 'dart:typed_data';
 

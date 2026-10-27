@@ -1,5 +1,5 @@
 name: striso_core
-description: Striso Live core logic in pure Dart (protocol, stream parser, client, mock board, layout, harmony, parameters, touch, settings map, config/UF2).
+description: Striso Live core logic in pure Dart (protocol, stream parser, client, layout, harmony, parameters, touch, settings map, config/UF2).
 version: 1.0.0
 publish_to: none
 

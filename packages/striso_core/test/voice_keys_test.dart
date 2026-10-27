@@ -1,6 +1,7 @@
 // The voice keys (Stca, StcA): the replies as the firmware writes them
-// (striso-control-firmware virtual/tests/transcripts/voice_keys.txt), the client against the mock,
-// and the save that writes the board's edits as they are.
+// (striso-control-firmware virtual/tests/transcripts/voice_keys.txt) and the save that writes the
+// board's edits as they are. The client against the board's voice keys:
+// packages/striso_virtual/test/voice_keys_test.dart.
 import 'dart:typed_data';
 
 import 'package:striso_core/striso_core.dart';
@@ -67,31 +68,6 @@ void main() {
     expect(parseVoiceKeyReply('K ok 12'), isNull);
     expect(voiceKeyCommand(12, 0x1234), [0x53, 0x74, 0x63, 0x41, 12, 0x34, 0x12]);
     expect(() => voiceKeyCommand(12, 0x10000), throwsRangeError);
-  });
-
-  test('the client against the mock: put on a key, clear it, its factory engine; errors', () async {
-    final t = MockTransport();
-    final c = StrisoClient(t);
-    await c.connect();
-    final vk0 = (await c.getVoiceKeys())!;
-    expect(vk0.saved, isTrue);
-    expect(vk0[15]!.engine, 'trumpet');
-    expect(vk0[12]!.empty, isTrue);
-    final voices = await c.listVoices();
-    final modal = voices.firstWhere((v) => v.engine == 'modal' && v.preset != null && !v.preset!.contains(' '));
-    final a = (await c.assignVoiceKey(12, modal.index))!;
-    expect((a.ok, a.engine, a.preset), (true, 'modal', modal.preset));
-    final vk1 = (await c.getVoiceKeys())!;
-    expect(vk1[12]!.engine, 'modal');
-    expect(vk1[12]!.plays, isTrue);
-    expect(vk1.edits.map((e) => e.key), containsAll(['sGv12a', 'sGv12p']));
-    expect((await c.assignVoiceKey(15, voiceKeyClear))!.ok, isTrue);
-    expect((await c.getVoiceKeys())![15]!.empty, isTrue);
-    expect((await c.getVoiceKeys())!.edits.map((e) => '$e'), contains('a blank sGv15a'));
-    expect((await c.assignVoiceKey(15, voiceKeyFactory))!.engine, 'trumpet');
-    expect((await c.assignVoiceKey(17, 0))!.why, 'key');
-    expect((await c.assignVoiceKey(12, 9999))!.why, 'entry');
-    await c.disconnect();
   });
 
   test('the save writes the board\'s voice-key edits as they are, and only voice-key records', () {

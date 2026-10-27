@@ -1,11 +1,14 @@
-// Ports of tools/app/test/client.test.mjs, stream.test.mjs and live.test.mjs: the client against
-// the mock board and a scripted board, end to end through the byte stream; the live state.
+// The client without a board: the engine-slot lines, a firmware that doesn't answer, an unplug; a
+// scripted board's byte pattern end to end through the stream; the live state. The client against
+// a board: packages/striso_virtual/test/client_test.dart (the virtual board).
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:striso_core/striso_core.dart';
 import 'package:test/test.dart';
+
+import 'support/silent_transport.dart';
 
 Future<void> sleep(int ms) => Future<void>.delayed(Duration(milliseconds: ms));
 List<int> ascii(String s) => s.codeUnits;
@@ -115,160 +118,7 @@ void frame(LiveState live, int id, int pres, int vpres, int x, int y, double t) 
     live.apply(Src.dis, id, Int32List.fromList([pres, vpres, x, y]), 4, t);
 
 void main() {
-  group('mock board', () {
-    test('version, voices, params, voice switch and parameter writes while streaming', () async {
-      final t = MockTransport();
-      final dev = t.board;
-      final c = StrisoClient(t);
-      await c.connect();
-      var keys = 0, motions = 0;
-      final ids = <int>{};
-      c.onStream = (src, id, vals, n) {
-        if (src == Src.dis && n == 4) {
-          keys++;
-          ids.add(id);
-        }
-        if (src == Src.accel && n == 7) motions++;
-      };
-      final v = (await c.getVersion())!;
-      expect(v.fw, contains('_v2.2.4'));
-      c.startStream();
-
-      final voices = await c.listVoices();
-      expect(voices.length, dev.voiceCount);
-      expect(voices.length, 65); // with the 9 trumpet presets
-      expect(voices.where((x) => x.engine == 'trumpet').map((x) => x.name), contains('trumpet:cup mute'));
-      expect(voices.any((x) => x.name == 'modal:wine glass'), isTrue);
-      expect(voices.where((x) => x.current).length, 1);
-
-      final p0 = (await c.getParams(0))!;
-      expect(p0.name, 'va:classic');
-      expect(p0.params.length, 55);
-      expect(p0.complete, isTrue);
-      expect(p0.params.firstWhere((p) => p.name == 'gain').value, toFloat32(2.3));
-      expect((await c.getParams(1))!.name, 'fx');
-
-      final wine = voices.firstWhere((x) => x.name == 'modal:wine glass');
-      final sel = await c.selectVoice(wine.index);
-      expect(sel, (ok: true, index: wine.index, name: 'modal:wine glass'));
-      expect((await c.getParams(0))!.name, 'modal:wine glass');
-
-      // a burst of writes to one parameter is coalesced; the last value wins
-      for (var k = 0; k <= 100; k++) {
-        c.setParam(0, 8, 0.1 + k * 0.02);
-      }
-      c.setParam(1, 2, 0.75);
-      await sleep(80);
-      expect(dev.values[8], toFloat32(2.1));
-      expect(dev.fx[2], toFloat32(0.75));
-      expect(c.sentParams, lessThan(10));
-
-      final l = await c.getLoad();
-      expect(l != null && l.budget > 0, isTrue);
-
-      final errs = <({int target, int index})>[];
-      final sub = c.qErrors.listen(errs.add);
-      c.setParam(0, 120, 1);
-      await sleep(60);
-      expect(errs, [(target: 0, index: 120)]);
-      await sub.cancel();
-
-      await sleep(400);
-      expect(keys, greaterThan(20));
-      expect(motions, greaterThan(20));
-      for (final id in ids) {
-        expect(keyIds, contains(id));
-      }
-      expect(c.parser.stats.truncated, 0);
-
-      await c.disconnect();
-      expect(dev.streaming, isFalse, reason: 'disconnect stops the stream');
-    });
-
-    test('touch and key targets: list, write, clamp and errors', () async {
-      final t = MockTransport();
-      final c = StrisoClient(t);
-      await c.connect();
-      final g = (await c.getParams(Target.touch))!;
-      expect(g.params.map((p) => p.name), ['pressure', 'velocity', 'tilt', 'bend', 'threshold']);
-      final k = (await c.getParams(Target.keys))!;
-      expect(k.params.length, 61);
-      expect(k.params[60].name, firmwareKeyName(60));
-      expect(firmwareKeyName(60), 'B_4');
-      final errs = <({int target, int index})>[];
-      final sub = c.qErrors.listen(errs.add);
-      c.setParam(Target.keys, 5, 20); // out of range: the board answers Q err
-      c.setParam(Target.touch, 0, 9); // clamps to 4
-      c.setParam(Target.keys, 6, 1.25);
-      await sleep(60);
-      expect(errs, [(target: 3, index: 5)]);
-      expect(t.board.touch[0], 4);
-      expect(t.board.keyFactors[6], toFloat32(1.25));
-      await sub.cancel();
-      await c.disconnect();
-    });
-
-    test('replies to back to back commands are not mixed up', () async {
-      final c = StrisoClient(MockTransport());
-      await c.connect();
-      c.startStream();
-      final r = await Future.wait([c.listVoices(), c.getParams(0), c.getLoad(), c.getParams(1)]);
-      expect((r[0] as List).length, greaterThan(10));
-      expect((r[1] as ParamList).target, 0);
-      expect((r[2] as LoadReading).blocks, greaterThanOrEqualTo(0));
-      expect((r[3] as ParamList).target, 1);
-      await c.disconnect();
-    });
-
-    test('engine slots: install with progress, listed, loads at the next start, erase', () async {
-      final store = MockModuleStore();
-      final own = MockBoard().voiceCount;
-      var c = StrisoClient(MockTransport(board: MockBoard(modules: store)));
-      await c.connect();
-      expect(await c.listModuleSlots(), [for (var k = 2; k <= 6; k++) ModuleSlot(k, SlotState.empty)]);
-      final pkg = mockModulePackage('sax', version: '0.3', padTo: 10000);
-      final seen = <int>[];
-      final r = await c.installModule(pkg, onProgress: (b, t) => seen.add(b));
-      expect(r.ok, isTrue, reason: r.error);
-      expect(r.error, isNull, reason: 'the progress crcs match what was sent');
-      expect(r.tag, 'mock');
-      expect([r.done!.slot, r.done!.id, r.done!.version, r.done!.abi], [2, 'sax', '0.3', mockEngineAbi]);
-      expect(seen, [4096, 8192, 10000]);
-      expect((await c.listModuleSlots())!.first, const ModuleSlot(2, SlotState.ok, id: 'sax', version: '0.3', abi: mockEngineAbi, bytes: 10000));
-      expect((await c.listVoices()).length, own, reason: 'a new module loads at the next start');
-      // another engine ABI: kept, listed disabled with the reason
-      expect((await c.installModule(mockModulePackage('clarinet', abi: 9))).done?.slot, 3);
-      final slots = (await c.listModuleSlots())!;
-      expect(slots[1].state, SlotState.disabled);
-      expect(slots[1].reason, 'abi 9, firmware has $mockEngineAbi');
-      expect((await c.installModule([1, 2, 3])).error, 'not a package the mock reads');
-      await c.disconnect();
-
-      // the next start: the ok one's voices after the built-in engines
-      c = StrisoClient(MockTransport(board: MockBoard(modules: store)));
-      await c.connect();
-      final voices = await c.listVoices();
-      expect(voices.length, own + 4);
-      expect(voices[own + 1].name, 'sax:alto sax');
-      expect(await c.eraseModuleSlot(2), isNull);
-      expect(await c.eraseModuleSlot(7), 'no slot 7 (slots 2..6)');
-      expect((await c.listModuleSlots())!.first.state, SlotState.empty);
-      await c.disconnect();
-
-      // a firmware without a store refuses, and takes the bytes without reading any as a
-      // command; one without slots at all (the stock firmware) does not answer
-      final n = StrisoClient(MockTransport(board: MockBoard()));
-      await n.connect();
-      expect((await n.installModule(pkg)).error, 'no module store');
-      expect(await n.listModuleSlots(), isEmpty);
-      expect((await n.listVoices()).length, own, reason: 'the package was never sent as commands');
-      await n.disconnect();
-      final old = StrisoClient(MockTransport(board: MockBoard(stockFirmware: true)));
-      await old.connect();
-      expect(await old.listModuleSlots(timeout: const Duration(milliseconds: 150)), isNull);
-      await old.disconnect();
-    });
-
+  group('without a board', () {
     test('module lines: the slot list, install and erase replies, crc32', () {
       expect(parseModuleSlots(['slot 2 empty']), isNull, reason: 'cut off');
       final l = parseModuleSlots([
@@ -294,8 +144,15 @@ void main() {
       expect(moduleEraseCommand(3), [0x53, 0x74, 0x63, 0x7a, 0x33]);
     });
 
+    test('a firmware without engine slots (the stock one) does not answer Stco', () async {
+      final c = StrisoClient(SilentTransport());
+      await c.connect();
+      expect(await c.listModuleSlots(timeout: const Duration(milliseconds: 150)), isNull);
+      await c.disconnect();
+    });
+
     test('unplug is reported and pending commands resolve', () async {
-      final t = MockTransport();
+      final t = SilentTransport();
       final c = StrisoClient(t);
       await c.connect();
       UsbError? reason;

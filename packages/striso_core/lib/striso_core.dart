@@ -1,4 +1,4 @@
-/// Striso Live core: protocol, stream parser, client, mock board, layout, live state, harmony,
+/// Striso Live core: protocol, stream parser, client, layout, live state, harmony,
 /// parameters, touch math, settings map and config/UF2, all in pure Dart.
 library;
 
@@ -9,7 +9,6 @@ export 'src/dials.dart';
 export 'src/harmony.dart';
 export 'src/layout.dart';
 export 'src/live_state.dart';
-export 'src/mock.dart';
 export 'src/modules.dart';
 export 'src/params.dart';
 export 'src/playable.dart';

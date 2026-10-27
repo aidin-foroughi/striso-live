@@ -1,5 +1,5 @@
 // Striso USB bulk protocol: command encoding, binary stream framing and text reply parsing.
-// Port of tools/app/js/protocol.js. Firmware references (striso-control-firmware):
+// Firmware references (striso-control-firmware):
 //   pconnection.c  PExReceiveByte: "Stc" + command byte; 'Q' takes 6 more bytes
 //   main.c         ThreadSend: header 0x80 | src<<3 | (size-2), id, pack() of the 14 bit values
 //   striso.h       source and control ids
@@ -183,7 +183,7 @@ int decode14(int hi, int lo) {
 
 List<int> encode14(int v) => [(v >> 7) & 0x7f, v & 0x7f];
 
-/// A whole stream message as the firmware sends it (the mock and the tests use it).
+/// A whole stream message as the firmware sends it (the tests use it).
 Uint8List encodeMessage(int src, int id, List<num> values) {
   if (values.length > 7) throw RangeError('at most 7 values');
   final out = Uint8List(2 + 2 * values.length);

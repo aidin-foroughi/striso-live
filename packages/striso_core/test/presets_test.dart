@@ -1,5 +1,5 @@
 // The board's sound presets on the console (doc/presets_console.md): the replies parsed as the
-// spec writes them, and the client against the mock that answers them.
+// spec writes them. The client against the board's presets: packages/striso_virtual/test/presets_test.dart.
 import 'dart:convert';
 
 import 'package:striso_core/striso_core.dart';
@@ -59,76 +59,6 @@ void main() {
       expect(utf8.decode(up.sublist(9)), 'Pad');
       expect(jsonDecode(utf8.decode(saveAsBytes(' Pad ', ' Dark. '))), {'title': 'Pad', 'description': 'Dark.'});
       expect(() => presetDeleteCommand(0), throwsRangeError);
-    });
-  });
-
-  group('the client on the mock', () {
-    late MockBoard board;
-    late StrisoClient c;
-    setUp(() async {
-      board = MockBoard(autoplay: false, idleFrames: 0);
-      c = StrisoClient(MockTransport(board: board));
-      await c.connect();
-    });
-    tearDown(() => c.disconnect());
-
-    test('save as, list, read back, open, delete', () async {
-      final voices = await c.listVoices();
-      final pad = voices.firstWhere((v) => v.name == 'va:pad');
-      await c.selectVoice(pad.index);
-      final l = (await c.listPresets())!;
-      expect(l.presets.length, voices.length, reason: 'the factory presets are the voice entries');
-      expect(l.presets.firstWhere((p) => p.title == 'pad' && p.engine == 'va').id, 33025, reason: 'the spec\'s example id');
-      final saved = (await c.savePresetAs('Warm pad', 'Slow attack, dark.'))!;
-      expect(saved.ok, isTrue);
-      final mine = (await c.listPresets())!.user.single;
-      expect((mine.id, mine.engine, mine.title, mine.description), (saved.id, 'va', 'Warm pad', 'Slow attack, dark.'));
-      final text = (await c.presetText(saved.id!))!.text!;
-      expect(describePresetFile(text).title, 'Warm pad');
-      expect(describePresetFile(text).engine, 'va');
-      await c.selectVoice(0);
-      final o = (await c.openPreset(saved.id!))!;
-      expect(o.ok, isTrue);
-      expect(o.exact, isTrue);
-      expect(o.voice, voices.firstWhere((v) => v.engine == 'va').index, reason: 'its engine\'s first voice');
-      expect((await c.deletePreset(saved.id!))!.ok, isTrue);
-      expect((await c.listPresets())!.user, isEmpty);
-      expect((await c.deletePreset(saved.id!))!.why, 'no preset ${saved.id}');
-      expect((await c.deletePreset(33025))!.why, 'factory 33025');
-    });
-
-    test('install: a file from elsewhere loads by name, with what was clamped and skipped', () async {
-      final file = jsonEncode({
-        'format': 'awva-preset/1',
-        'engine': {'id': 'va', 'version': 'v2.2.4-200', 'params_hash': '00000000'},
-        'title': 'From an older va',
-        'params': {'gain': 99, 'release': 0.3, 'old_knob': 1},
-      });
-      final r = (await c.installPreset(utf8.encode(file)))!;
-      expect(r.ok, isTrue);
-      expect((await c.presetText(r.id!))!.text, file, reason: 'stored byte for byte');
-      final o = (await c.openPreset(r.id!))!;
-      expect(o.ok, isTrue);
-      expect(o.exact, isFalse);
-      expect(o.clampedNames, ['gain']);
-      expect(o.skippedNames, ['old_knob']);
-      expect(o.missing, greaterThan(0));
-      // refused, with the board's reason
-      expect((await c.installPreset(utf8.encode('{not json')))!.why, 'syntax');
-      expect((await c.installPreset(utf8.encode(file.replaceAll('"va"', '"flute"'))))!.why, 'engine flute');
-      expect((await c.installPreset(const []))!.why, 'empty');
-      expect((await c.savePresetAs('x' * 64, ''))!.why, 'fields');
-      expect((await c.presetText(32768))!.why, 'no text 32768', reason: 'strisy has no presets');
-      expect(describePresetFile((await c.presetText(33025))!.text!).title, 'pad', reason: 'a factory preset\'s text');
-    });
-
-    test('the store off: factory presets only, the user\'s commands say so', () async {
-      board.presetStore = false;
-      final l = (await c.listPresets())!;
-      expect(l.storeOn, isFalse);
-      expect(l.user, isEmpty);
-      expect((await c.savePresetAs('x', ''))!.why, 'store off');
-      expect((await c.openPreset(33025))!.ok, isTrue, reason: 'a factory preset still opens');
     });
   });
 }

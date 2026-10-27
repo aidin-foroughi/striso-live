@@ -1,5 +1,5 @@
 // Striso board key layout, from the firmware's button coordinates (synth_control.cpp c0_dis/c1_dis)
-// and the DCompose geometry of utils/dcompose.py. Port of tools/app/js/layout.js.
+// and the DCompose geometry of utils/dcompose.py.
 //
 // Button ids 0..67 are 4 rows of 17 columns; row 3 has only 10 keys (button_read.c disables
 // 52 54 57 59 61 64 66). c0 counts octaves, c1 fifths from D (start note 62 = D4). Columns run

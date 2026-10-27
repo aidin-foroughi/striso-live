@@ -1,7 +1,7 @@
 // Harmony for the Striso: scales, chord names, roman numerals and functions, key finding.
-// Port of tools/app/js/harmony.js. Notes are spelled: the Striso's columns are a line of fifths,
-// so a key knows whether it is D# or Eb. A tonal pitch class (tpc) is a position on the line of
-// fifths with C = 0, G = 1, F = -1, D = 2, Bb = -2, F# = 6; its pitch class is tpc * 7 mod 12.
+// Notes are spelled: the Striso's columns are a line of fifths, so a key knows whether it is D#
+// or Eb. A tonal pitch class (tpc) is a position on the line of fifths with C = 0, G = 1,
+// F = -1, D = 2, Bb = -2, F# = 6; its pitch class is tpc * 7 mod 12.
 
 import 'dart:math' as math;
 

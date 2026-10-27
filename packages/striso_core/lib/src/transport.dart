@@ -1,4 +1,5 @@
-// A byte transport to the board: libusb (striso_usb), the mock board, or a test double.
+// A byte transport to the board: libusb (striso_usb), the virtual board (striso_virtual), or a
+// test double.
 
 import 'dart:async';
 import 'dart:typed_data';

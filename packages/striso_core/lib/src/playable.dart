@@ -1,5 +1,5 @@
-// A board the app can play by hand (the board view in Demo): the Dart mock board, or the virtual
-// board (striso_virtual) that runs the firmware's own code.
+// A board the app can play by hand (the board view): the virtual board (striso_virtual), which
+// runs the firmware's own code.
 
 abstract class PlayableBoard {
   /// Key [id] (0..67) down or still down: pressure 0..1, tilt -1..1, a strike velocity 0..1.

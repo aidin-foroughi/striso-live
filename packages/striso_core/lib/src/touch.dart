@@ -1,5 +1,4 @@
 // Key equalizer math: median, the factor suggestion, the live pressure trace.
-// Port of tools/app/js/touch.js (pure parts).
 
 double? median(Iterable<double> xs) {
   final s = xs.toList()..sort();

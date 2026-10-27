@@ -1,5 +1,6 @@
 // StcU: the board's USB audio counters, parsed by their words (the firmware's reply is text), in
-// the UAC1 firmware's layout and the UAC2 firmware's; Stct, the board's ring target.
+// the UAC1 firmware's layout and the UAC2 firmware's; Stct, the board's ring target. The client
+// asking the board: packages/striso_virtual/test/usb_audio_test.dart.
 import 'package:striso_core/striso_core.dart';
 import 'package:test/test.dart';
 
@@ -70,30 +71,13 @@ void main() {
     expect(parseUsbAudioStats(const ['Stcs', 'voice 3 viola']), isNull);
   });
 
-  test('Stct: the command and its reply', () {
+  test('U and Stct: the commands and the reply', () {
+    expect(Cmd.usbAudio(), [0x53, 0x74, 0x63, 0x55]);
     expect(Cmd.usbAudioTarget(72), [0x53, 0x74, 0x63, 0x74, 0x30, 0x37, 0x32]);
     expect(Cmd.usbAudioTarget(0), [0x53, 0x74, 0x63, 0x74, 0x30, 0x30, 0x30]);
     expect(() => Cmd.usbAudioTarget(48), throwsRangeError);
     expect(() => Cmd.usbAudioTarget(257), throwsRangeError);
     expect(parseUsbAudioTarget('usb audio target 72 frames (1500 us)'), 72);
     expect(parseUsbAudioTarget('voice 3'), isNull);
-  });
-
-  test('the client asks with U and t; the demo board answers like the UAC2 firmware', () async {
-    expect(Cmd.usbAudio(), [0x53, 0x74, 0x63, 0x55]);
-    final t = MockTransport();
-    final c = StrisoClient(t);
-    await c.connect();
-    t.board.usbAudioUnderruns = 2;
-    t.board.usbAudioHostSkipped = 1;
-    final s = await c.getUsbAudioStats();
-    expect(s, isNotNull);
-    expect([s!.streaming, s.uac, s.underruns, s.hostSkipped, s.ringTarget, s.drops], [true, 2, 2, 1, 96, 3]);
-    final again = await c.getUsbAudioStats();
-    expect(again!.drops, 0, reason: 'counters since the last call');
-    expect(await c.setUsbAudioTarget(0), 96);
-    expect(await c.setUsbAudioTarget(80), 80);
-    expect((await c.getUsbAudioStats())!.ringTarget, 80);
-    await c.disconnect();
   });
 }
