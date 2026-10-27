@@ -49,14 +49,13 @@ List<EnginePackage> findEngines(String? dir) {
   return out;
 }
 
-/// Whether [source] is an engine to install (not a firmware build): a package, or a zip of
-/// packages without a build's manifest.
+/// Whether [source] is an engine to install (not a firmware build): a package, or a zip with
+/// packages in it.
 bool isEngineSource(String source) {
   final lower = source.toLowerCase();
   if (!lower.endsWith('.zip')) return _isPackage(lower);
   try {
     final zip = ZipDecoder().decodeBytes(File(source).readAsBytesSync());
-    if (zip.files.any((f) => f.isFile && _base(f.name) == 'manifest.json')) return false;
     return zip.files.any((f) => f.isFile && _isPackage(f.name));
   } catch (_) {
     return false;
