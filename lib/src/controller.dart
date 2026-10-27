@@ -1505,6 +1505,12 @@ class AppController extends ChangeNotifier implements MorphHost, SessionHost, Pa
       } else {
         sound.load(t, ParamSet(r.name, [for (final p in r.params) p..loadValue = p.value], complete: r.complete));
         if (!r.complete) toast('Only ${r.params.length} of ${r.count} ${targetNames[t]} parameters arrived', 'warn');
+        // the voice's words (Stcw: icon, label, hover), by index; a firmware without them gives none
+        if (t == 0) {
+          final w = await c.getWords();
+          if (!identical(c, client)) return;
+          if (w != null && w.name == r.name) applyWords(params[0]!.params, w.words);
+        }
       }
     }
     if (targets.contains(0)) {

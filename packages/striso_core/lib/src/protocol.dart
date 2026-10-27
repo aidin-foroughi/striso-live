@@ -62,6 +62,10 @@ class Cmd {
   static Uint8List load() => commandChar('L');
   static Uint8List voices() => commandChar('v');
   static Uint8List params(int target) => commandChar('pfgk'[target]);
+
+  /// The current voice's parameters' words: icon, label, hover (firmware with Stcw; older boards
+  /// answer with nothing).
+  static Uint8List words() => commandChar('w');
   static Uint8List streamOn() => commandChar('S');
   static Uint8List streamOff() => commandChar('s');
 
@@ -328,9 +332,52 @@ class Param {
   final int kind;
   double value;
   double loadValue;
+
+  /// Its words for people, from the board's Stcw (awva's label, hover text and icon: "concept" or
+  /// "concept+modifier"); empty when the board has none for it.
+  String label = '', hover = '', icon = '';
   Param({required this.index, required this.name, required this.group, required this.min, required this.max, required this.value, required this.kind})
     : loadValue = value;
-  Param copy() => Param(index: index, name: name, group: group, min: min, max: max, value: value, kind: kind)..loadValue = loadValue;
+  Param copy() => Param(index: index, name: name, group: group, min: min, max: max, value: value, kind: kind)
+    ..loadValue = loadValue
+    ..label = label
+    ..hover = hover
+    ..icon = icon;
+}
+
+/// A parameter's words from Stcw (one line `<index> <icon> <label>|<hover>`; icon "-": none).
+class ParamWords {
+  final int index;
+  final String icon, label, hover;
+  const ParamWords(this.index, this.icon, this.label, this.hover);
+}
+
+/// The words of [words] onto [params], by index (a list for another voice, or of another length,
+/// leaves them as they are).
+void applyWords(List<Param> params, List<ParamWords> words) {
+  if (words.length != params.length) return;
+  for (final w in words) {
+    if (w.index < 0 || w.index >= params.length) continue;
+    params[w.index]
+      ..icon = w.icon
+      ..label = w.label
+      ..hover = w.hover;
+  }
+}
+
+/// `"words <target> <name> <count>"` (name may contain spaces)
+({int target, String name, int count})? parseWordsHeader(String line) {
+  final m = RegExp(r'^words ([0-3]) (.+) (\d+)\s*$').firstMatch(line);
+  return m == null ? null : (target: int.parse(m[1]!), name: m[2]!, count: int.parse(m[3]!));
+}
+
+final _wordsLine = RegExp(r'^(\d+) (\S+) ([^|\r\n]*)\|(.*?)\s*$');
+
+/// "index icon label|hover" (icon "-" and empty words: the board has none for it)
+ParamWords? parseWordsLine(String line) {
+  final m = _wordsLine.firstMatch(line);
+  if (m == null) return null;
+  return ParamWords(int.parse(m[1]!), m[2] == '-' ? '' : m[2]!, m[3]!.trim(), m[4]!.trim());
 }
 
 final _paramLine = RegExp(r'^(\d+) (\S+) (\S+) ([0-9a-fA-F]{8}) ([0-9a-fA-F]{8}) ([0-9a-fA-F]{8}) (\d+)\s*$');

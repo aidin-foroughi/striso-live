@@ -284,6 +284,35 @@ class StrisoClient {
     return ParamList(target, h.name, h.count, r.state['params'] as List<Param>, !r.timedOut);
   }
 
+  /// Whether the board answers Stcw (null: not asked yet). A firmware without it says nothing, so
+  /// after one unanswered ask the client asks no more on this connection.
+  bool? hasWords;
+
+  /// The current voice's parameters' words (Stcw): its name as in Stcp and a list in Stcp's order;
+  /// null without a whole reply (a firmware without Stcw does not answer).
+  Future<({String name, List<ParamWords> words})?> getWords() async {
+    if (hasWords == false) return null;
+    final r = await request(Cmd.words(), (l, s) {
+      if (s['header'] == null) {
+        final h = parseWordsHeader(l);
+        if (h == null) return Take.no;
+        s['header'] = h;
+        s['words'] = <ParamWords>[];
+        return Take.more;
+      }
+      if (l.trim() == 'words end') return Take.done;
+      final w = parseWordsLine(l);
+      if (w == null) return Take.no;
+      (s['words'] as List<ParamWords>).add(w);
+      return Take.more;
+    }, timeout: const Duration(milliseconds: 1500));
+    final h = r.state['header'] as ({int target, String name, int count})?;
+    final w = r.state['words'] as List<ParamWords>?;
+    hasWords ??= h != null;
+    if (h == null || w == null || r.timedOut || w.length != h.count) return null;
+    return (name: h.name, words: w);
+  }
+
   /// The tuning and the pitch of every key (StcN). Null when the firmware does not answer.
   Future<TuningInfo?> getTuning() async {
     final r = await request(

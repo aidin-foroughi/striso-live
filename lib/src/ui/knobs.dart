@@ -1,6 +1,7 @@
 // Knob and parameter toggle (DESIGN.md 4.2). Drag up/down (Shift: fine), scroll, arrow keys;
 // double-click resets to the value read from the board; Alt+click locks against Mutate. The label
-// shows the name; while hovered or dragged it shows the value. An accent dot marks an edit.
+// shows the name, led by the parameter's icon; while hovered or dragged it shows the value. An
+// accent dot marks an edit. The tooltip leads with the parameter's label and hover text (Stcw).
 
 import 'dart:async';
 import 'dart:math' as math;
@@ -12,6 +13,7 @@ import 'package:striso_core/striso_core.dart';
 
 import '../controller.dart';
 import '../theme.dart';
+import 'param_icon.dart';
 
 String prettyName(String n) => n.replaceAll('_', ' ');
 
@@ -88,9 +90,12 @@ class _KnobState extends State<Knob> {
   Widget build(BuildContext context) {
     final size = widget.size;
     return Tooltip(
-      message:
-          '${prettyName(p.name)}: ${formatParam(p, p.min)} to ${formatParam(p, p.max)}${p.kind == Kind.integer ? ', steps' : ''}\n'
-          'Drag, scroll or use the arrow keys. Double-click resets. Alt+click locks.',
+      message: paramTip(
+        p.label,
+        p.hover,
+        '${prettyName(p.name)}: ${formatParam(p, p.min)} to ${formatParam(p, p.max)}${p.kind == Kind.integer ? ', steps' : ''}\n'
+        'Drag, scroll or use the arrow keys. Double-click resets. Alt+click locks.',
+      ),
       waitDuration: const Duration(milliseconds: 900),
       child: Focus(
         focusNode: _focus,
@@ -185,6 +190,10 @@ class _KnobState extends State<Knob> {
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              if (!showValue && hasParamIcon(p.icon)) ...[
+                                ParamIcon(p.icon, color: Pal.text2, background: Pal.bg0),
+                                const SizedBox(width: Space.xs),
+                              ],
                               Flexible(
                                 child: Text(
                                   showValue ? formatParam(p) : prettyName(p.name),
@@ -287,7 +296,7 @@ class ToggleCtl extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: '${prettyName(p.name)}: on/off. Alt+click locks.',
+      message: paramTip(p.label, p.hover, '${prettyName(p.name)}: on/off. Alt+click locks.'),
       waitDuration: const Duration(milliseconds: 900),
       child: ListenableBuilder(
         listenable: ctl.values,
@@ -302,6 +311,10 @@ class ToggleCtl extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (showName && hasParamIcon(p.icon)) ...[
+                    ParamIcon(p.icon, color: Pal.text2, background: Pal.bg0),
+                    const SizedBox(width: Space.xs),
+                  ],
                   Toggle(
                     value: on,
                     label: showName ? prettyName(p.name) : null,

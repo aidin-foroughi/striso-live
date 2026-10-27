@@ -292,6 +292,14 @@ fine), scroll, arrows, double-click resets to loadValue. Integer knobs snap with
 substitute: the tick jumps, no tween. Toggle: 28×16 pill, bg3 off / accent on, 12 px knob
 white; label right in body.
 
+Parameter icon: a voice parameter's label leads with its icon, 14 px in text2, 4 px before the
+name (a toggle's before its pill). The board names it (`Stcw`: awva's icon, `concept` or
+`concept+modifier`), and the drawing is awva's `assets/icons` at `tool/AWVA_COMMIT`
+(`tool/gen_param_icons.dart` writes `lib/src/ui/param_icons.g.dart`; the same shapes as the awva
+app's): 1.5 lines on the 24 grid, round ends and joins, a modifier's mark over a knockout of bg0.
+The tooltip's first lines are the board's label and hover text, then the name, range and
+gestures. A board without `Stcw`, or a parameter without words, shows the name alone.
+
 Slider (Setup only): 4 px track bg3, filled part accent, 14 px thumb text1 with bg0 2 px ring;
 value right-aligned in body tabular, 56 px wide.
 

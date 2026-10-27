@@ -245,6 +245,10 @@ class ParamsModel {
       _pending.removeWhere((x) => x.$1 == t);
       if (have.params.length != r.params.length || (t <= 1 && r.name != have.name)) {
         params[t] = ParamSet(r.name, [for (final p in r.params) p..loadValue = p.value], complete: r.complete);
+        if (t == 0) {
+          final w = await c.getWords();
+          if (identical(c, host.client) && w != null && w.name == r.name) applyWords(params[0]!.params, w.words);
+        }
         continue;
       }
       for (var i = 0; i < r.params.length; i++) {
