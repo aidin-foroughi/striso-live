@@ -1,7 +1,7 @@
 # The tuning reply (StcN) for each settings-card tuning, chosen with its settings key (StcK); then 12-TET with the fine dial at -31.25 cents.
 # Recorded from the virtual board (striso-control-firmware's striso_virtual) by
 # packages/striso_virtual/tool/record_fixtures.dart; do not edit, record again.
-# firmware: 2026-10-26_v2.2.4-338-82-g4c0ab4e_all
+# firmware: 2026-10-26_v2.2.4-338-95-gfb3961a_all
 # Sections: [name] > the command sent, then the board's reply lines.
 [tuning 0] > StcN
 tuning 0 40E00000 41400000 00000000 00AA00 42780000 61

@@ -316,10 +316,11 @@ per computer Virtual runs on, and each takes its own. There is no other way in (
 ```
 │ ENGINES ON VIRTUAL                                        │
 │ slot 2  accordion 0.1.0                  81 KB       🗑   │
-│ slot 3  trumpet 1.2      disabled: abi 3, firmware has 4 🗑 │  ← the firmware's reason
+│ slot 3  trumpet 1.2      disabled: faulted (pc 0x…)     🗑 │  ← the firmware's reason
 │ slot 4  empty                                              │
 │ …                                                          │
 │ Putting clarinet-v3-fit on Virtual · 40 of 84 KB ▬▬▬───    │  ← the firmware's progress
+│ trumpet is not on Virtual: trumpet: abi 6, the host has 5  │  ← a refusal, in the firmware's words
 │ ENGINE LIBRARY                                             │
 │ clarinet-v3-fit                       [Put on Virtual]     │
 │ [Add an engine…]                                           │

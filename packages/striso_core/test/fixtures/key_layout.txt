@@ -1,7 +1,7 @@
 # The key layout (StcG): every key's number, button id, coordinates and name.
 # Recorded from the virtual board (striso-control-firmware's striso_virtual) by
 # packages/striso_virtual/tool/record_fixtures.dart; do not edit, record again.
-# firmware: 2026-10-26_v2.2.4-338-92-g04cd5ce-dirty_all
+# firmware: 2026-10-26_v2.2.4-338-95-gfb3961a_all
 # Sections: [name] > the command sent, then the board's reply lines.
 [G] > StcG
 layout 61 68 62 flip=0
