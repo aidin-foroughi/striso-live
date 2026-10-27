@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 
 import 'bindings.dart';
+import 'transport.dart' show writeAll, writePieces;
 
 class VirtualLeds {
   /// The indicator's colour as last set (0..255 each), and its PWM duty now (shows blinks).
@@ -187,18 +188,10 @@ class VirtualBoard {
   /// whole or not at all (0: its buffer cannot hold it now). Returns how far it got (bytes.length:
   /// all of it; less: the piece there was not taken, write the rest later), -1 when the board is
   /// not attached.
-  int consoleWrite(List<int> bytes, [int from = 0]) {
-    var off = from;
-    while (off < bytes.length) {
-      final n = bytes.length - off > 65536 ? 65536 : bytes.length - off;
-      _io.asTypedList(n).setRange(0, n, bytes, off);
-      final r = lib.consoleWrite(_h, _io, n);
-      if (r < 0) return -1;
-      if (r == 0) return off;
-      off += n;
-    }
-    return off;
-  }
+  int consoleWrite(List<int> bytes, [int from = 0]) => writePieces(bytes, from, (off, n) {
+    _io.asTypedList(n).setRange(0, n, bytes, off);
+    return lib.consoleWrite(_h, _io, n);
+  });
 
   /// What the board sent since the last read (empty when nothing, null when not attached).
   Uint8List? consoleRead() {
@@ -214,13 +207,24 @@ class VirtualBoard {
   }
 
   /// USB-MIDI packets (4 bytes each: cable/CIN, then the message) into the board's USB MIDI in, as
-  /// a host sends them; false when it is not attached. (The app's MIDI inputs call sv_midi_write
-  /// from the driver's thread; this is the same input for tests.)
-  bool midiWrite(List<int> packets) {
-    final n = packets.length;
-    _io.asTypedList(n).setAll(0, packets);
-    return lib.midiWrite(_h, _io, n) >= 0;
-  }
+  /// a host sends them, from [from], in pieces of 64 KB; sv_midi_write takes a piece whole or not
+  /// at all (0: the host's buffer cannot hold it now, the board has not read it yet). Returns how
+  /// far it got (packets.length: all of it), -1 when the board is not attached. (The app's MIDI
+  /// inputs call sv_midi_write from the driver's thread; this is the same input for tests.)
+  int midiWriteFrom(List<int> packets, [int from = 0]) => writePieces(packets, from, (off, n) {
+    _io.asTypedList(n).setRange(0, n, packets, off);
+    return lib.midiWrite(_h, _io, n);
+  });
+
+  /// [midiWriteFrom] at once: true when every packet was taken (false: not attached, or the host's
+  /// buffer was full: [midiWriteAll] waits for it).
+  bool midiWrite(List<int> packets) => midiWriteFrom(packets) == packets.length;
+
+  /// Every packet, a piece the board can't take now written again as it reads them (writeAll, as the
+  /// console's writes): nothing dropped. False: the board is not attached; no progress for [stall]
+  /// is an error. The board must be running (startRealtime, or rendered meanwhile).
+  Future<bool> midiWriteAll(List<int> packets, {Duration stall = const Duration(seconds: 10), Duration retry = const Duration(milliseconds: 2)}) =>
+      writeAll((from) => midiWriteFrom(packets, from), packets.length, stall: stall, retry: retry);
 
   /// Universal MIDI Packets (32-bit words, whole packets) into the board's MIDI 2.0 input
   /// (sv_ump_write): MIDI 2.0 channel voice messages play the synth in their resolution. Returns

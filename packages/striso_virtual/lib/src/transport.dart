@@ -34,6 +34,23 @@ Future<bool> writeAll(
   }
 }
 
+/// [bytes] from [from] in pieces of at most [piece] bytes (a multiple of 4: whole USB-MIDI packets)
+/// through [write] (offset, length -> the library's answer: < 0 not attached, 0 the piece not taken
+/// now, else taken whole), as sv_console_write and sv_midi_write take them. Returns how far it got
+/// (bytes.length: all of it; less: the piece there was not taken, write the rest later), -1 when the
+/// board is not attached.
+int writePieces(List<int> bytes, int from, int Function(int off, int n) write, {int piece = 65536}) {
+  var off = from;
+  while (off < bytes.length) {
+    final n = bytes.length - off > piece ? piece : bytes.length - off;
+    final r = write(off, n);
+    if (r < 0) return -1;
+    if (r == 0) return off;
+    off += n;
+  }
+  return off;
+}
+
 class VirtualBoardTransport implements Transport {
   final VirtualBoard board;
   final Duration poll;
